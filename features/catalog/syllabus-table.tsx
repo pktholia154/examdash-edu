@@ -62,14 +62,14 @@ export function SyllabusTable({
       </div>
 
       {sortedItems.length === 0 ? (
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
+        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-transparent p-6 text-sm text-[var(--text-muted)]">
           Syllabus paper breakdown will appear here as mock sets are scheduled.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+        <div className="overflow-x-auto rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-transparent">
           <table className="w-full text-left border-collapse text-sm">
             <thead>
-              <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-muted)]">
+              <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 text-xs font-semibold text-[var(--text-muted)]">
                 <th scope="col" className="py-3 px-4">
                   ID
                 </th>

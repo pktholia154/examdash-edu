@@ -25,7 +25,7 @@ async function fetchSampleMarkdownSafe(url: string): Promise<string> {
     });
     if (!res.ok) return '';
     const text = await res.text();
-    return text.slice(0, 40000);
+    return text.slice(0, 250_000);
   } catch {
     return '';
   } finally {
@@ -51,15 +51,18 @@ export default async function ReadBookSlotPage({
   const book = lookup.data;
   const initialMode = sp.mode === 'sample' ? 'sample' : 'full';
   const initialFormat =
-    sp.format === 'pdf'
-      ? 'pdf'
-      : book.sampleMarkdownUrl || !book.samplePdfUrl
+    sp.format === 'markdown'
       ? 'markdown'
-      : 'pdf';
+      : sp.format === 'pdf'
+      ? 'pdf'
+      : book.hasFullPdf || book.samplePdfUrl
+      ? 'pdf'
+      : 'markdown';
 
-  const sampleMarkdownPreview = book.sampleMarkdownUrl
-    ? await fetchSampleMarkdownSafe(book.sampleMarkdownUrl)
-    : '';
+  const sampleMarkdownPreview =
+    initialMode === 'sample' && book.sampleMarkdownUrl
+      ? await fetchSampleMarkdownSafe(book.sampleMarkdownUrl)
+      : '';
 
   return (
     <ReaderSlotView

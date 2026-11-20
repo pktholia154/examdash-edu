@@ -50,13 +50,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const authHeader = req.headers.get('authorization');
+  const rawBearerToken =
+    authHeader && authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : '';
+
   try {
-    const grant = await issueShortLivedAssetGrant(
+    const result = await issueShortLivedAssetGrant(
       collectionName,
       urlSlug,
-      decoded.uid
+      decoded.uid,
+      rawBearerToken
     );
-    if (!grant) {
+    if (result.status === 'not_found') {
       return NextResponse.json(
         { error: 'Requested catalog item was not found or is unpublished.' },
         {
@@ -65,8 +72,17 @@ export async function POST(req: NextRequest) {
         }
       );
     }
+    if (result.status === 'forbidden') {
+      return NextResponse.json(
+        { error: 'Purchase entitlement required to unlock full edition.' },
+        {
+          status: 403,
+          headers: { 'Cache-Control': 'private, no-store' },
+        }
+      );
+    }
 
-    return NextResponse.json(grant, {
+    return NextResponse.json(result.grant, {
       status: 200,
       headers: {
         'Cache-Control': 'private, no-store',

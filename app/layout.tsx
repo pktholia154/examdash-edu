@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import { Plus_Jakarta_Sans, JetBrains_Mono, Source_Serif_4 } from 'next/font/google';
 import './globals.css';
 import { AppProviders } from '../features/shell/providers';
 import {
@@ -13,6 +13,14 @@ const plusJakarta = Plus_Jakarta_Sans({
   display: 'swap',
   variable: '--font-sans',
   weight: ['400', '500', '600', '700', '800'],
+});
+
+const sourceSerif = Source_Serif_4({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+  variable: '--font-serif',
+  weight: ['400', '600', '700'],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -109,7 +117,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${plusJakarta.variable} ${jetbrainsMono.variable}`}
+      className={`${plusJakarta.variable} ${sourceSerif.variable} ${jetbrainsMono.variable}`}
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

@@ -38,6 +38,8 @@ const PUBLIC_BOOK_FIELDS = [
   'createdAt',
   'samplePdfUrl',
   'sampleMarkdownUrl',
+  'fullPdfStoragePath',
+  'fullMarkdownStoragePath',
 ] as const;
 
 const PUBLIC_EXAM_FIELDS = [
@@ -62,6 +64,7 @@ const PUBLIC_EXAM_FIELDS = [
   'totalMocktest',
   'MocktestTitles',
   'sampleJsonStoragePath',
+  'fullJsonStoragePath',
 ] as const;
 
 type FirestoreRestFieldMap = Record<string, Record<string, unknown>>;
@@ -105,10 +108,14 @@ interface ParsedFirestoreDoc {
  * Executes a structured query against the existing `(default)` Firestore database in `examdash-ed`
  * over `node:https` (bypassing React 19 dev-mode global `fetch` RSC serialization).
  */
-function runDefaultFirestoreQuery(structuredQuery: Record<string, unknown>): Promise<ParsedFirestoreDoc[]> {
+function runDefaultFirestoreQuery(
+  structuredQuery: Record<string, unknown>,
+  options?: { includePrivateStoragePaths?: boolean }
+): Promise<ParsedFirestoreDoc[]> {
   const projectId = firebaseConfig.projectId || 'examdash-ed';
   const apiKey = firebaseConfig.apiKey || '';
   const payload = JSON.stringify({ structuredQuery });
+  const includePrivate = options?.includePrivateStoragePaths === true;
 
   const urlPath = `/v1/projects/${encodeURIComponent(
     projectId
@@ -146,9 +153,24 @@ function runDefaultFirestoreQuery(structuredQuery: Record<string, unknown>): Pro
                 if (!row?.document?.name) continue;
                 const segments = row.document.name.split('/');
                 const docId = segments[segments.length - 1] || '';
+                const parsed = parseFirestoreRestFields(row.document.fields);
+                if (!includePrivate) {
+                  parsed.hasFullPdf =
+                    typeof parsed.fullPdfStoragePath === 'string' &&
+                    parsed.fullPdfStoragePath.trim().length > 0;
+                  parsed.hasFullMarkdown =
+                    typeof parsed.fullMarkdownStoragePath === 'string' &&
+                    parsed.fullMarkdownStoragePath.trim().length > 0;
+                  parsed.hasFullJson =
+                    typeof parsed.fullJsonStoragePath === 'string' &&
+                    parsed.fullJsonStoragePath.trim().length > 0;
+                  delete parsed.fullPdfStoragePath;
+                  delete parsed.fullMarkdownStoragePath;
+                  delete parsed.fullJsonStoragePath;
+                }
                 docs.push({
                   docId,
-                  data: parseFirestoreRestFields(row.document.fields),
+                  data: parsed,
                 });
               }
             }
@@ -358,6 +380,122 @@ function buildStorageMediaUrl(storagePath: string): string {
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media`;
 }
 
+function getSigningSecret(): string {
+  return (
+    process.env.GEMINI_API_KEY || firebaseConfig.appId || 'examdash-ephemeral'
+  );
+}
+
+export function computeAssetGrantSignature(
+  userId: string,
+  collectionName: CollectionName,
+  docId: string,
+  expiresMs: number
+): string {
+  return crypto
+    .createHmac('sha256', getSigningSecret())
+    .update(`${userId}:${collectionName}:${docId}:${expiresMs}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+export function verifyAssetGrantSignature(
+  userId: string,
+  collectionName: CollectionName,
+  docId: string,
+  expiresMs: number,
+  providedSig: string
+): boolean {
+  if (!userId || !docId || !providedSig || !Number.isFinite(expiresMs)) {
+    return false;
+  }
+  if (Date.now() > expiresMs) {
+    return false;
+  }
+  const expected = computeAssetGrantSignature(
+    userId,
+    collectionName,
+    docId,
+    expiresMs
+  );
+  if (expected.length !== providedSig.length) return false;
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(expected, 'utf8'),
+      Buffer.from(providedSig, 'utf8')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verifies user purchase record in the provisioned Firestore database using the caller's
+ * own Firebase Auth Bearer token (zero Admin SDK IAM required; enforced by firestore.rules).
+ */
+export async function verifyCallerPurchaseRecord(
+  userId: string,
+  collectionName: CollectionName,
+  rawItemId: string,
+  bearerIdToken: string
+): Promise<boolean> {
+  if (!userId || !rawItemId || !bearerIdToken) return false;
+  const projectId = firebaseConfig.projectId || 'examdash-ed';
+  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+  const safeItemId = rawItemId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  const purchaseId = `${collectionName}_${safeItemId}`.slice(0, 120);
+
+  const docPath = `/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(
+    databaseId
+  )}/documents/users/${encodeURIComponent(
+    userId
+  )}/purchases/${encodeURIComponent(purchaseId)}`;
+
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'firestore.googleapis.com',
+        port: 443,
+        path: docPath,
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${bearerIdToken}`,
+        },
+        timeout: 6000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            resolve(false);
+            return;
+          }
+          try {
+            const parsed = JSON.parse(
+              Buffer.concat(chunks).toString('utf8')
+            ) as { fields?: FirestoreRestFieldMap };
+            const data = parseFirestoreRestFields(parsed.fields);
+            resolve(
+              data.userId === userId && data.status === 'completed'
+            );
+          } catch {
+            resolve(false);
+          }
+        });
+      }
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+}
+
 export interface SignedAssetGrant {
   itemId: string;
   collectionName: CollectionName;
@@ -371,6 +509,11 @@ export interface SignedAssetGrant {
   };
 }
 
+export type UnlockGrantResult =
+  | { status: 'ok'; grant: SignedAssetGrant }
+  | { status: 'not_found' }
+  | { status: 'forbidden' };
+
 /**
  * Server-only protected asset unlock helper.
  * Queries full storage paths strictly inside the authenticated `/api/v1/library/unlock` boundary
@@ -379,34 +522,55 @@ export interface SignedAssetGrant {
 export async function issueShortLivedAssetGrant(
   collectionName: CollectionName,
   urlSlug: string,
-  userId: string
-): Promise<SignedAssetGrant | null> {
-  const docs = await runDefaultFirestoreQuery({
-    from: [{ collectionId: collectionName }],
-    where: {
-      fieldFilter: {
-        field: { fieldPath: 'urlSlug' },
-        op: 'EQUAL',
-        value: { stringValue: urlSlug.trim() },
+  userId: string,
+  bearerIdToken?: string
+): Promise<UnlockGrantResult> {
+  const cleanSlug = urlSlug.trim();
+  const docs = await runDefaultFirestoreQuery(
+    {
+      from: [{ collectionId: collectionName }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'urlSlug' },
+          op: 'EQUAL',
+          value: { stringValue: cleanSlug },
+        },
       },
     },
-  });
-  if (docs.length === 0) return null;
+    { includePrivateStoragePaths: true }
+  );
+  if (docs.length === 0) return { status: 'not_found' };
 
   const docSnap = docs[0];
   const raw = docSnap.data;
-  if (!isDocumentLive(raw)) return null;
+  if (!isDocumentLive(raw)) return { status: 'not_found' };
+
+  const itemId =
+    typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : docSnap.docId;
+  const buyPrice =
+    typeof raw.buyPrice === 'number' ? raw.buyPrice : Number(raw.buyPrice) || 0;
+
+  // Verify caller purchase entitlement for paid items when Bearer token is supplied
+  if (buyPrice > 0 && bearerIdToken) {
+    const entitled = await verifyCallerPurchaseRecord(
+      userId,
+      collectionName,
+      itemId,
+      bearerIdToken
+    );
+    if (!entitled) {
+      return { status: 'forbidden' };
+    }
+  }
 
   const expiresMs = Date.now() + 15 * 60 * 1000; // <= 15 minutes
   const expiresAtIso = new Date(expiresMs).toISOString();
-  const signingSecret =
-    process.env.GEMINI_API_KEY || firebaseConfig.appId || 'examdash-ephemeral';
-
-  const signature = crypto
-    .createHmac('sha256', signingSecret)
-    .update(`${userId}:${collectionName}:${docSnap.docId}:${expiresMs}`)
-    .digest('hex')
-    .slice(0, 32);
+  const signature = computeAssetGrantSignature(
+    userId,
+    collectionName,
+    docSnap.docId,
+    expiresMs
+  );
 
   if (collectionName === 'books') {
     const fullPdf =
@@ -417,24 +581,39 @@ export async function issueShortLivedAssetGrant(
       typeof raw.fullMarkdownStoragePath === 'string'
         ? raw.fullMarkdownStoragePath.trim()
         : '';
+    const samplePdf =
+      typeof raw.samplePdfUrl === 'string' ? raw.samplePdfUrl.trim() : '';
+    const sampleMd =
+      typeof raw.sampleMarkdownUrl === 'string'
+        ? raw.sampleMarkdownUrl.trim()
+        : '';
+
+    const baseQuery = `collection=books&slug=${encodeURIComponent(
+      cleanSlug
+    )}&mode=full&uid=${encodeURIComponent(
+      userId
+    )}&exp=${expiresMs}&sig=${signature}`;
 
     return {
-      itemId: typeof raw.id === 'string' ? raw.id : docSnap.docId,
-      collectionName,
-      urlSlug,
-      expiresAtIso,
-      signature,
-      assets: {
-        ...(fullPdf
-          ? {
-              pdfUrl: `${buildStorageMediaUrl(fullPdf)}&ed_sig=${signature}&ed_exp=${expiresMs}`,
-            }
-          : {}),
-        ...(fullMd
-          ? {
-              markdownUrl: `${buildStorageMediaUrl(fullMd)}&ed_sig=${signature}&ed_exp=${expiresMs}`,
-            }
-          : {}),
+      status: 'ok',
+      grant: {
+        itemId,
+        collectionName,
+        urlSlug: cleanSlug,
+        expiresAtIso,
+        signature,
+        assets: {
+          ...(fullPdf || samplePdf
+            ? {
+                pdfUrl: `/api/v1/library/stream?${baseQuery}&format=pdf`,
+              }
+            : {}),
+          ...(fullMd || sampleMd
+            ? {
+                markdownUrl: `/api/v1/library/stream?${baseQuery}&format=markdown`,
+              }
+            : {}),
+        },
       },
     };
   }
@@ -445,17 +624,135 @@ export async function issueShortLivedAssetGrant(
       : '';
 
   return {
-    itemId: typeof raw.id === 'string' ? raw.id : docSnap.docId,
-    collectionName,
-    urlSlug,
-    expiresAtIso,
-    signature,
-    assets: {
-      ...(fullJson
-        ? {
-            jsonUrl: `${buildStorageMediaUrl(fullJson)}&ed_sig=${signature}&ed_exp=${expiresMs}`,
-          }
-        : {}),
+    status: 'ok',
+    grant: {
+      itemId,
+      collectionName,
+      urlSlug: cleanSlug,
+      expiresAtIso,
+      signature,
+      assets: {
+        ...(fullJson
+          ? {
+              jsonUrl: `${buildStorageMediaUrl(fullJson)}&ed_sig=${signature}&ed_exp=${expiresMs}`,
+            }
+          : {}),
+      },
+    },
+  };
+}
+
+export interface BookUpstreamResolution {
+  docId: string;
+  itemId: string;
+  upstreamUrl: string;
+  fallbackSampleUrl?: string;
+  contentType: string;
+}
+
+/**
+ * Resolves the upstream Firebase Storage URL on the server for `/api/v1/library/stream`
+ * so raw private storage paths never enter public HTML and browsers/Workers avoid CORS errors.
+ */
+export async function resolveBookStreamUpstream(params: {
+  urlSlug: string;
+  mode: 'sample' | 'full';
+  format: 'pdf' | 'markdown';
+  uid?: string;
+  expMs?: number;
+  sig?: string;
+}): Promise<
+  | { status: 'ok'; target: BookUpstreamResolution }
+  | { status: 'not_found' }
+  | { status: 'unauthorized' }
+> {
+  const cleanSlug = (params.urlSlug || '').trim();
+  if (!cleanSlug) return { status: 'not_found' };
+
+  const docs = await runDefaultFirestoreQuery(
+    {
+      from: [{ collectionId: 'books' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'urlSlug' },
+          op: 'EQUAL',
+          value: { stringValue: cleanSlug },
+        },
+      },
+    },
+    { includePrivateStoragePaths: true }
+  );
+
+  if (docs.length === 0) return { status: 'not_found' };
+  const docSnap = docs[0];
+  const raw = docSnap.data;
+  if (!isDocumentLive(raw)) return { status: 'not_found' };
+
+  const itemId =
+    typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : docSnap.docId;
+  const contentType =
+    params.format === 'pdf'
+      ? 'application/pdf'
+      : 'text/markdown; charset=utf-8';
+
+  const sampleUrl =
+    params.format === 'pdf'
+      ? typeof raw.samplePdfUrl === 'string'
+        ? raw.samplePdfUrl.trim()
+        : ''
+      : typeof raw.sampleMarkdownUrl === 'string'
+      ? raw.sampleMarkdownUrl.trim()
+      : '';
+
+  if (params.mode === 'sample') {
+    if (!sampleUrl) return { status: 'not_found' };
+    return {
+      status: 'ok',
+      target: {
+        docId: docSnap.docId,
+        itemId,
+        upstreamUrl: sampleUrl,
+        contentType,
+      },
+    };
+  }
+
+  // Full mode requires valid <= 15m HMAC grant signature
+  if (
+    !params.uid ||
+    !params.expMs ||
+    !params.sig ||
+    !verifyAssetGrantSignature(
+      params.uid,
+      'books',
+      docSnap.docId,
+      params.expMs,
+      params.sig
+    )
+  ) {
+    return { status: 'unauthorized' };
+  }
+
+  const fullPath =
+    params.format === 'pdf'
+      ? typeof raw.fullPdfStoragePath === 'string'
+        ? raw.fullPdfStoragePath.trim()
+        : ''
+      : typeof raw.fullMarkdownStoragePath === 'string'
+      ? raw.fullMarkdownStoragePath.trim()
+      : '';
+
+  const upstreamUrl = fullPath ? buildStorageMediaUrl(fullPath) : sampleUrl;
+  if (!upstreamUrl) return { status: 'not_found' };
+
+  return {
+    status: 'ok',
+    target: {
+      docId: docSnap.docId,
+      itemId,
+      upstreamUrl,
+      fallbackSampleUrl: sampleUrl || undefined,
+      contentType,
     },
   };
 }

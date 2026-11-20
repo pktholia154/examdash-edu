@@ -220,6 +220,445 @@ select,
   color: var(--text-main);
 }
 
+/* ==========================================================================
+   Reader Comfort Skins (Light / Warm Sepia / True Dark) — Zero-Cost CSS Vars
+   ========================================================================== */
+.ed-reader-skin-light {
+  color-scheme: light;
+  --reader-bg: #FFFFFF;
+  --reader-stage-bg: #F1F5F9;
+  --reader-surface: #F8FAFC;
+  --reader-elevated: #F1F5F9;
+  --reader-ink: #0F172A;
+  --reader-muted: #475569;
+  --reader-border: #E2E8F0;
+  --reader-border-strong: #CBD5E1;
+  --reader-code-bg: #F8FAFC;
+  --reader-accent: #0F172A;
+  --reader-accent-ink: #FFFFFF;
+  --reader-highlight-bg: rgba(234, 179, 8, 0.28);
+}
+
+.ed-reader-skin-sepia {
+  color-scheme: light;
+  --reader-bg: #FBF5E8;
+  --reader-stage-bg: #F2E8D5;
+  --reader-surface: #F5ECDA;
+  --reader-elevated: #EFE3CB;
+  --reader-ink: #3B2F2F;
+  --reader-muted: #6E5A4F;
+  --reader-border: #E2D4BC;
+  --reader-border-strong: #CBB899;
+  --reader-code-bg: #F3E9D6;
+  --reader-accent: #3B2F2F;
+  --reader-accent-ink: #FBF5E8;
+  --reader-highlight-bg: rgba(217, 119, 6, 0.24);
+}
+
+.ed-reader-skin-dark {
+  color-scheme: dark;
+  --reader-bg: #0B1120;
+  --reader-stage-bg: #070B14;
+  --reader-surface: #111827;
+  --reader-elevated: #1E293B;
+  --reader-ink: #E2E8F0;
+  --reader-muted: #94A3B8;
+  --reader-border: #1E293B;
+  --reader-border-strong: #334155;
+  --reader-code-bg: #0F172A;
+  --reader-accent: #F8FAFC;
+  --reader-accent-ink: #0F172A;
+  --reader-highlight-bg: rgba(250, 204, 21, 0.25);
+}
+
+/* ==========================================================================
+   Production PDF Viewer — Native 2D Panning, Stage & Zero-Re-Render Filters
+   ========================================================================== */
+.pdf-viewport {
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background-color: var(--reader-stage-bg, var(--bg-elevated));
+}
+
+.pdf-stage {
+  margin-inline: auto;
+  transform-origin: 0 0;
+}
+
+.pdf-comfort-light canvas {
+  filter: none;
+}
+
+.pdf-comfort-sepia canvas {
+  filter: sepia(0.28) contrast(0.96) brightness(0.98);
+}
+
+.pdf-comfort-dark canvas {
+  filter: invert(0.91) hue-rotate(180deg) contrast(0.94);
+}
+
+/* ==========================================================================
+   Production Markdown Viewer — Reflowable Prose, Study Cards & Scroll Guards
+   ========================================================================== */
+.ed-md-font-sans {
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+.ed-md-font-serif {
+  font-family: var(--font-serif), Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
+}
+
+.ed-md-prose {
+  --md-scale: 1;
+  --md-line-height: 1.68;
+  max-width: 68ch;
+  margin-inline: auto;
+  color: var(--reader-ink);
+  font-size: calc(1.0625rem * var(--md-scale));
+  line-height: var(--md-line-height);
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.ed-md-tall-script {
+  --md-line-height: 1.82;
+}
+
+.ed-md-paid-guard {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.ed-md-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+
+.ed-md-prose h1,
+.ed-md-prose h2,
+.ed-md-prose h3 {
+  color: var(--reader-ink);
+  scroll-margin-top: calc(76px + var(--safe-area-inset-top));
+  text-wrap: balance;
+}
+
+.ed-md-prose h1 {
+  font-size: calc(1.625rem * var(--md-scale));
+  font-weight: 800;
+  letter-spacing: -0.022em;
+  line-height: 1.25;
+  margin-block: 0.5rem 1.25rem;
+  padding-block-end: 0.75rem;
+  border-bottom: 1px solid var(--reader-border);
+}
+
+.ed-md-prose h2 {
+  font-size: calc(1.3rem * var(--md-scale));
+  font-weight: 700;
+  letter-spacing: -0.016em;
+  line-height: 1.32;
+  margin-block: 2.25rem 0.85rem;
+  padding-block-end: 0.45rem;
+  border-bottom: 1px solid var(--reader-border);
+}
+
+.ed-md-prose h3 {
+  font-size: calc(1.1rem * var(--md-scale));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  margin-block: 1.5rem 0.6rem;
+}
+
+.ed-md-prose p {
+  margin-block: 0.85rem;
+}
+
+.ed-md-prose ul,
+.ed-md-prose ol {
+  margin-block: 0.85rem;
+  padding-inline-start: 1.5rem;
+}
+
+.ed-md-prose ul {
+  list-style-type: disc;
+}
+
+.ed-md-prose ol {
+  list-style-type: decimal;
+  font-variant-numeric: tabular-nums;
+}
+
+.ed-md-prose li {
+  margin-block: 0.4rem;
+}
+
+.ed-md-prose strong {
+  font-weight: 700;
+  color: var(--reader-ink);
+}
+
+.ed-md-prose a {
+  color: var(--reader-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+.ed-md-prose hr {
+  border: 0;
+  border-top: 1px solid var(--reader-border);
+  margin-block: 2rem;
+}
+
+.ed-md-prose blockquote {
+  margin-block: 1.15rem;
+  padding: 0.9rem 1.1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--reader-border);
+  background-color: var(--reader-surface);
+  color: var(--reader-muted);
+}
+
+.ed-md-prose code:not(pre code) {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.875em;
+  padding: 0.15em 0.4em;
+  border-radius: 0.375rem;
+  background-color: var(--reader-elevated);
+  border: 1px solid var(--reader-border);
+}
+
+/* Semantic GFM Callout Cards (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING]) */
+.ed-md-callout {
+  margin-block: 1.25rem;
+  padding: 1rem 1.125rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--reader-border-strong);
+  background-color: var(--reader-surface);
+}
+
+.ed-md-callout-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: calc(0.82rem * var(--md-scale));
+  font-weight: 700;
+  margin-block-end: 0.4rem;
+  color: var(--reader-ink);
+}
+
+.ed-md-callout-note {
+  background-color: rgba(14, 165, 233, 0.07);
+  border-color: rgba(14, 165, 233, 0.28);
+}
+
+.ed-md-callout-tip {
+  background-color: rgba(22, 163, 74, 0.07);
+  border-color: rgba(22, 163, 74, 0.28);
+}
+
+.ed-md-callout-important {
+  background-color: rgba(147, 51, 234, 0.07);
+  border-color: rgba(147, 51, 234, 0.28);
+}
+
+.ed-md-callout-warning {
+  background-color: rgba(217, 119, 6, 0.09);
+  border-color: rgba(217, 119, 6, 0.32);
+}
+
+/* Interactive Quiz / Solution Accordions (<details><summary>) >= 48px touch target */
+.ed-md-prose details {
+  margin-block: 0.85rem 1.35rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--reader-border);
+  background-color: var(--reader-surface);
+  overflow: hidden;
+}
+
+.ed-md-prose details summary {
+  min-height: 48px;
+  padding: 0.65rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: calc(0.875rem * var(--md-scale));
+  font-weight: 600;
+  color: var(--reader-ink);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.ed-md-prose details summary::-webkit-details-marker {
+  display: none;
+}
+
+.ed-md-prose details summary::after {
+  content: '+';
+  font-family: var(--font-mono), monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--reader-muted);
+  flex-shrink: 0;
+}
+
+.ed-md-prose details[open] summary {
+  border-bottom: 1px solid var(--reader-border);
+  background-color: var(--reader-elevated);
+}
+
+.ed-md-prose details[open] summary::after {
+  content: '−';
+}
+
+.ed-md-solution-body {
+  padding: 0.85rem 1rem;
+  font-size: calc(0.95rem * var(--md-scale));
+  color: var(--reader-ink);
+}
+
+/* Mobile Overflow Guardrail (.md-scroll-x) with subtle scroll-shadow cues */
+.md-scroll-x {
+  overflow-x: auto;
+  max-width: 100%;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+  margin-block: 1.15rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--reader-border);
+  background:
+    linear-gradient(to right, var(--reader-bg) 20%, rgba(0, 0, 0, 0)),
+    linear-gradient(to left, var(--reader-bg) 20%, rgba(0, 0, 0, 0)) 100% 0,
+    radial-gradient(farthest-side at 0 50%, rgba(15, 23, 42, 0.14), rgba(0, 0, 0, 0)),
+    radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, 0.14), rgba(0, 0, 0, 0)) 100% 0;
+  background-repeat: no-repeat;
+  background-color: var(--reader-code-bg);
+  background-size: 28px 100%, 28px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+.ed-md-table-bar,
+.ed-md-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--reader-border);
+  background-color: var(--reader-elevated);
+  font-family: var(--font-sans), sans-serif;
+  font-size: 0.75rem;
+  color: var(--reader-muted);
+}
+
+.ed-md-action-btn {
+  min-height: 36px;
+  padding-inline: 0.65rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--reader-border-strong);
+  background-color: var(--reader-bg);
+  color: var(--reader-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ed-md-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(0.9rem * var(--md-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.ed-md-prose thead th {
+  position: sticky;
+  top: 0;
+  background-color: var(--reader-elevated);
+  color: var(--reader-ink);
+  font-weight: 700;
+  text-align: start;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--reader-border-strong);
+}
+
+.ed-md-prose tbody td {
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--reader-border);
+  vertical-align: top;
+}
+
+.ed-md-prose tbody tr:nth-child(even) {
+  background-color: var(--reader-surface);
+}
+
+.ed-md-prose pre {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  font-size: calc(0.85rem * var(--md-scale));
+  line-height: 1.6;
+  color: var(--reader-ink);
+}
+
+.ed-md-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+  border: 1px solid var(--reader-border);
+  margin-block: 1rem;
+  cursor: zoom-in;
+}
+
+/* Search target block highlight */
+.ed-md-block-highlight {
+  background-color: var(--reader-highlight-bg);
+  border-radius: 0.5rem;
+  outline: 2px solid var(--reader-border-strong);
+  outline-offset: 4px;
+}
+
+/* Highlight.js minimal adaptive token colors */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: #2563EB;
+  font-weight: 600;
+}
+.ed-reader-skin-dark .hljs-keyword,
+.ed-reader-skin-dark .hljs-selector-tag,
+.ed-reader-skin-dark .hljs-built_in {
+  color: #60A5FA;
+}
+.hljs-string,
+.hljs-attr {
+  color: #15803D;
+}
+.ed-reader-skin-dark .hljs-string,
+.ed-reader-skin-dark .hljs-attr {
+  color: #4ADE80;
+}
+.hljs-number,
+.hljs-literal {
+  color: #B45309;
+}
+.ed-reader-skin-dark .hljs-number,
+.ed-reader-skin-dark .hljs-literal {
+  color: #FBBF24;
+}
+.hljs-comment {
+  color: var(--reader-muted);
+  font-style: italic;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -18,7 +18,11 @@ export function middleware(req: NextRequest) {
         preflight.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         preflight.headers.set(
           'Access-Control-Allow-Headers',
-          'Authorization, Content-Type, Idempotency-Key, X-Platform, X-App-Version'
+          'Authorization, Content-Type, Idempotency-Key, Range, X-Platform, X-App-Version'
+        );
+        preflight.headers.set(
+          'Access-Control-Expose-Headers',
+          'Accept-Ranges, Content-Range, Content-Length'
         );
         preflight.headers.set('Access-Control-Max-Age', '86400');
       }
@@ -30,7 +34,11 @@ export function middleware(req: NextRequest) {
       res.headers.set('Access-Control-Allow-Origin', origin);
       res.headers.set(
         'Access-Control-Allow-Headers',
-        'Authorization, Content-Type, Idempotency-Key, X-Platform, X-App-Version'
+        'Authorization, Content-Type, Idempotency-Key, Range, X-Platform, X-App-Version'
+      );
+      res.headers.set(
+        'Access-Control-Expose-Headers',
+        'Accept-Ranges, Content-Range, Content-Length'
       );
     }
     res.headers.set('X-Robots-Tag', 'noindex, nofollow');
@@ -78,6 +86,6 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icon.svg|.*\\.png$|\\.well-known/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|icon.svg|wasm/|.*\\.(?:png|wasm)$|\\.well-known/).*)',
   ],
 };

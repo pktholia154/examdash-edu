@@ -107,11 +107,13 @@ export function mapBookToPublicDTO(
     sampleMarkdownUrl:
       typeof raw.sampleMarkdownUrl === 'string' ? raw.sampleMarkdownUrl.trim() : '',
     hasFullPdf:
-      typeof raw.fullPdfStoragePath === 'string' &&
-      raw.fullPdfStoragePath.trim().length > 0,
+      raw.hasFullPdf === true ||
+      (typeof raw.fullPdfStoragePath === 'string' &&
+        raw.fullPdfStoragePath.trim().length > 0),
     hasFullMarkdown:
-      typeof raw.fullMarkdownStoragePath === 'string' &&
-      raw.fullMarkdownStoragePath.trim().length > 0,
+      raw.hasFullMarkdown === true ||
+      (typeof raw.fullMarkdownStoragePath === 'string' &&
+        raw.fullMarkdownStoragePath.trim().length > 0),
   };
 }
 
@@ -191,7 +193,8 @@ export function mapExamToPublicDTO(
         ? raw.sampleJsonStoragePath.trim()
         : '',
     hasFullJson:
-      typeof raw.fullJsonStoragePath === 'string' &&
-      raw.fullJsonStoragePath.trim().length > 0,
+      raw.hasFullJson === true ||
+      (typeof raw.fullJsonStoragePath === 'string' &&
+        raw.fullJsonStoragePath.trim().length > 0),
   };
 }

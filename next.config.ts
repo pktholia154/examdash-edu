@@ -34,9 +34,16 @@ const nextConfig: NextConfig = {
         source: '/.well-known/assetlinks.json',
         headers: [{ key: 'Content-Type', value: 'application/json' }],
       },
+      {
+        source: '/wasm/:path*',
+        headers: [
+          { key: 'Content-Type', value: 'application/wasm' },
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
     ];
   },
-  webpack: (config, {dev}) => {
+  webpack: (config, { dev, isServer, webpack }) => {
     // HMR is disabled in AI Studio via DISABLE_HMR env var.
     // Do not modify—file watching is disabled to prevent flickering during agent edits.
     if (dev && process.env.DISABLE_HMR === 'true') {
@@ -44,6 +51,24 @@ const nextConfig: NextConfig = {
         ignored: /.*/,
       };
     }
+
+    if (!isServer) {
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(/^node:/, (resource: { request: string }) => {
+          resource.request = resource.request.replace(/^node:/, '');
+        })
+      );
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        'fs/promises': false,
+        path: false,
+        url: false,
+        module: false,
+        crypto: false,
+      };
+    }
+
     return config;
   },
 };
