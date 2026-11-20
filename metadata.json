@@ -1,0 +1,6 @@
+{
+  "name": "ExamDash — Books, Mock Exams & Study Library",
+  "description": "Discover curated ebooks, quizbooks, and full-length mock exam packs with instant syllabus previews and unified study library access.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

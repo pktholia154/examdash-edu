@@ -1,0 +1,130 @@
+import type { Metadata, Viewport } from 'next';
+import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import './globals.css';
+import { AppProviders } from '../features/shell/providers';
+import {
+  buildSiteGraphJsonLd,
+  getCanonicalOrigin,
+  serializeSafeJsonLd,
+} from '../lib/seo/schema';
+
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-sans',
+  weight: ['400', '500', '600', '700', '800'],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-mono',
+  weight: ['400', '500', '600'],
+});
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  interactiveWidget: 'resizes-content',
+  themeColor: '#F8FAFC',
+};
+
+const SITE_TITLE = 'ExamDash — Books, Mock Exams & Study Library';
+const SITE_DESC =
+  'Discover curated ebooks, quizbooks, and full-length mock exam packs with instant syllabus previews and unified study library access.';
+
+export const metadata: Metadata = {
+  metadataBase: new URL(getCanonicalOrigin()),
+  title: {
+    default: SITE_TITLE,
+    template: '%s | ExamDash',
+  },
+  description: SITE_DESC,
+  alternates: {
+    canonical: '/',
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'ExamDash',
+  },
+  icons: {
+    icon: '/icon.svg',
+    apple: '/apple-touch-icon.png',
+  },
+  openGraph: {
+    title: SITE_TITLE,
+    description: SITE_DESC,
+    url: getCanonicalOrigin(),
+    siteName: 'ExamDash',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: SITE_TITLE,
+    description: SITE_DESC,
+  },
+};
+
+// < 600B synchronous pre-paint theme script preventing FOIT/flash on cookie-free cached HTML
+const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme');var d=s?s==='dark':window.matchMedia('(prefers-color-scheme:dark)').matches;if(d){document.documentElement.classList.add('dark');}}catch(e){}})();`;
+
+// Speculation Rules for instant MPA transitions (excluding /api/* and authenticated routes)
+const SPECULATION_RULES_JSON = JSON.stringify({
+  prerender: [
+    {
+      where: {
+        and: [
+          { href_matches: '/*' },
+          { not: { href_matches: '/api/*' } },
+          { not: { href_matches: '/purchased*' } },
+          { not: { href_matches: '/read/*' } },
+          { not: { href_matches: '/attempt/*' } },
+        ],
+      },
+      eagerness: 'moderate',
+    },
+  ],
+});
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const siteJsonLd = serializeSafeJsonLd(buildSiteGraphJsonLd());
+
+  return (
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${plusJakarta.variable} ${jetbrainsMono.variable}`}
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script
+          type="speculationrules"
+          dangerouslySetInnerHTML={{ __html: SPECULATION_RULES_JSON }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: siteJsonLd }}
+        />
+      </head>
+      <body suppressHydrationWarning className="font-sans antialiased">
+        <AppProviders>{children}</AppProviders>
+      </body>
+    </html>
+  );
+}

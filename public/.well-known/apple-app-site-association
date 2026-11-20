@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["TEAMID.app.examdash.ed"],
+        "components": [
+          { "/": "/books/*", "comment": "Book detail routes" },
+          { "/": "/exams/*", "comment": "Exam detail routes" },
+          { "/": "/purchased", "comment": "Purchased library" },
+          { "/": "/api/*", "exclude": true, "comment": "Exclude API routes" }
+        ]
+      }
+    ]
+  }
+}

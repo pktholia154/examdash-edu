@@ -1,0 +1,209 @@
+{
+  "entities": {
+    "Book": {
+      "title": "Book",
+      "description": "Published ebook or question bank item in the catalog.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isPublished": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "publishAt": { "type": "string", "format": "date-time" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "urlSlug": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "seoDescription": { "type": "string", "maxLength": 500 },
+        "fullDescription": { "type": "string", "maxLength": 50000 },
+        "type": { "type": "string", "maxLength": 64 },
+        "language": { "type": "string", "maxLength": 64 },
+        "publisher": { "type": "string", "maxLength": 160 },
+        "authorName": { "type": "string", "maxLength": 160 },
+        "tags": { "type": "array", "description": "Taxonomy tags (max 25)" },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
+        "listPrice": { "type": "number" },
+        "buyPrice": { "type": "number" },
+        "sampleMarkdownUrl": { "type": "string", "maxLength": 2048 },
+        "samplePdfUrl": { "type": "string", "maxLength": 2048 },
+        "fullMarkdownStoragePath": { "type": "string", "maxLength": 1024 },
+        "fullPdfStoragePath": { "type": "string", "maxLength": 1024 }
+      },
+      "required": [
+        "id",
+        "isPublished",
+        "isDeleted",
+        "title",
+        "urlSlug",
+        "type",
+        "language",
+        "currency",
+        "listPrice",
+        "buyPrice"
+      ]
+    },
+    "ExamPack": {
+      "title": "ExamPack",
+      "description": "Published mock test series pack in ExamPackDocument collection.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isPublished": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "publishAt": { "type": "string", "format": "date-time" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "urlSlug": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "seoDescription": { "type": "string", "maxLength": 500 },
+        "fullDescription": { "type": "string", "maxLength": 50000 },
+        "type": { "type": "string", "maxLength": 64 },
+        "language": { "type": "string", "maxLength": 64 },
+        "publisher": { "type": "string", "maxLength": 160 },
+        "authorName": { "type": "string", "maxLength": 160 },
+        "tags": { "type": "array", "description": "Taxonomy tags (max 25)" },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
+        "listPrice": { "type": "number" },
+        "buyPrice": { "type": "number" },
+        "totalMocktest": { "type": "number" },
+        "MocktestTitles": { "type": "array", "description": "Syllabus list of mock tests" },
+        "fullJsonStoragePath": { "type": "string", "maxLength": 1024 },
+        "sampleJsonStoragePath": { "type": "string", "maxLength": 1024 }
+      },
+      "required": [
+        "id",
+        "isPublished",
+        "isDeleted",
+        "title",
+        "urlSlug",
+        "type",
+        "language",
+        "currency",
+        "listPrice",
+        "buyPrice",
+        "totalMocktest"
+      ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Non-PII user workspace profile document.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "preferredView": { "type": "string", "enum": ["grid", "list"], "maxLength": 10 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "preferredView", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII subcollection document for user contact metadata.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 254 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "updatedAt"]
+    },
+    "UserPurchase": {
+      "title": "UserPurchase",
+      "description": "Verified entitlement record unlocking a Book or ExamPack for a user.",
+      "type": "object",
+      "properties": {
+        "purchaseId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "collectionName": { "type": "string", "enum": ["books", "ExamPackDocument"], "maxLength": 32 },
+        "urlSlug": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "authorName": { "type": "string", "maxLength": 160 },
+        "language": { "type": "string", "maxLength": 64 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
+        "listPrice": { "type": "number" },
+        "paidPrice": { "type": "number" },
+        "totalMocktest": { "type": "number" },
+        "status": { "type": "string", "enum": ["completed"], "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "purchaseId",
+        "userId",
+        "itemId",
+        "collectionName",
+        "urlSlug",
+        "title",
+        "type",
+        "currency",
+        "listPrice",
+        "paidPrice",
+        "status",
+        "createdAt"
+      ]
+    },
+    "UserCartItem": {
+      "title": "UserCartItem",
+      "description": "Authenticated user cart item synced from localStorage composite key.",
+      "type": "object",
+      "properties": {
+        "cartKey": { "type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "collectionName": { "type": "string", "enum": ["books", "ExamPackDocument"], "maxLength": 32 },
+        "urlSlug": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "authorName": { "type": "string", "maxLength": 160 },
+        "language": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
+        "listPrice": { "type": "number" },
+        "buyPrice": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "cartKey",
+        "userId",
+        "itemId",
+        "collectionName",
+        "urlSlug",
+        "title",
+        "type",
+        "currency",
+        "listPrice",
+        "buyPrice",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/books/{bookId}": {
+      "schema": { "$ref": "#/entities/Book" },
+      "description": "Read-only public catalog of published ebooks and question banks."
+    },
+    "/ExamPackDocument/{examId}": {
+      "schema": { "$ref": "#/entities/ExamPack" },
+      "description": "Read-only public catalog of published exam packs and mock test series."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only non-PII user profile preferences."
+    },
+    "/users/{userId}/private/{infoId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Strictly isolated PII subcollection storing verified user email."
+    },
+    "/users/{userId}/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/UserPurchase" },
+      "description": "Immutable completed entitlement records owned by the user."
+    },
+    "/users/{userId}/cart/{cartKey}": {
+      "schema": { "$ref": "#/entities/UserCartItem" },
+      "description": "Owner-scoped active shopping cart items."
+    }
+  }
+}

@@ -1,0 +1,373 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default-Deny Catch-All
+    match /{document=**} { allow read, write: if false; }
+
+    // Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedOwner(userId) {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.uid == userId;
+    }
+
+    function hasParentUser(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        || existsAfter(/databases/$(database)/documents/users/$(userId));
+    }
+
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'preferredView', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'preferredView', 'createdAt', 'updatedAt'])
+        && data.uid is string
+        && data.uid.size() >= 1
+        && data.uid.size() <= 128
+        && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.uid == request.auth.uid
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 120
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024))
+        && data.preferredView is string
+        && data.preferredView.size() <= 10
+        && (data.preferredView == 'grid' || data.preferredView == 'list')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['uid', 'email', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'updatedAt'])
+        && data.uid is string
+        && data.uid.size() >= 1
+        && data.uid.size() <= 128
+        && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.uid == request.auth.uid
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 254
+        && data.email == request.auth.token.email
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPurchase(data, purchaseId) {
+      return data.keys().hasAll([
+          'purchaseId',
+          'userId',
+          'itemId',
+          'collectionName',
+          'urlSlug',
+          'title',
+          'type',
+          'currency',
+          'listPrice',
+          'paidPrice',
+          'status',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'purchaseId',
+          'userId',
+          'itemId',
+          'collectionName',
+          'urlSlug',
+          'title',
+          'type',
+          'authorName',
+          'language',
+          'currency',
+          'listPrice',
+          'paidPrice',
+          'totalMocktest',
+          'status',
+          'createdAt'
+        ])
+        && data.purchaseId is string
+        && data.purchaseId.size() >= 1
+        && data.purchaseId.size() <= 128
+        && data.purchaseId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.purchaseId == purchaseId
+        && data.userId is string
+        && data.userId.size() >= 1
+        && data.userId.size() <= 128
+        && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userId == request.auth.uid
+        && data.itemId is string
+        && data.itemId.size() >= 1
+        && data.itemId.size() <= 128
+        && data.itemId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.collectionName is string
+        && data.collectionName.size() <= 32
+        && (data.collectionName == 'books' || data.collectionName == 'ExamPackDocument')
+        && data.urlSlug is string
+        && data.urlSlug.size() >= 1
+        && data.urlSlug.size() <= 200
+        && data.urlSlug.matches('^[a-z0-9\\-]+$')
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 300
+        && data.type is string
+        && data.type.size() >= 1
+        && data.type.size() <= 64
+        && (!('authorName' in data) || (data.authorName is string && data.authorName.size() <= 160))
+        && (!('language' in data) || (data.language is string && data.language.size() <= 64))
+        && data.currency is string
+        && data.currency.size() == 3
+        && data.currency.matches('^[A-Z]{3}$')
+        && (data.listPrice is int || data.listPrice is float)
+        && data.listPrice >= 0
+        && (data.paidPrice is int || data.paidPrice is float)
+        && data.paidPrice >= 0
+        && data.listPrice >= data.paidPrice
+        && (!('totalMocktest' in data) || (data.totalMocktest is int && data.totalMocktest >= 0))
+        && data.status is string
+        && data.status.size() <= 16
+        && data.status == 'completed'
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUserCartItem(data, cartKey) {
+      return data.keys().hasAll([
+          'cartKey',
+          'userId',
+          'itemId',
+          'collectionName',
+          'urlSlug',
+          'title',
+          'type',
+          'currency',
+          'listPrice',
+          'buyPrice',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'cartKey',
+          'userId',
+          'itemId',
+          'collectionName',
+          'urlSlug',
+          'title',
+          'authorName',
+          'language',
+          'type',
+          'currency',
+          'listPrice',
+          'buyPrice',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.cartKey is string
+        && data.cartKey.size() >= 3
+        && data.cartKey.size() <= 128
+        && data.cartKey.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.cartKey == cartKey
+        && data.userId is string
+        && data.userId.size() >= 1
+        && data.userId.size() <= 128
+        && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userId == request.auth.uid
+        && data.itemId is string
+        && data.itemId.size() >= 1
+        && data.itemId.size() <= 128
+        && data.itemId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.collectionName is string
+        && data.collectionName.size() <= 32
+        && (data.collectionName == 'books' || data.collectionName == 'ExamPackDocument')
+        && data.urlSlug is string
+        && data.urlSlug.size() >= 1
+        && data.urlSlug.size() <= 200
+        && data.urlSlug.matches('^[a-z0-9\\-]+$')
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 300
+        && (!('authorName' in data) || (data.authorName is string && data.authorName.size() <= 160))
+        && (!('language' in data) || (data.language is string && data.language.size() <= 64))
+        && data.type is string
+        && data.type.size() >= 1
+        && data.type.size() <= 64
+        && data.currency is string
+        && data.currency.size() == 3
+        && data.currency.matches('^[A-Z]{3}$')
+        && (data.listPrice is int || data.listPrice is float)
+        && data.listPrice >= 0
+        && (data.buyPrice is int || data.buyPrice is float)
+        && data.buyPrice >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Connection Probe Read-Only Document
+    match /test/connection {
+      allow get: if true;
+      allow list, create, update, delete: if false;
+    }
+
+    // Read-Only Public Catalog: Books
+    match /books/{bookId} {
+      allow get: if isValidId(bookId)
+        && resource.data.isPublished == true
+        && resource.data.isDeleted == false;
+      allow list: if resource.data.isPublished == true
+        && resource.data.isDeleted == false;
+      allow create, update, delete: if false;
+    }
+
+    // Read-Only Public Catalog: ExamPackDocument
+    match /ExamPackDocument/{examId} {
+      allow get: if isValidId(examId)
+        && resource.data.isPublished == true
+        && resource.data.isDeleted == false;
+      allow list: if resource.data.isPublished == true
+        && resource.data.isDeleted == false;
+      allow create, update, delete: if false;
+    }
+
+    // Owner-Scoped User Workspace & Subcollections
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if (
+        isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: UpdatePreferredView
+          incoming().diff(existing()).affectedKeys().hasOnly(['preferredView', 'updatedAt'])
+          ||
+          // Action: SyncProfileDetails
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'preferredView', 'updatedAt'])
+        )
+      );
+
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId);
+
+      // Split-Collection PII Isolation
+      match /private/{infoId} {
+        allow get: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(infoId)
+          && infoId == 'contact'
+          && request.auth.uid == userId
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow list: if false;
+
+        allow create: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(infoId)
+          && infoId == 'contact'
+          && isValidUserPrivateInfo(incoming())
+          && incoming().updatedAt == request.time
+          && hasParentUser(userId);
+
+        allow update: if (
+          isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(infoId)
+          && infoId == 'contact'
+          && isValidUserPrivateInfo(incoming())
+          && incoming().uid == existing().uid
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId))
+        );
+
+        allow delete: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(infoId);
+      }
+
+      // Immutable Entitlement Records (Terminal State Locked)
+      match /purchases/{purchaseId} {
+        allow get: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(purchaseId)
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isSignedIn()
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid;
+
+        allow create: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(purchaseId)
+          && isValidUserPurchase(incoming(), purchaseId)
+          && incoming().createdAt == request.time
+          && hasParentUser(userId);
+
+        allow update, delete: if false;
+      }
+
+      // Active Shopping Cart Sync
+      match /cart/{cartKey} {
+        allow get: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(cartKey)
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isSignedIn()
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid;
+
+        allow create: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(cartKey)
+          && isValidUserCartItem(incoming(), cartKey)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasParentUser(userId);
+
+        allow update: if (
+          isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(cartKey)
+          && isValidUserCartItem(incoming(), cartKey)
+          && incoming().cartKey == existing().cartKey
+          && incoming().userId == existing().userId
+          && incoming().itemId == existing().itemId
+          && incoming().collectionName == existing().collectionName
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['listPrice', 'buyPrice', 'title', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId))
+        );
+
+        allow delete: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(cartKey);
+      }
+    }
+  }
+}
