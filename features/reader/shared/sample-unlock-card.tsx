@@ -7,15 +7,12 @@ import {
   computeDiscountPercent,
   formatPrice,
   makeCompositeKey,
-  makeFirestoreSafeCartKey,
 } from '../../../lib/registry/content-type-registry';
 import { useAuth } from '../../auth/auth-provider';
 import { useCart } from '../../cart/cart-provider';
-import { useToast } from '../../toast/toast-context';
 
 /**
- * Store-Safe End-of-Sample Unlock Card wired to ExamDash CheckoutAdapter
- * (Web Checkout / Cart & Entitlement sync).
+ * End-of-Sample Unlock Card wired to production Razorpay Checkout & Library Entitlement sync.
  */
 export function SampleUnlockCard({
   book,
@@ -26,9 +23,8 @@ export function SampleUnlockCard({
   formatLabel: 'PDF' | 'Markdown';
   onUnlocked?: () => void;
 }) {
-  const { ownedCompositeKeys, recordCompletedPurchases } = useAuth();
-  const { isInCart, addItem, openCart, claimFreeItem, isCheckingOut } = useCart();
-  const { showToast } = useToast();
+  const { ownedCompositeKeys } = useAuth();
+  const { isInCart, addItem, openCart, buyNow, isCheckingOut } = useCart();
 
   const compositeKey = makeCompositeKey('books', book.id);
   const isOwned = book.buyPrice === 0 || ownedCompositeKeys.has(compositeKey);
@@ -37,30 +33,9 @@ export function SampleUnlockCard({
   const discountPct = computeDiscountPercent(book.listPrice, book.buyPrice);
   const savings = Math.max(0, book.listPrice - book.buyPrice);
 
-  const handleInstantUnlock = async () => {
-    if (isFree) {
-      await claimFreeItem(book);
-      onUnlocked?.();
-      return;
-    }
-    const ok = await recordCompletedPurchases([
-      {
-        compositeKey,
-        firestoreKey: makeFirestoreSafeCartKey('books', book.id),
-        id: book.id,
-        collectionName: 'books',
-        urlSlug: book.urlSlug,
-        title: book.title,
-        authorName: book.authorName,
-        language: book.language,
-        type: book.type,
-        currency: (book.currency || 'INR').toUpperCase(),
-        listPrice: book.listPrice,
-        buyPrice: book.buyPrice,
-      },
-    ]);
+  const handleBuyUnlock = async () => {
+    const ok = await buyNow(book, { redirectToPurchased: false });
     if (ok) {
-      showToast(`Unlocked full edition of "${book.title}"!`, 'success');
       onUnlocked?.();
     }
   };
@@ -132,22 +107,22 @@ export function SampleUnlockCard({
             <button
               type="button"
               disabled={isCheckingOut}
-              onClick={() => void handleInstantUnlock()}
+              onClick={() => void handleBuyUnlock()}
               className="inline-flex items-center justify-center gap-2 min-h-[48px] px-5 rounded-lg bg-[var(--reader-accent,var(--brand-primary))] text-[var(--reader-accent-ink,var(--brand-primary-ink))] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
             >
               <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Claim Free Book</span>
+              <span>{isCheckingOut ? 'Claiming...' : 'Claim Free Book'}</span>
             </button>
           ) : (
             <>
               <button
                 type="button"
                 disabled={isCheckingOut}
-                onClick={() => void handleInstantUnlock()}
+                onClick={() => void handleBuyUnlock()}
                 className="inline-flex items-center justify-center gap-2 min-h-[48px] px-5 rounded-lg bg-[var(--reader-accent,var(--brand-primary))] text-[var(--reader-accent-ink,var(--brand-primary-ink))] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
               >
                 <Zap className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>Unlock Full Book</span>
+                <span>{isCheckingOut ? 'Opening Razorpay...' : 'Buy & Unlock'}</span>
               </button>
 
               {inCart ? (

@@ -34,7 +34,7 @@ import {
   OperationType,
   testConnection,
 } from '../../lib/firebase/client';
-import type { CartItem, UserPurchaseRecord } from '../../lib/types/catalog';
+import type { UserPurchaseRecord } from '../../lib/types/catalog';
 import { makeCompositeKey } from '../../lib/registry/content-type-registry';
 import { requestPersistentWebStorage } from '../../lib/platform/capacitor-bridge';
 import { useToast } from '../toast/toast-context';
@@ -49,13 +49,7 @@ interface AuthContextValue {
   signInWithGoogle: () => Promise<User | null>;
   signOutUser: () => Promise<void>;
   deleteAccount: () => Promise<void>;
-  recordCompletedPurchases: (
-    items: Array<
-      CartItem & {
-        totalMocktest?: number;
-      }
-    >
-  ) => Promise<boolean>;
+  mergeVerifiedPurchases: (records: UserPurchaseRecord[]) => void;
   getIdToken: () => Promise<string | null>;
 }
 
@@ -69,7 +63,7 @@ const AuthContext = createContext<AuthContextValue>({
   signInWithGoogle: async () => null,
   signOutUser: async () => {},
   deleteAccount: async () => {},
-  recordCompletedPurchases: async () => false,
+  mergeVerifiedPurchases: () => {},
   getIdToken: async () => null,
 });
 
@@ -195,6 +189,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             paidPrice: Number(d.paidPrice) || 0,
             totalMocktest:
               typeof d.totalMocktest === 'number' ? d.totalMocktest : undefined,
+            paymentProvider:
+              d.paymentProvider === 'razorpay'
+                ? 'razorpay'
+                : d.paymentProvider === 'free'
+                ? 'free'
+                : undefined,
+            razorpayOrderId:
+              typeof d.razorpayOrderId === 'string'
+                ? d.razorpayOrderId
+                : undefined,
+            razorpayPaymentId:
+              typeof d.razorpayPaymentId === 'string'
+                ? d.razorpayPaymentId
+                : undefined,
             status: 'completed',
             createdAtIso: new Date(createdMs).toISOString(),
           });
@@ -253,76 +261,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [showToast]);
 
-  const recordCompletedPurchases = useCallback(
-    async (
-      items: Array<
-        CartItem & {
-          totalMocktest?: number;
+  const mergeVerifiedPurchases = useCallback(
+    (incomingRecords: UserPurchaseRecord[]) => {
+      if (!Array.isArray(incomingRecords) || incomingRecords.length === 0) return;
+      setPurchases((prev) => {
+        const byId = new Map<string, UserPurchaseRecord>();
+        for (const item of prev) {
+          byId.set(item.purchaseId, item);
         }
-      >
-    ): Promise<boolean> => {
-      let activeUser = auth.currentUser;
-      if (!activeUser) {
-        activeUser = await signInWithGoogle();
-      }
-      if (!activeUser) return false;
-
-      const uid = activeUser.uid;
-      const purchasesPath = `users/${uid}/purchases`;
-
-      try {
-        await ensureUserProfileSynced(activeUser);
-        const batch = writeBatch(db);
-
-        for (const item of items) {
-          const safeItemId = item.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
-          const purchaseId = `${item.collectionName}_${safeItemId}`.slice(0, 120);
-          const purchaseRef = doc(db, 'users', uid, 'purchases', purchaseId);
-
-          const paidPrice = Math.max(0, Number(item.buyPrice) || 0);
-          const listPrice = Math.max(paidPrice, Number(item.listPrice) || paidPrice);
-          const cleanSlug = item.urlSlug
-            .toLowerCase()
-            .replace(/[^a-z0-9-]/g, '-')
-            .slice(0, 200);
-
-          const payload: Record<string, unknown> = {
-            purchaseId,
-            userId: uid,
-            itemId: safeItemId,
-            collectionName: item.collectionName,
-            urlSlug: cleanSlug || 'item',
-            title: sanitizeBoundedString(item.title, 300, 'ExamDash Resource'),
-            type: sanitizeBoundedString(item.type, 64, 'Ebook'),
-            authorName: sanitizeBoundedString(item.authorName, 160, 'ExamDash'),
-            language: sanitizeBoundedString(item.language, 64, 'English'),
-            currency: /^[A-Z]{3}$/.test((item.currency || '').toUpperCase())
-              ? item.currency.toUpperCase()
-              : 'INR',
-            listPrice,
-            paidPrice,
-            status: 'completed',
-            createdAt: serverTimestamp(),
-          };
-
-          if (typeof item.totalMocktest === 'number' && item.totalMocktest >= 0) {
-            payload.totalMocktest = Math.floor(item.totalMocktest);
-          }
-
-          batch.set(purchaseRef, payload);
-
-          // Also clear item from synced Firestore cart if present
-          const cartRef = doc(db, 'users', uid, 'cart', item.firestoreKey);
-          batch.delete(cartRef);
+        for (const item of incomingRecords) {
+          byId.set(item.purchaseId, item);
         }
-
-        await batch.commit();
-        return true;
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, purchasesPath);
-      }
+        const merged = Array.from(byId.values());
+        merged.sort(
+          (a, b) =>
+            new Date(b.createdAtIso).getTime() -
+            new Date(a.createdAtIso).getTime()
+        );
+        return merged;
+      });
     },
-    [signInWithGoogle]
+    []
   );
 
   const getIdToken = useCallback(async (): Promise<string | null> => {
@@ -367,7 +326,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithGoogle,
         signOutUser,
         deleteAccount,
-        recordCompletedPurchases,
+        mergeVerifiedPurchases,
         getIdToken,
       }}
     >

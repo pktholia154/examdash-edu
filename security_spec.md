@@ -14,8 +14,10 @@
 5. **PII Split-Collection Isolation**:
    - `/users/{userId}` forbids storing `email`, `phone`, or `address`.
    - `/users/{userId}/private/{infoId}` (only `infoId == 'contact'`) stores `email` and is readable/writable strictly by the verified owner (`request.auth.uid == userId`).
-6. **Terminal State & Immutable Entitlements (`purchases`)**:
+6. **Terminal State, Payment Proof & Immutable Entitlements (`purchases`)**:
    - `/users/{userId}/purchases/{purchaseId}` requires `status == 'completed'`, `createdAt == request.time`, `paidPrice >= 0`, `listPrice >= paidPrice`, and forbids ALL `update` and `delete` operations (`allow update, delete: if false`) so completed entitlements cannot be tampered with.
+   - Paid entitlements (`paidPrice > 0`) MUST include `paymentProvider == 'razorpay'`, `razorpayOrderId` matching `^order_[a-zA-Z0-9]+$` (10–64 chars), and `razorpayPaymentId` matching `^pay_[a-zA-Z0-9]+$` (10–64 chars).
+   - Free entitlements (`paidPrice == 0`) MUST have `paymentProvider == 'free'` (or omitted) and must NOT carry forged Razorpay IDs.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
 
@@ -31,3 +33,5 @@
 10. **Identity Spoofing in Payload**: User A writes `/users/{userA}/purchases/p1` with `userId: "userB"` -> `PERMISSION_DENIED`.
 11. **Terminal Purchase Mutation**: User A attempts `update` on `/users/{userA}/purchases/p1` (`status == 'completed'`) to alter `itemId` -> `PERMISSION_DENIED`.
 12. **Client-Forged Timestamp**: User A creates `/users/{userA}` with a past/future `createdAt` (`!= request.time`) -> `PERMISSION_DENIED`.
+13. **Paid Purchase Without Razorpay Proof**: User A writes `/users/{userA}/purchases/p2` with `paidPrice: 499` and omits `razorpayOrderId` / `razorpayPaymentId` or sends malformed IDs -> `PERMISSION_DENIED`.
+

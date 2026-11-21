@@ -334,6 +334,72 @@ export async function getExamBySlug(
   return { status: 'not_found' };
 }
 
+export interface CatalogItemRef {
+  collectionName: CollectionName;
+  id: string;
+}
+
+/**
+ * Resolves authoritative live published catalog records by (collectionName, id) on the server.
+ * Used exclusively by server-side payment order creation and verification so pricing and metadata
+ * are never trusted from client payloads.
+ */
+export async function getCatalogItemsByRefs(
+  refs: CatalogItemRef[]
+): Promise<Array<PublicBookDTO | PublicExamDTO>> {
+  if (!Array.isArray(refs) || refs.length === 0) return [];
+
+  const uniqueRefs = new Map<string, CatalogItemRef>();
+  for (const ref of refs) {
+    const cleanId = (ref.id || '').trim();
+    if (!cleanId) continue;
+    if (ref.collectionName !== 'books' && ref.collectionName !== 'ExamPackDocument') {
+      continue;
+    }
+    uniqueRefs.set(`${ref.collectionName}:${cleanId}`, {
+      collectionName: ref.collectionName,
+      id: cleanId,
+    });
+  }
+
+  const wantsBooks = Array.from(uniqueRefs.values()).some(
+    (r) => r.collectionName === 'books'
+  );
+  const wantsExams = Array.from(uniqueRefs.values()).some(
+    (r) => r.collectionName === 'ExamPackDocument'
+  );
+
+  const [books, exams] = await Promise.all([
+    wantsBooks ? getLiveBooks() : Promise.resolve([] as PublicBookDTO[]),
+    wantsExams ? getLiveExams() : Promise.resolve([] as PublicExamDTO[]),
+  ]);
+
+  const bookMap = new Map<string, PublicBookDTO>();
+  for (const b of books) {
+    bookMap.set(b.id, b);
+    bookMap.set(b.urlSlug, b);
+  }
+
+  const examMap = new Map<string, PublicExamDTO>();
+  for (const e of exams) {
+    examMap.set(e.id, e);
+    examMap.set(e.urlSlug, e);
+  }
+
+  const resolved: Array<PublicBookDTO | PublicExamDTO> = [];
+  for (const ref of uniqueRefs.values()) {
+    const match =
+      ref.collectionName === 'books'
+        ? bookMap.get(ref.id)
+        : examMap.get(ref.id);
+    if (match) {
+      resolved.push(match);
+    }
+  }
+
+  return resolved;
+}
+
 export async function searchCatalog(rawQuery: string): Promise<{
   books: PublicBookDTO[];
   exams: PublicExamDTO[];

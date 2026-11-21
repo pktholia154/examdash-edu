@@ -17,11 +17,9 @@ import {
   computeDiscountPercent,
   formatPrice,
   makeCompositeKey,
-  makeFirestoreSafeCartKey,
 } from '../../lib/registry/content-type-registry';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
-import { useToast } from '../toast/toast-context';
 
 const LazyBookInlineReaderModal = dynamic(
   () =>
@@ -30,9 +28,9 @@ const LazyBookInlineReaderModal = dynamic(
 );
 
 export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
-  const { ownedCompositeKeys, recordCompletedPurchases } = useAuth();
-  const { isInCart, addItem, openCart, claimFreeItem, isCheckingOut } = useCart();
-  const { showToast } = useToast();
+  const { ownedCompositeKeys } = useAuth();
+  const { isInCart, addItem, openCart, buyNow, claimFreeItem, isCheckingOut } =
+    useCart();
 
   const [inlineReaderState, setInlineReaderState] = useState<{
     open: boolean;
@@ -84,33 +82,8 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
       ? `/read/${item.urlSlug}`
       : `/attempt/${item.urlSlug}/${encodeURIComponent(firstExamSetId)}`;
 
-  const handleInstantBuy = async () => {
-    if (isFree) {
-      await claimFreeItem(item);
-      return;
-    }
-    const ok = await recordCompletedPurchases([
-      {
-        compositeKey,
-        firestoreKey: makeFirestoreSafeCartKey(item.collectionName, item.id),
-        id: item.id,
-        collectionName: item.collectionName,
-        urlSlug: item.urlSlug,
-        title: item.title,
-        authorName: item.authorName,
-        language: item.language,
-        type: item.type,
-        currency: (item.currency || 'INR').toUpperCase(),
-        listPrice: item.listPrice,
-        buyPrice: item.buyPrice,
-        ...(item.collectionName === 'ExamPackDocument'
-          ? { totalMocktest: item.totalMocktest }
-          : {}),
-      },
-    ]);
-    if (ok) {
-      showToast(`Unlocked "${item.title}" in your Library!`, 'success');
-    }
+  const handleBuyNow = async () => {
+    await buyNow(item, { redirectToPurchased: true });
   };
 
   const hasBookPdfSample =
@@ -243,11 +216,11 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
               <button
                 type="button"
                 disabled={isCheckingOut}
-                onClick={() => void handleInstantBuy()}
+                onClick={() => void handleBuyNow()}
                 className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-[var(--text-main)] text-sm font-semibold hover:bg-[var(--bg-elevated)] disabled:opacity-50 transition-colors whitespace-nowrap"
               >
                 <Zap className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>Instant Unlock</span>
+                <span>{isCheckingOut ? 'Processing...' : 'Buy Now'}</span>
               </button>
             </>
           )}

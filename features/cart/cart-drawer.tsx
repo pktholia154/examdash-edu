@@ -196,13 +196,22 @@ export function CartDrawer() {
             >
               <span>
                 {isCheckingOut
-                  ? 'Completing Checkout...'
+                  ? 'Processing Payment...'
+                  : summary.buyTotal === 0
+                  ? user
+                    ? 'Claim Free Resources'
+                    : 'Sign in & Claim Free'
                   : user
-                  ? `One-Click Checkout · ${formatPrice(summary.buyTotal, activeCurrency)}`
-                  : `Sign in & Checkout · ${formatPrice(summary.buyTotal, activeCurrency)}`}
+                  ? `Pay with Razorpay · ${formatPrice(summary.buyTotal, activeCurrency)}`
+                  : `Sign in & Pay · ${formatPrice(summary.buyTotal, activeCurrency)}`}
               </span>
               <ArrowRight className="w-4 h-4 shrink-0" aria-hidden="true" />
             </button>
+            {summary.buyTotal > 0 && (
+              <p className="text-center text-[11px] text-[var(--text-muted)]">
+                Secured by Razorpay · Verified purchases unlock immediately in your Library
+              </p>
+            )}
           </div>
         )}
       </aside>

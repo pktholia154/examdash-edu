@@ -5,7 +5,7 @@ export function getCanonicalOrigin(): string {
   if (envUrl && envUrl.startsWith('http') && !envUrl.includes('MY_APP_URL')) {
     return envUrl.replace(/\/+$/, '');
   }
-  return 'https://examdash.app';
+  return 'https://exam-dash.com';
 }
 
 /**

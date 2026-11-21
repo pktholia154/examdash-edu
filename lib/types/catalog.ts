@@ -103,6 +103,9 @@ export interface UserPurchaseRecord {
   listPrice: number;
   paidPrice: number;
   totalMocktest?: number;
+  paymentProvider?: 'razorpay' | 'free';
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
   status: 'completed';
   createdAtIso: string;
 }

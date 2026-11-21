@@ -39,9 +39,13 @@ test('Dirty Dozen: Verified email, strict key allowlists, temporal integrity, an
   assert.match(rules, /existsAfter\(\/databases\/\$\(database\)\/documents\/users\/\$\(userId\)\)/);
 });
 
-test('Dirty Dozen: Completed purchases enforce terminal state immutability', () => {
+test('Dirty Dozen: Completed purchases enforce terminal state immutability and Razorpay payment metadata', () => {
   const rules = readRules();
   assert.match(rules, /match\s+\/purchases\/\{purchaseId\}/);
   assert.match(rules, /data\.status\s*==\s*'completed'/);
+  assert.match(rules, /data\.paymentProvider\s*==\s*'razorpay'/);
+  assert.match(rules, /\^order_\[a-zA-Z0-9\]\+\$/);
+  assert.match(rules, /\^pay_\[a-zA-Z0-9\]\+\$/);
   assert.match(rules, /allow\s+update,\s*delete:\s*if\s+false;/);
 });
+

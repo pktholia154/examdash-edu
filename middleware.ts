@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 const CAPACITOR_ALLOWED_ORIGINS = new Set([
   'capacitor://localhost',
   'https://localhost',
+  'https://exam-dash.com',
+  'https://www.exam-dash.com',
 ]);
 
 export function middleware(req: NextRequest) {

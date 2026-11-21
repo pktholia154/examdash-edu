@@ -1,0 +1,26 @@
+# Dependencies & build artifacts
+node_modules
+.next
+out
+dist
+dist-mobile
+coverage
+
+# Local environment & secret files (inject via Cloud Run / Secret Manager at runtime)
+.env
+.env.*
+!.env.example
+
+# VCS, IDE & tooling artifacts
+.git
+.gitignore
+.aistudio
+.playwright-cli
+.vscode
+.idea
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db

@@ -231,6 +231,17 @@ export function PurchasedLibraryView() {
     return out;
   }, [examPurchases, examSetsByPurchaseId]);
 
+  // Any purchased exam pack whose individual ExamSet[] payload wasn't expanded yet/is empty
+  // still renders as an unlocked pack card so NO purchased exam ever goes missing on /purchased.
+  const unresolvedExamPurchases = useMemo(
+    () =>
+      examPurchases.filter((record) => {
+        const resolved = examSetsByPurchaseId[record.purchaseId];
+        return !resolved || resolved.sets.length === 0;
+      }),
+    [examPurchases, examSetsByPurchaseId]
+  );
+
   // Sync local CBT attempt scores and resumable sessions for flattened sets
   useEffect(() => {
     const syncAttempts = () => {
@@ -510,6 +521,12 @@ export function PurchasedLibraryView() {
                             </span>
                           </div>
 
+                          {entry.packRecord.razorpayPaymentId && (
+                            <p className="mt-1.5 text-[11px] font-mono text-[var(--text-muted)] truncate">
+                              Receipt: {entry.packRecord.razorpayPaymentId}
+                            </p>
+                          )}
+
                           {lastAttempt && (
                             <p className="mt-2 text-xs font-semibold text-[var(--status-success)]">
                               Last Score: {lastAttempt.totalScore} /{' '}
@@ -553,6 +570,74 @@ export function PurchasedLibraryView() {
                                 <span>Attempt Set</span>
                               </>
                             )}
+                          </a>
+                        </div>
+                      </article>
+                    );
+                  })}
+
+                  {unresolvedExamPurchases.map((record) => {
+                    const attemptHref = `/attempt/${record.urlSlug}`;
+                    const detailHref = `/exams/${record.urlSlug}`;
+
+                    return (
+                      <article
+                        key={record.purchaseId}
+                        className={cn(
+                          'rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 tabular-nums',
+                          viewMode === 'list'
+                            ? 'flex flex-col sm:flex-row sm:items-center gap-4'
+                            : 'flex flex-col gap-3.5'
+                        )}
+                      >
+                        <a href={attemptHref} className="shrink-0 block">
+                          <MonogramThumbnail
+                            title={record.title}
+                            type={record.type}
+                            collectionName="ExamPackDocument"
+                            size={viewMode === 'list' ? 'sm' : 'md'}
+                          />
+                        </a>
+
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-base font-bold text-[var(--text-main)] line-clamp-2">
+                            <a href={attemptHref} className="hover:underline">
+                              {record.title}
+                            </a>
+                          </h3>
+                          <p className="mt-1 text-xs text-[var(--text-muted)]">
+                            {record.authorName} · {record.language}
+                            {record.totalMocktest
+                              ? ` · ${record.totalMocktest} Mock ${
+                                  record.totalMocktest === 1 ? 'Test' : 'Tests'
+                                }`
+                              : ''}
+                            {' · '}Paid{' '}
+                            {record.paidPrice === 0
+                              ? 'Free'
+                              : formatPrice(record.paidPrice, record.currency)}
+                          </p>
+                          {record.razorpayPaymentId && (
+                            <p className="mt-1 text-[11px] font-mono text-[var(--text-muted)] truncate">
+                              Receipt: {record.razorpayPaymentId}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="mt-auto pt-3 border-t sm:border-t-0 border-[var(--border-subtle)] flex flex-wrap items-center gap-2 shrink-0">
+                          <a
+                            href={attemptHref}
+                            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+                          >
+                            <Play className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Open Exam Pack</span>
+                          </a>
+                          <a
+                            href={detailHref}
+                            className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
+                          >
+                            <span>Syllabus</span>
+                            <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
                           </a>
                         </div>
                       </article>
@@ -610,8 +695,15 @@ export function PurchasedLibraryView() {
                         </h3>
                         <p className="mt-1 text-xs text-[var(--text-muted)]">
                           {record.authorName} · {record.language} · Paid{' '}
-                          {formatPrice(record.paidPrice, record.currency)}
+                          {record.paidPrice === 0
+                            ? 'Free'
+                            : formatPrice(record.paidPrice, record.currency)}
                         </p>
+                        {record.razorpayPaymentId && (
+                          <p className="mt-1 text-[11px] font-mono text-[var(--text-muted)] truncate">
+                            Receipt: {record.razorpayPaymentId}
+                          </p>
+                        )}
 
                         {grant && (
                           <div className="mt-2.5 p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-xs space-y-1">

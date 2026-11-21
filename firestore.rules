@@ -68,6 +68,35 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidPaymentProof(data) {
+      return (
+        (
+          data.paidPrice > 0
+          && 'paymentProvider' in data
+          && data.paymentProvider is string
+          && data.paymentProvider.size() <= 16
+          && data.paymentProvider == 'razorpay'
+          && 'razorpayOrderId' in data
+          && data.razorpayOrderId is string
+          && data.razorpayOrderId.size() >= 10
+          && data.razorpayOrderId.size() <= 64
+          && data.razorpayOrderId.matches('^order_[a-zA-Z0-9]+$')
+          && 'razorpayPaymentId' in data
+          && data.razorpayPaymentId is string
+          && data.razorpayPaymentId.size() >= 10
+          && data.razorpayPaymentId.size() <= 64
+          && data.razorpayPaymentId.matches('^pay_[a-zA-Z0-9]+$')
+        )
+        ||
+        (
+          data.paidPrice == 0
+          && (!('paymentProvider' in data) || (data.paymentProvider is string && data.paymentProvider.size() <= 16 && data.paymentProvider == 'free'))
+          && !('razorpayOrderId' in data)
+          && !('razorpayPaymentId' in data)
+        )
+      );
+    }
+
     function isValidUserPurchase(data, purchaseId) {
       return data.keys().hasAll([
           'purchaseId',
@@ -97,6 +126,9 @@ service cloud.firestore {
           'listPrice',
           'paidPrice',
           'totalMocktest',
+          'paymentProvider',
+          'razorpayOrderId',
+          'razorpayPaymentId',
           'status',
           'createdAt'
         ])
@@ -138,6 +170,7 @@ service cloud.firestore {
         && data.paidPrice >= 0
         && data.listPrice >= data.paidPrice
         && (!('totalMocktest' in data) || (data.totalMocktest is int && data.totalMocktest >= 0))
+        && isValidPaymentProof(data)
         && data.status is string
         && data.status.size() <= 16
         && data.status == 'completed'

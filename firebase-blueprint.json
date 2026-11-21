@@ -126,6 +126,9 @@
         "listPrice": { "type": "number" },
         "paidPrice": { "type": "number" },
         "totalMocktest": { "type": "number" },
+        "paymentProvider": { "type": "string", "enum": ["razorpay", "free"], "maxLength": 16 },
+        "razorpayOrderId": { "type": "string", "minLength": 10, "maxLength": 64, "pattern": "^order_[a-zA-Z0-9]+$" },
+        "razorpayPaymentId": { "type": "string", "minLength": 10, "maxLength": 64, "pattern": "^pay_[a-zA-Z0-9]+$" },
         "status": { "type": "string", "enum": ["completed"], "maxLength": 16 },
         "createdAt": { "type": "string", "format": "date-time" }
       },
