@@ -3,7 +3,11 @@
 import React from 'react';
 import { Check, ExternalLink, Plus, Sparkles } from 'lucide-react';
 import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
-import type { CatalogItemDTO, ViewMode } from '../../lib/types/catalog';
+import type {
+  CatalogCardDTO,
+  CatalogItemDTO,
+  ViewMode,
+} from '../../lib/types/catalog';
 import {
   computeDiscountPercent,
   formatPrice,
@@ -14,7 +18,7 @@ import { useCart } from '../cart/cart-provider';
 import { cn } from '../../lib/utils';
 
 export interface CatalogCardProps {
-  item: CatalogItemDTO;
+  item: CatalogCardDTO | CatalogItemDTO;
   viewMode: ViewMode;
 }
 

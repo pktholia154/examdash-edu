@@ -1,14 +1,121 @@
 /**
- * Runtime Capacitor Platform Guards & Offline Storage Persistence
+ * Runtime Capacitor Platform Guards, Native Preferences, SystemBars & Offline Storage Persistence
  * Zero static native imports so web & crawler bundles never pull native bridge code.
  */
 
-export function isCapacitorNative(): boolean {
-  if (typeof window === 'undefined') return false;
-  const win = window as unknown as {
-    Capacitor?: { isNativePlatform?: () => boolean };
+const AUTHED_PREF_KEY = 'ed-authed';
+
+interface CapacitorGlobalBridge {
+  isNativePlatform?: () => boolean;
+  getPlatform?: () => string;
+  Plugins?: {
+    Preferences?: {
+      get?: (opts: { key: string }) => Promise<{ value?: string | null }>;
+      set?: (opts: { key: string; value: string }) => Promise<void>;
+      remove?: (opts: { key: string }) => Promise<void>;
+    };
+    StatusBar?: {
+      setStyle?: (opts: { style: 'DARK' | 'LIGHT' | 'DEFAULT' }) => Promise<void>;
+      setBackgroundColor?: (opts: { color: string }) => Promise<void>;
+    };
+    SystemBars?: {
+      setStyle?: (opts: { style: 'DARK' | 'LIGHT' | 'DEFAULT' }) => Promise<void>;
+      setColor?: (opts: { color: string }) => Promise<void>;
+    };
   };
-  return Boolean(win.Capacitor?.isNativePlatform?.());
+}
+
+function getCapacitorGlobal(): CapacitorGlobalBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return (window as unknown as { Capacitor?: CapacitorGlobalBridge }).Capacitor;
+}
+
+export function isCapacitorNative(): boolean {
+  return Boolean(getCapacitorGlobal()?.isNativePlatform?.());
+}
+
+export function getCapacitorPlatform(): 'ios' | 'android' | 'web' {
+  if (!isCapacitorNative()) return 'web';
+  const raw = getCapacitorGlobal()?.getPlatform?.()?.toLowerCase() || '';
+  if (raw === 'ios') return 'ios';
+  return 'android';
+}
+
+/**
+ * Checks whether the user previously signed in (`ed-authed === "1"`).
+ * Uses `localStorage` on Web and `@capacitor/preferences` runtime plugin on Capacitor Native.
+ * Prevents loading Firebase Auth chunks/iframes for anonymous guests and Googlebot.
+ */
+export async function readPersistedAuthHint(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  if (isCapacitorNative()) {
+    const prefs = getCapacitorGlobal()?.Plugins?.Preferences;
+    if (prefs?.get) {
+      try {
+        const res = await prefs.get({ key: AUTHED_PREF_KEY });
+        if (res?.value === '1') return true;
+        if (res?.value === '0') return false;
+      } catch {
+        // Fall back to localStorage mirror
+      }
+    }
+  }
+
+  try {
+    return localStorage.getItem(AUTHED_PREF_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function writePersistedAuthHint(authed: boolean): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  if (isCapacitorNative()) {
+    const prefs = getCapacitorGlobal()?.Plugins?.Preferences;
+    try {
+      if (authed) {
+        await prefs?.set?.({ key: AUTHED_PREF_KEY, value: '1' });
+      } else {
+        await prefs?.remove?.({ key: AUTHED_PREF_KEY });
+      }
+    } catch {
+      // Ignore native plugin error
+    }
+  }
+
+  try {
+    if (authed) {
+      localStorage.setItem(AUTHED_PREF_KEY, '1');
+    } else {
+      localStorage.removeItem(AUTHED_PREF_KEY);
+    }
+  } catch {
+    // Ignore private mode storage errors
+  }
+}
+
+/**
+ * Mirrors `#0B1120` (dark) / `#F8FAFC` (light) theme colors to `@capacitor/status-bar`
+ * and `SystemBars` on Capacitor Native boot and theme switches.
+ */
+export async function syncNativeSystemBars(theme: 'light' | 'dark'): Promise<void> {
+  if (!isCapacitorNative()) return;
+  const plugins = getCapacitorGlobal()?.Plugins;
+  const hexColor = theme === 'dark' ? '#0B1120' : '#F8FAFC';
+  // In Capacitor StatusBar, 'DARK' renders light text/icons for dark backgrounds,
+  // and 'LIGHT' renders dark text/icons for light backgrounds.
+  const barStyle = theme === 'dark' ? 'DARK' : 'LIGHT';
+
+  try {
+    await plugins?.StatusBar?.setStyle?.({ style: barStyle });
+    await plugins?.StatusBar?.setBackgroundColor?.({ color: hexColor });
+    await plugins?.SystemBars?.setStyle?.({ style: barStyle });
+    await plugins?.SystemBars?.setColor?.({ color: hexColor });
+  } catch {
+    // Non-blocking on platforms where status bar color is OS-locked
+  }
 }
 
 export async function requestPersistentWebStorage(): Promise<boolean> {

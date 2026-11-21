@@ -568,6 +568,10 @@ export interface SignedAssetGrant {
   urlSlug: string;
   expiresAtIso: string;
   signature: string;
+  remoteUpdatedAtIso?: string;
+  hasFullPdf?: boolean;
+  hasFullMarkdown?: boolean;
+  hasFullJson?: boolean;
   assets: {
     pdfUrl?: string;
     markdownUrl?: string;
@@ -639,6 +643,7 @@ export async function issueShortLivedAssetGrant(
   );
 
   if (collectionName === 'books') {
+    const mappedBook = mapBookToPublicDTO(docSnap.docId, raw);
     const fullPdf =
       typeof raw.fullPdfStoragePath === 'string'
         ? raw.fullPdfStoragePath.trim()
@@ -668,6 +673,9 @@ export async function issueShortLivedAssetGrant(
         urlSlug: cleanSlug,
         expiresAtIso,
         signature,
+        remoteUpdatedAtIso: mappedBook.updatedAtIso,
+        hasFullPdf: Boolean(fullPdf),
+        hasFullMarkdown: Boolean(fullMd),
         assets: {
           ...(fullPdf || samplePdf
             ? {
@@ -684,6 +692,7 @@ export async function issueShortLivedAssetGrant(
     };
   }
 
+  const mappedExam = mapExamToPublicDTO(docSnap.docId, raw);
   const fullJson =
     typeof raw.fullJsonStoragePath === 'string'
       ? raw.fullJsonStoragePath.trim()
@@ -707,6 +716,8 @@ export async function issueShortLivedAssetGrant(
       urlSlug: cleanSlug,
       expiresAtIso,
       signature,
+      remoteUpdatedAtIso: mappedExam.updatedAtIso,
+      hasFullJson: Boolean(fullJson),
       assets: {
         ...(fullJson || sampleJson ? { jsonUrl: examStreamUrl } : {}),
       },

@@ -25,11 +25,13 @@ export function AttemptSlotView({
   exam,
   initialSetId,
   initialMode,
+  initialSource = 'online',
   autostart = false,
 }: {
   exam: PublicExamDTO;
   initialSetId?: string;
   initialMode: 'trial' | 'full';
+  initialSource?: 'online' | 'offline';
   autostart?: boolean;
 }) {
   return (
@@ -37,6 +39,7 @@ export function AttemptSlotView({
       exam={exam}
       initialSetId={initialSetId}
       initialMode={initialMode}
+      initialSource={initialSource}
       autostart={autostart}
     />
   );

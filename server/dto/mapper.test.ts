@@ -92,3 +92,52 @@ test('isDocumentLive enforces isPublished, !isDeleted, and publishAt <= now', ()
     false
   );
 });
+
+test('mapBookToPublicDTO strips misleading Free from title/tags and normalizes description when buyPrice > 0', () => {
+  const paidBookWithFreeClaim = mapBookToPublicDTO('B2', {
+    id: 'B2',
+    isPublished: true,
+    isDeleted: false,
+    title: 'IBPS PO Prelims Guide (Free) - Free Edition',
+    urlSlug: 'ibps-po-prelims-b2',
+    seoDescription: 'Download for free PDF question bank.',
+    tags: ['IBPS', 'Free', 'Free PDF', 'Error-Free', 'Banking'],
+    buyPrice: 149,
+    listPrice: 249,
+    samplePdfUrl: 'https://example.com/sample.pdf',
+  });
+
+  assert.equal(/\bfree\b/i.test(paidBookWithFreeClaim.title), false);
+  assert.deepEqual(paidBookWithFreeClaim.tags, ['IBPS', 'Error-Free', 'Banking']);
+  assert.match(paidBookWithFreeClaim.seoDescription, /Includes Free Sample/i);
+
+  const paidWithParenthetical = mapBookToPublicDTO('B1', {
+    id: 'B1',
+    isPublished: true,
+    isDeleted: false,
+    title: 'Indian History MCQs (Free Sample Book)',
+    urlSlug: 'indian-history-mcqs-b1',
+    fullDescription: '# Indian History MCQs (Free Sample Book): Question Bank\n\nBody text.',
+    buyPrice: 100,
+    listPrice: 120,
+    samplePdfUrl: 'https://example.com/sample.pdf',
+  });
+  assert.equal(paidWithParenthetical.title, 'Indian History MCQs');
+  assert.equal(paidWithParenthetical.fullDescription.includes('(Free Sample Book)'), false);
+
+  const genuinelyFreeBook = mapBookToPublicDTO('B3', {
+    id: 'B3',
+    isPublished: true,
+    isDeleted: false,
+    title: 'Free NCERT Polity Digest',
+    urlSlug: 'free-ncert-polity-b3',
+    seoDescription: '100% Free digital study digest.',
+    tags: ['Free', 'NCERT'],
+    buyPrice: 0,
+    listPrice: 0,
+  });
+
+  assert.equal(genuinelyFreeBook.title, 'Free NCERT Polity Digest');
+  assert.deepEqual(genuinelyFreeBook.tags, ['Free', 'NCERT']);
+});
+

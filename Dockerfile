@@ -39,8 +39,9 @@ ENV PORT=8080
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
-# Copy public assets and Next.js standalone output
+# Copy public assets, repo-committed fonts, and Next.js standalone output
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/assets ./assets
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 

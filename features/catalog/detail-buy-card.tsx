@@ -4,20 +4,17 @@ import React, { useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
   BookOpen,
-  Check,
-  ExternalLink,
   FileText,
   Play,
-  ShoppingBag,
   Sparkles,
   Zap,
 } from 'lucide-react';
-import type { CatalogItemDTO } from '../../lib/types/catalog';
 import {
   computeDiscountPercent,
   formatPrice,
   makeCompositeKey,
 } from '../../lib/registry/content-type-registry';
+import type { CollectionName } from '../../lib/types/catalog';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
 
@@ -27,210 +24,152 @@ const LazyBookInlineReaderModal = dynamic(
   { ssr: false }
 );
 
-export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
-  const { ownedCompositeKeys } = useAuth();
-  const { isInCart, addItem, openCart, buyNow, claimFreeItem, isCheckingOut } =
-    useCart();
+/**
+ * Primitive-only props contract (Module 4 RSC Payload Slimming):
+ * Prevents serializing 3+ KB of `fullDescription` Markdown into `self.__next_f`.
+ */
+export interface DetailBuyCardProps {
+  id: string;
+  collectionName: CollectionName;
+  title: string;
+  urlSlug: string;
+  currency: string;
+  buyPrice: number;
+  listPrice: number;
+  samplePdfUrl?: string;
+  sampleMarkdownUrl?: string;
+  sampleJsonUrl?: string;
+}
 
-  const [inlineReaderState, setInlineReaderState] = useState<{
+export function DetailBuyCard({
+  id,
+  collectionName,
+  title,
+  urlSlug,
+  currency,
+  buyPrice,
+  listPrice,
+  samplePdfUrl,
+  sampleMarkdownUrl,
+  sampleJsonUrl,
+}: DetailBuyCardProps) {
+  const { ownedCompositeKeys } = useAuth();
+  const { buyNow, isCheckingOut } = useCart();
+
+  const [inlineSampleState, setInlineSampleState] = useState<{
     open: boolean;
     format: 'pdf' | 'markdown';
-    mode: 'sample' | 'full';
   } | null>(null);
 
-  const openInlineReader = useCallback(
-    (format: 'pdf' | 'markdown', mode: 'sample' | 'full') => {
-      if (typeof window !== 'undefined') {
-        try {
-          const currentState =
-            window.history.state && typeof window.history.state === 'object'
-              ? (window.history.state as Record<string, unknown>)
-              : {};
-          if (!currentState.edInlineReader) {
-            window.history.pushState(
-              { ...currentState, edInlineReader: true },
-              ''
-            );
-          }
-        } catch {
-          // Ignore restricted iframe history APIs
+  const openSampleReader = useCallback((format: 'pdf' | 'markdown') => {
+    if (typeof window !== 'undefined') {
+      try {
+        const currentState =
+          window.history.state && typeof window.history.state === 'object'
+            ? (window.history.state as Record<string, unknown>)
+            : {};
+        if (!currentState.edInlineReader) {
+          window.history.pushState(
+            { ...currentState, edInlineReader: true },
+            ''
+          );
         }
+      } catch {
+        // Ignore restricted iframe history APIs
       }
-      setInlineReaderState({ open: true, format, mode });
-    },
-    []
-  );
-
-  const closeInlineReader = useCallback(() => {
-    setInlineReaderState(null);
+    }
+    setInlineSampleState({ open: true, format });
   }, []);
 
-  const compositeKey = makeCompositeKey(item.collectionName, item.id);
-  const isOwned = item.buyPrice === 0 || ownedCompositeKeys.has(compositeKey);
-  const inCart = isInCart(compositeKey);
-  const isFree = item.buyPrice === 0;
-  const discountPct = computeDiscountPercent(item.listPrice, item.buyPrice);
-  const savingsAmount = Math.max(0, item.listPrice - item.buyPrice);
+  const closeSampleReader = useCallback(() => {
+    setInlineSampleState(null);
+  }, []);
 
-  const firstExamSetId =
-    item.collectionName === 'ExamPackDocument'
-      ? item.MocktestTitles[0]?.id || 'exam_set_1'
-      : '';
+  const compositeKey = makeCompositeKey(collectionName, id);
+  const isOwned = ownedCompositeKeys.has(compositeKey);
+  const isFree = buyPrice === 0;
+  const discountPct = computeDiscountPercent(listPrice, buyPrice);
+  const savingsAmount = Math.max(0, listPrice - buyPrice);
 
-  const openHref =
-    item.collectionName === 'books'
-      ? `/read/${item.urlSlug}`
-      : `/attempt/${item.urlSlug}/${encodeURIComponent(firstExamSetId)}`;
-
-  const handleBuyNow = async () => {
-    await buyNow(item, { redirectToPurchased: true });
+  const handlePrimaryAction = async () => {
+    await buyNow(
+      {
+        id,
+        collectionName,
+        title,
+        urlSlug,
+        currency,
+        buyPrice,
+        listPrice,
+      },
+      { redirectToPurchased: true }
+    );
   };
 
-  const hasBookPdfSample =
-    item.collectionName === 'books' && Boolean(item.samplePdfUrl);
+  const hasBookPdfSample = collectionName === 'books' && Boolean(samplePdfUrl);
   const hasBookMarkdownSample =
-    item.collectionName === 'books' && Boolean(item.sampleMarkdownUrl);
-  const canReadFullPdf =
-    item.collectionName === 'books' &&
-    isOwned &&
-    (item.hasFullPdf || Boolean(item.samplePdfUrl));
-  const canReadFullMarkdown =
-    item.collectionName === 'books' &&
-    isOwned &&
-    (item.hasFullMarkdown || Boolean(item.sampleMarkdownUrl));
+    collectionName === 'books' && Boolean(sampleMarkdownUrl);
+  const hasExamSample =
+    collectionName === 'ExamPackDocument' && Boolean(sampleJsonUrl);
+
+  const primaryLabel = isCheckingOut
+    ? 'Processing...'
+    : isFree
+    ? 'Claim Free'
+    : 'Buy Now';
 
   return (
     <>
-      {/* Seamless Inline Purchase & Sample Action Bar */}
+      {/* Strict 2-Action Detail Bar (Zero Add to Cart, Zero .gated-asset-boundary) */}
       <div
         aria-label="Purchase and sample options"
-        className="py-5 border-b border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 gated-asset-boundary"
+        className="py-5 border-b border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
       >
-        {/* Price & Savings Summary */}
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 tabular-nums">
           <span className="text-2xl font-extrabold text-[var(--text-main)] leading-none">
-            {isFree ? 'Free' : formatPrice(item.buyPrice, item.currency)}
+            {isFree ? 'Free' : formatPrice(buyPrice, currency)}
           </span>
           {discountPct > 0 && (
             <span className="text-sm text-[var(--text-muted)] line-through">
-              {formatPrice(item.listPrice, item.currency)}
+              {formatPrice(listPrice, currency)}
             </span>
           )}
           {discountPct > 0 && (
             <span className="text-xs font-semibold text-[var(--status-success)]">
-              {discountPct}% OFF · Save {formatPrice(savingsAmount, item.currency)}
+              {discountPct}% OFF · Save {formatPrice(savingsAmount, currency)}
             </span>
           )}
         </div>
 
-        {/* Seamless Inline Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
           {isOwned ? (
-            <>
-              {item.collectionName === 'books' ? (
-                <>
-                  {canReadFullPdf && (
-                    <button
-                      type="button"
-                      onClick={() => openInlineReader('pdf', 'full')}
-                      className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
-                    >
-                      <FileText className="w-4 h-4 shrink-0" aria-hidden="true" />
-                      <span>Read Full PDF</span>
-                    </button>
-                  )}
-
-                  {canReadFullMarkdown && (
-                    <button
-                      type="button"
-                      onClick={() => openInlineReader('markdown', 'full')}
-                      className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
-                    >
-                      <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
-                      <span>Read Full Markdown</span>
-                    </button>
-                  )}
-
-                  <a
-                    href={`${openHref}?mode=full&format=pdf`}
-                    className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-subtle)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]/60 transition-colors whitespace-nowrap"
-                  >
-                    <span>Open in Reader</span>
-                    <ExternalLink className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  </a>
-                </>
-              ) : (
-                <>
-                  <a
-                    href={openHref}
-                    className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
-                  >
-                    <Play className="w-4 h-4 shrink-0" aria-hidden="true" />
-                    <span>Start 1st Mock</span>
-                  </a>
-                  <a
-                    href="/purchased"
-                    className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
-                  >
-                    <span>All {item.totalMocktest} Sets in Library</span>
-                    <ExternalLink className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  </a>
-                </>
-              )}
-            </>
-          ) : isFree ? (
+            <a
+              href="/purchased"
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+            >
+              <span>Open in Purchased Library →</span>
+            </a>
+          ) : (
             <button
               type="button"
               disabled={isCheckingOut}
-              onClick={() => void claimFreeItem(item)}
-              className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
+              onClick={() => void handlePrimaryAction()}
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-6 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
             >
-              <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Claim Free</span>
-            </button>
-          ) : (
-            <>
-              {inCart ? (
-                <button
-                  type="button"
-                  onClick={openCart}
-                  className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-main)] text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
-                >
-                  <Check
-                    className="w-4 h-4 text-[var(--status-success)] shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>In Cart</span>
-                </button>
+              {isFree ? (
+                <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />
               ) : (
-                <button
-                  type="button"
-                  onClick={() => addItem(item)}
-                  className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
-                >
-                  <ShoppingBag className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span>Add to Cart</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                disabled={isCheckingOut}
-                onClick={() => void handleBuyNow()}
-                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-[var(--text-main)] text-sm font-semibold hover:bg-[var(--bg-elevated)] disabled:opacity-50 transition-colors whitespace-nowrap"
-              >
                 <Zap className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>{isCheckingOut ? 'Processing...' : 'Buy Now'}</span>
-              </button>
-            </>
+              )}
+              <span>{primaryLabel}</span>
+            </button>
           )}
 
-          {/* Inline Book Sample Buttons (opens in-page PDF/Markdown Viewer WITHOUT leaving /books/[urlSlug]) */}
           {hasBookPdfSample && (
             <button
               type="button"
-              onClick={() => openInlineReader('pdf', 'sample')}
-              className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-subtle)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]/60 transition-colors whitespace-nowrap"
+              onClick={() => openSampleReader('pdf')}
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
             >
               <FileText className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>PDF Sample</span>
@@ -240,37 +179,34 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
           {hasBookMarkdownSample && (
             <button
               type="button"
-              onClick={() => openInlineReader('markdown', 'sample')}
-              className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-subtle)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]/60 transition-colors whitespace-nowrap"
+              onClick={() => openSampleReader('markdown')}
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
             >
               <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>Markdown Sample</span>
             </button>
           )}
 
-          {/* Exam Sample Trial Button (1st Mock Test Free Sample) */}
-          {item.collectionName === 'ExamPackDocument' &&
-            !isOwned &&
-            item.sampleJsonStoragePath && (
-              <a
-                href={`/attempt/${item.urlSlug}/${encodeURIComponent(firstExamSetId)}?mode=trial`}
-                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-subtle)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]/60 transition-colors whitespace-nowrap"
-              >
-                <Play className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>Try 1st Sample Mock</span>
-              </a>
-            )}
+          {hasExamSample && sampleJsonUrl && (
+            <a
+              href={sampleJsonUrl}
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
+            >
+              <Play className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span>Try Sample Mock</span>
+            </a>
+          )}
         </div>
       </div>
 
-      {/* Mobile Sticky Bottom Purchase & Sample Bar (56px, replaces bottom nav on detail routes) */}
+      {/* Mobile Sticky Bottom Bar (data-nosnippet, Strict 2-Action Contract, <= 60px height) */}
       <div
         data-nosnippet=""
-        className="md:hidden fixed bottom-0 inset-x-0 z-30 h-14 border-t border-[var(--border-strong)] bg-[var(--bg-canvas)]/95 backdrop-blur-md px-4 pb-[var(--safe-area-inset-bottom)] flex items-center justify-between gap-2.5"
+        className="md:hidden fixed bottom-0 inset-x-0 z-30 h-15 border-t border-[var(--border-strong)] bg-[var(--bg-canvas)]/95 backdrop-blur-md px-4 pb-[var(--safe-area-inset-bottom)] flex items-center justify-between gap-2.5"
       >
         <div className="min-w-0 tabular-nums">
           <p className="text-base font-extrabold text-[var(--text-main)] leading-tight">
-            {isFree ? 'Free' : formatPrice(item.buyPrice, item.currency)}
+            {isFree ? 'Free' : formatPrice(buyPrice, currency)}
           </p>
           {discountPct > 0 && (
             <p className="text-[11px] font-semibold text-[var(--status-success)] leading-tight">
@@ -280,78 +216,75 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {!isOwned && hasBookPdfSample && (
+          {hasBookPdfSample ? (
             <button
               type="button"
-              onClick={() => openInlineReader('pdf', 'sample')}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
+              onClick={() => openSampleReader('pdf')}
+              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
             >
               <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Sample</span>
+              <span>PDF Sample</span>
             </button>
-          )}
-
-          {!isOwned &&
-            item.collectionName === 'ExamPackDocument' &&
-            item.sampleJsonStoragePath && (
-              <a
-                href={`/attempt/${item.urlSlug}/${encodeURIComponent(firstExamSetId)}?mode=trial`}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
-              >
-                <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Sample</span>
-              </a>
-            )}
-
-          {isOwned ? (
-            item.collectionName === 'books' ? (
-              <button
-                type="button"
-                onClick={() =>
-                  openInlineReader(canReadFullPdf ? 'pdf' : 'markdown', 'full')
-                }
-                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap"
-              >
-                <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Read PDF</span>
-              </button>
-            ) : (
-              <a
-                href={openHref}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-5 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap"
-              >
-                <span>Open</span>
-                <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-              </a>
-            )
-          ) : inCart ? (
+          ) : hasBookMarkdownSample ? (
             <button
               type="button"
-              onClick={openCart}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
+              onClick={() => openSampleReader('markdown')}
+              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
             >
-              <Check className="w-3.5 h-3.5 text-[var(--status-success)]" aria-hidden="true" />
-              <span>In Cart</span>
+              <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Markdown Sample</span>
             </button>
+          ) : null}
+
+          {hasExamSample && sampleJsonUrl && (
+            <a
+              href={sampleJsonUrl}
+              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
+            >
+              <Play className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Try Sample Mock</span>
+            </a>
+          )}
+
+          {isOwned ? (
+            <a
+              href="/purchased"
+              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap"
+            >
+              <span>Open in Purchased Library →</span>
+            </a>
           ) : (
             <button
               type="button"
-              onClick={() => (isFree ? void claimFreeItem(item) : addItem(item))}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold whitespace-nowrap"
+              disabled={isCheckingOut}
+              onClick={() => void handlePrimaryAction()}
+              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
             >
-              <span>{isFree ? 'Claim Free' : 'Add to Cart'}</span>
+              {isFree ? (
+                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+              ) : (
+                <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+              )}
+              <span>{primaryLabel}</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Lazy-Loaded In-Page Reader Modal (zero JS overhead until user clicks Sample / Read) */}
-      {item.collectionName === 'books' && inlineReaderState?.open && (
+      {collectionName === 'books' && inlineSampleState?.open && (
         <LazyBookInlineReaderModal
-          book={item}
-          initialFormat={inlineReaderState.format}
-          initialMode={inlineReaderState.mode}
-          onClose={closeInlineReader}
+          book={{
+            id,
+            title,
+            urlSlug,
+            currency,
+            buyPrice,
+            listPrice,
+            samplePdfUrl,
+            sampleMarkdownUrl,
+          }}
+          initialFormat={inlineSampleState.format}
+          onClose={closeSampleReader}
         />
       )}
     </>

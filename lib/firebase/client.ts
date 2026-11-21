@@ -1,25 +1,37 @@
-import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+let cachedApp: FirebaseApp | null = null;
+let cachedAuth: Auth | null = null;
+let cachedGoogleProvider: GoogleAuthProvider | null = null;
 
 /**
- * Provisioned Firestore database for authenticated user state (profile, cart, purchases)
- * governed by deployed Eight-Pillars firestore.rules.
+ * Lazily initializes Firebase App & Auth ONLY when explicitly called
+ * (either when `ed-authed === "1"` or when the user clicks Sign In).
+ * Never imports `firebase/firestore` so zero Listen/channel XHRs ever execute in the browser.
  */
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export function getFirebaseApp(): FirebaseApp {
+  if (!cachedApp) {
+    cachedApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  }
+  return cachedApp;
+}
 
-/**
- * Existing project (default) Firestore database in asia-south1 containing live
- * `books` and `ExamPackDocument` catalog collections.
- */
-export const catalogDb = getFirestore(app, '(default)');
+export function getFirebaseAuth(): Auth {
+  if (!cachedAuth) {
+    cachedAuth = getAuth(getFirebaseApp());
+  }
+  return cachedAuth;
+}
 
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
+export function getGoogleProvider(): GoogleAuthProvider {
+  if (!cachedGoogleProvider) {
+    cachedGoogleProvider = new GoogleAuthProvider();
+    cachedGoogleProvider.setCustomParameters({ prompt: 'select_account' });
+  }
+  return cachedGoogleProvider;
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -52,16 +64,17 @@ export function handleFirestoreError(
   operationType: OperationType,
   path: string | null
 ): never {
+  const currentUser = cachedAuth?.currentUser ?? null;
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid ?? null,
-      email: auth.currentUser?.email ?? null,
-      emailVerified: auth.currentUser?.emailVerified ?? null,
-      isAnonymous: auth.currentUser?.isAnonymous ?? null,
-      tenantId: auth.currentUser?.tenantId ?? null,
+      userId: currentUser?.uid ?? null,
+      email: currentUser?.email ?? null,
+      emailVerified: currentUser?.emailVerified ?? null,
+      isAnonymous: currentUser?.isAnonymous ?? null,
+      tenantId: currentUser?.tenantId ?? null,
       providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
+        currentUser?.providerData?.map((provider) => ({
           providerId: provider.providerId,
           email: provider.email,
         })) ?? [],
@@ -71,18 +84,4 @@ export function handleFirestoreError(
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
-}
-
-let connectionTested = false;
-
-export async function testConnection(): Promise<void> {
-  if (connectionTested || typeof window === 'undefined') return;
-  connectionTested = true;
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
-  }
 }

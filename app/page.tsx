@@ -3,10 +3,12 @@ import {
   getLiveBooks,
   getLiveExams,
 } from '../server/repositories/catalog-repository';
+import { toCatalogCardDTO } from '../lib/types/catalog';
 import { SearchHero } from '../features/catalog/search-hero';
 import { KpiStrip } from '../features/catalog/kpi-strip';
 import { CatalogSection } from '../features/catalog/catalog-section';
 import { ErrorState } from '../components/ui/state-blocks';
+import { HomeComplianceSection } from '../components/legal/home-compliance-section';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +32,9 @@ export default async function HomePage() {
     exams.reduce((acc, e) => acc + Math.max(0, e.listPrice - e.buyPrice), 0);
   const primaryCurrency =
     books[0]?.currency || exams[0]?.currency || 'INR';
+
+  const slimBooks = books.map(toCatalogCardDTO);
+  const slimExams = exams.map(toCatalogCardDTO);
 
   return (
     <>
@@ -57,7 +62,7 @@ export default async function HomePage() {
             heading="Books & Question Banks"
             subheading="Structured ebooks, chapter wise question banks, and free sample extracts."
             storageKey="home-books"
-            items={books}
+            items={slimBooks}
             viewAllHref="/books"
             viewAllLabel="All Books"
           />
@@ -71,12 +76,14 @@ export default async function HomePage() {
             heading="Exam Packs & Mock Test Series"
             subheading="Full-length timed test series with complete paper-wise syllabus breakdowns."
             storageKey="home-exams"
-            items={exams}
+            items={slimExams}
             viewAllHref="/exams"
             viewAllLabel="All Exam Packs"
           />
         </>
       )}
+
+      <HomeComplianceSection />
     </>
   );
 }

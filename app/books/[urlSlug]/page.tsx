@@ -1,20 +1,22 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import React from 'react';
-import Markdown from 'react-markdown';
+import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
+import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
+import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
+import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
+import { formatPrice } from '../../../lib/registry/content-type-registry';
+import {
+  buildBookDetailJsonLd,
+  buildThumbUrls,
+  getCanonicalOrigin,
+  serializeSafeJsonLd,
+} from '../../../lib/seo/schema';
 import {
   getBookBySlug,
   getLiveBooks,
   getLiveExams,
 } from '../../../server/repositories/catalog-repository';
-import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
-import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
-import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
-import {
-  buildBookDetailJsonLd,
-  serializeSafeJsonLd,
-} from '../../../lib/seo/schema';
-import { formatPrice } from '../../../lib/registry/content-type-registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +33,14 @@ export async function generateMetadata({
   }
 
   const book = lookup.data;
+  const origin = getCanonicalOrigin();
+  const canonicalUrl = `${origin}/books/${book.urlSlug}`;
+  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
+    'books',
+    book.urlSlug,
+    book.updatedAtIso
+  );
+
   const description =
     book.seoDescription ||
     book.fullDescription.slice(0, 155) ||
@@ -40,18 +50,35 @@ export async function generateMetadata({
     title: book.title,
     description,
     alternates: {
-      canonical: `/books/${book.urlSlug}`,
+      canonical: canonicalUrl,
     },
     openGraph: {
       title: `${book.title} | ExamDash`,
       description,
       type: 'book',
-      url: `/books/${book.urlSlug}`,
+      url: canonicalUrl,
+      images: [
+        {
+          url: ogPngUrl,
+          width: 1200,
+          height: 675,
+          alt: book.title,
+          type: 'image/png',
+        },
+        {
+          url: sqPngUrl,
+          width: 1200,
+          height: 1200,
+          alt: book.title,
+          type: 'image/png',
+        },
+      ],
     },
     twitter: {
       card: 'summary_large_image',
       title: `${book.title} | ExamDash`,
       description,
+      images: [ogPngUrl],
     },
   };
 }
@@ -94,7 +121,7 @@ export default async function BookDetailPage({
   const relatedExams = allExams.slice(0, 2);
 
   return (
-    <div className="ed-container py-8 sm:py-10">
+    <div className="ed-container pt-8 sm:pt-10 pb-24 lg:pb-10">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: jsonLd }}
@@ -109,7 +136,7 @@ export default async function BookDetailPage({
       />
 
       <article className="w-full">
-        {/* Header Block */}
+        {/* Header Block (UI stays 100% zero-KB CSS/SVG MonogramThumbnail) */}
         <div className="flex flex-col sm:flex-row items-start gap-5 pb-6 border-b border-[var(--border-subtle)]">
           <MonogramThumbnail
             title={book.title}
@@ -127,7 +154,6 @@ export default async function BookDetailPage({
               {book.title}
             </h1>
 
-            {/* Answer-First Summary Beneath Heading */}
             {book.seoDescription && (
               <p className="mt-2.5 text-base text-[var(--text-muted)] leading-relaxed">
                 {book.seoDescription}
@@ -155,10 +181,20 @@ export default async function BookDetailPage({
           </div>
         </div>
 
-        {/* Seamless Purchase & Sample Action Bar */}
-        <DetailBuyCard item={book} />
+        {/* Primitive-Only Client Island (Zero fullDescription duplication in self.__next_f) */}
+        <DetailBuyCard
+          id={book.id}
+          collectionName="books"
+          title={book.title}
+          urlSlug={book.urlSlug}
+          currency={book.currency}
+          buyPrice={book.buyPrice}
+          listPrice={book.listPrice}
+          samplePdfUrl={book.samplePdfUrl || undefined}
+          sampleMarkdownUrl={book.sampleMarkdownUrl || undefined}
+        />
 
-        {/* Full Description */}
+        {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
         <section aria-labelledby="book-description-heading" className="mt-8">
           <h2
             id="book-description-heading"
@@ -167,13 +203,14 @@ export default async function BookDetailPage({
             About This Book & Coverage
           </h2>
           <div className="text-sm sm:text-base leading-relaxed text-[var(--text-main)]">
-            <div className="markdown-body space-y-3">
-              <Markdown>
-                {book.fullDescription ||
-                  book.seoDescription ||
-                  'Comprehensive digital study material curated for exam preparation.'}
-              </Markdown>
-            </div>
+            <DescriptionMarkdown
+              markdown={
+                book.fullDescription ||
+                book.seoDescription ||
+                'Comprehensive digital study material curated for exam preparation.'
+              }
+              heroTitle={book.title}
+            />
           </div>
         </section>
 

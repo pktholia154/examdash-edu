@@ -28,6 +28,13 @@ import {
   X,
 } from 'lucide-react';
 import type { PublicBookDTO } from '../../../lib/types/catalog';
+import {
+  deleteBookFormatOffline,
+  hasBookFormatOffline,
+  OFFLINE_VAULT_UPDATED_EVENT,
+  readBookFormatOffline,
+  saveBookFormatOffline,
+} from '../../../lib/offline/offline-vault';
 import { cn } from '../../../lib/utils';
 import { useToast } from '../../toast/toast-context';
 import {
@@ -62,6 +69,8 @@ export interface MarkdownViewerProps {
   streamUrl: string;
   initialMarkdownText?: string;
   isSample: boolean;
+  userId?: string;
+  preferOffline?: boolean;
   bearerTokenProvider?: () => Promise<string | null>;
   onRefreshSignedUrl?: () => Promise<string | null>;
   onSwitchToFullMode?: () => void;
@@ -130,6 +139,8 @@ export function MarkdownViewer({
   streamUrl,
   initialMarkdownText,
   isSample,
+  userId,
+  preferOffline = false,
   bearerTokenProvider,
   onRefreshSignedUrl,
   onSwitchToFullMode,
@@ -235,13 +246,20 @@ export function MarkdownViewer({
 
   useEffect(() => {
     let active = true;
-    void hasOfflineAsset(vaultKey).then((exists) => {
+    const syncVaultState = async () => {
+      const exists =
+        !isSample && userId
+          ? await hasBookFormatOffline(userId, book.id, 'markdown')
+          : await hasOfflineAsset(vaultKey);
       if (active) setIsSavedOffline(exists);
-    });
+    };
+    void syncVaultState();
+    window.addEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
     return () => {
       active = false;
+      window.removeEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
     };
-  }, [vaultKey]);
+  }, [book.id, isSample, userId, vaultKey]);
 
   useEffect(() => {
     const onFsChange = () => {
@@ -456,6 +474,57 @@ export function MarkdownViewer({
   useEffect(() => {
     let cancelled = false;
 
+    const readFromLocalVault = async (): Promise<ArrayBuffer | null> => {
+      if (!isSample && userId) {
+        const uidBuf = await readBookFormatOffline(userId, book.id, 'markdown');
+        if (uidBuf) return uidBuf;
+      }
+      return readOfflineAsset(vaultKey);
+    };
+
+    const fetchOnlineMarkdownBuffer = async (): Promise<ArrayBuffer> => {
+      let resolvedUrl = streamUrl;
+      if (!resolvedUrl && !isSample && onRefreshSignedUrlRef.current) {
+        resolvedUrl = (await onRefreshSignedUrlRef.current()) || '';
+      }
+      if (!resolvedUrl) {
+        throw new Error('No Markdown stream URL configured for this book.');
+      }
+
+      const fetchWithToken = async (url: string): Promise<Response> => {
+        const headers: Record<string, string> = {};
+        const tokenProvider = bearerTokenProviderRef.current;
+        if (tokenProvider) {
+          const token = await tokenProvider();
+          if (token) headers.Authorization = `Bearer ${token}`;
+        }
+        return fetch(url, { method: 'GET', headers });
+      };
+
+      let res = await fetchWithToken(resolvedUrl);
+      if (
+        (res.status === 401 || res.status === 403) &&
+        !isSample &&
+        onRefreshSignedUrlRef.current
+      ) {
+        const refreshed = await onRefreshSignedUrlRef.current();
+        if (refreshed) {
+          res = await fetchWithToken(refreshed);
+        }
+      }
+
+      if (!res.ok) {
+        const errObj = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(
+          errObj.error || `Failed to load Markdown stream (HTTP ${res.status}).`
+        );
+      }
+
+      return res.arrayBuffer();
+    };
+
     const runLoad = async () => {
       await Promise.resolve();
       if (cancelled) return;
@@ -465,61 +534,60 @@ export function MarkdownViewer({
       try {
         let markdownText = '';
 
-        // 1. Check Offline Vault first
-        const offlineBuf = await readOfflineAsset(vaultKey);
-        if (offlineBuf) {
-          rawMarkdownBytesRef.current = offlineBuf;
-          markdownText = new TextDecoder('utf-8').decode(offlineBuf);
-        } else if (
-          isSample &&
-          initialMarkdownText &&
-          initialMarkdownText.trim().length > 0
-        ) {
-          markdownText = initialMarkdownText;
-          rawMarkdownBytesRef.current = new TextEncoder().encode(
-            markdownText
-          ).buffer;
-        } else if (streamUrl) {
-          const fetchWithToken = async (url: string): Promise<Response> => {
-            const headers: Record<string, string> = {};
-            const tokenProvider = bearerTokenProviderRef.current;
-            if (tokenProvider) {
-              const token = await tokenProvider();
-              if (token) headers.Authorization = `Bearer ${token}`;
-            }
-            return fetch(url, { method: 'GET', headers });
-          };
-
-          let res = await fetchWithToken(streamUrl);
-          if (
-            (res.status === 401 || res.status === 403) &&
-            !isSample &&
-            onRefreshSignedUrlRef.current
-          ) {
-            const refreshed = await onRefreshSignedUrlRef.current();
-            if (refreshed) {
-              res = await fetchWithToken(refreshed);
-            }
+        if (isSample) {
+          const offlineBuf = await readFromLocalVault();
+          if (offlineBuf) {
+            rawMarkdownBytesRef.current = offlineBuf;
+            markdownText = new TextDecoder('utf-8').decode(offlineBuf);
+          } else if (initialMarkdownText && initialMarkdownText.trim().length > 0) {
+            markdownText = initialMarkdownText;
+            rawMarkdownBytesRef.current = new TextEncoder().encode(
+              markdownText
+            ).buffer;
+          } else if (streamUrl) {
+            const buf = await fetchOnlineMarkdownBuffer();
+            rawMarkdownBytesRef.current = buf;
+            markdownText = new TextDecoder('utf-8').decode(buf);
+          } else {
+            markdownText = `# ${book.title}\n\n${
+              book.fullDescription ||
+              book.seoDescription ||
+              'No Markdown content attached.'
+            }`;
           }
-
-          if (!res.ok) {
-            const errObj = (await res.json().catch(() => ({}))) as {
-              error?: string;
-            };
-            throw new Error(
-              errObj.error || `Failed to load Markdown stream (HTTP ${res.status}).`
-            );
-          }
-
-          const buf = await res.arrayBuffer();
-          rawMarkdownBytesRef.current = buf;
-          markdownText = new TextDecoder('utf-8').decode(buf);
         } else {
-          markdownText = `# ${book.title}\n\n${
-            book.fullDescription ||
-            book.seoDescription ||
-            'No Markdown content attached.'
-          }`;
+          const offlineFirst =
+            preferOffline ||
+            (typeof navigator !== 'undefined' && !navigator.onLine);
+
+          if (offlineFirst) {
+            let buf = await readFromLocalVault();
+            if (!buf && (typeof navigator === 'undefined' || navigator.onLine)) {
+              buf = await fetchOnlineMarkdownBuffer();
+            }
+            if (!buf) {
+              throw new Error(
+                'This Markdown edition is not saved offline on this device yet. Reconnect to read online or save offline.'
+              );
+            }
+            rawMarkdownBytesRef.current = buf;
+            markdownText = new TextDecoder('utf-8').decode(buf);
+          } else {
+            try {
+              const buf = await fetchOnlineMarkdownBuffer();
+              rawMarkdownBytesRef.current = buf;
+              markdownText = new TextDecoder('utf-8').decode(buf);
+            } catch (onlineErr) {
+              if (cancelled) return;
+              const vaultFallback = await readFromLocalVault();
+              if (vaultFallback) {
+                rawMarkdownBytesRef.current = vaultFallback;
+                markdownText = new TextDecoder('utf-8').decode(vaultFallback);
+              } else {
+                throw onlineErr;
+              }
+            }
+          }
         }
 
         if (cancelled) return;
@@ -598,12 +666,15 @@ export function MarkdownViewer({
     };
   }, [
     book.fullDescription,
+    book.id,
     book.seoDescription,
     book.title,
     initialMarkdownText,
     isSample,
+    preferOffline,
     reloadNonce,
     streamUrl,
+    userId,
     vaultKey,
   ]);
 
@@ -818,7 +889,11 @@ export function MarkdownViewer({
 
   const handleToggleOfflineVault = async () => {
     if (isSavedOffline) {
-      await removeOfflineAsset(vaultKey);
+      if (!isSample && userId) {
+        await deleteBookFormatOffline(userId, book.id, 'markdown');
+      } else {
+        await removeOfflineAsset(vaultKey);
+      }
       setIsSavedOffline(false);
       showToast('Removed offline Markdown copy from device vault.');
       return;
@@ -827,13 +902,37 @@ export function MarkdownViewer({
     if (!buf) return;
     setIsSavingOffline(true);
     try {
-      const ok = await saveOfflineAsset(vaultKey, buf);
-      if (ok) {
+      if (!isSample && userId) {
+        const ctrl = new AbortController();
+        await saveBookFormatOffline({
+          uid: userId,
+          itemId: book.id,
+          urlSlug: book.urlSlug,
+          format: 'markdown',
+          remoteUpdatedAtMs:
+            new Date(book.updatedAtIso).getTime() || Date.now(),
+          getIdToken: bearerTokenProviderRef.current || (async () => null),
+          signal: ctrl.signal,
+          prebuiltBuffer: buf.slice(0),
+        });
         setIsSavedOffline(true);
         showToast('Saved Markdown book to offline study vault!', 'success');
       } else {
-        showToast('Unable to save offline copy on this browser.', 'danger');
+        const ok = await saveOfflineAsset(vaultKey, buf);
+        if (ok) {
+          setIsSavedOffline(true);
+          showToast('Saved Markdown book to offline study vault!', 'success');
+        } else {
+          showToast('Unable to save offline copy on this browser.', 'danger');
+        }
       }
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : 'Unable to save offline copy on this device.',
+        'danger'
+      );
     } finally {
       setIsSavingOffline(false);
     }

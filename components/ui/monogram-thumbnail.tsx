@@ -10,7 +10,7 @@ export interface MonogramThumbnailProps {
   title: string;
   type: string;
   collectionName: CollectionName;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   showBadge?: boolean;
   className?: string;
 }
@@ -27,7 +27,11 @@ const BADGE_CLASSES: Record<ContentVisualKind, string> = {
   quizbook: 'bg-white/18 text-white',
 };
 
-const SIZE_CLASSES: Record<'sm' | 'md' | 'lg', { box: string; monogram: string }> = {
+const SIZE_CLASSES: Record<'xs' | 'sm' | 'md' | 'lg', { box: string; monogram: string }> = {
+  xs: {
+    box: 'w-12 h-12 shrink-0',
+    monogram: 'text-sm font-extrabold tracking-tight',
+  },
   sm: {
     box: 'w-16 h-16 shrink-0',
     monogram: 'text-lg font-extrabold tracking-tight',
@@ -71,7 +75,7 @@ export function MonogramThumbnail({
     >
       <span className={cn('leading-none', sizing.monogram)}>{monogram}</span>
 
-      {showBadge && size !== 'sm' && (
+      {showBadge && size !== 'sm' && size !== 'xs' && (
         <span
           className={cn(
             'absolute top-2.5 right-2.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase leading-tight',

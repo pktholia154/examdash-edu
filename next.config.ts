@@ -20,6 +20,9 @@ const nextConfig: NextConfig = {
     ],
   },
   output: 'standalone',
+  outputFileTracingIncludes: {
+    '/thumbs/[variant]/[collection]/[slug]': ['./assets/fonts/**/*'],
+  },
   devIndicators: false,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,

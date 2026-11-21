@@ -19,7 +19,11 @@ export default async function AttemptSpecificSetPage({
   searchParams,
 }: {
   params: Promise<{ slug: string; setId: string }>;
-  searchParams: Promise<{ mode?: string; autostart?: string }>;
+  searchParams: Promise<{
+    mode?: string;
+    autostart?: string;
+    source?: string;
+  }>;
 }) {
   const { slug, setId } = await params;
   const sp = await searchParams;
@@ -34,6 +38,7 @@ export default async function AttemptSpecificSetPage({
       exam={lookup.data}
       initialSetId={decodeURIComponent(setId)}
       initialMode={sp.mode === 'trial' ? 'trial' : 'full'}
+      initialSource={sp.source === 'offline' ? 'offline' : 'online'}
       autostart={sp.autostart === '1'}
     />
   );

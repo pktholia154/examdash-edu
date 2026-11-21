@@ -4,6 +4,8 @@ import { getLiveBooks } from '../../server/repositories/catalog-repository';
 import { Breadcrumbs } from '../../components/ui/breadcrumbs';
 import { CatalogSection } from '../../features/catalog/catalog-section';
 import { ErrorState } from '../../components/ui/state-blocks';
+import { getCanonicalOrigin } from '../../lib/seo/schema';
+import { toCatalogCardDTO } from '../../lib/types/catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +18,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const sp = await searchParams;
   const pageNum = Math.max(1, Number(sp.page) || 1);
-  const canonicalPath = pageNum > 1 ? `/books?page=${pageNum}` : '/books';
+  const origin = getCanonicalOrigin();
+  const canonicalPath =
+    pageNum > 1 ? `${origin}/books?page=${pageNum}` : `${origin}/books`;
 
   return {
     title:
@@ -56,7 +60,9 @@ export default async function BooksCatalogPage({
   const totalPages = Math.max(1, Math.ceil(books.length / PAGE_SIZE));
   const clampedPage = Math.min(pageNum, totalPages);
   const startIdx = (clampedPage - 1) * PAGE_SIZE;
-  const pagedBooks = books.slice(startIdx, startIdx + PAGE_SIZE);
+  const pagedBooks = books
+    .slice(startIdx, startIdx + PAGE_SIZE)
+    .map(toCatalogCardDTO);
 
   return (
     <div className="pt-8">
@@ -99,8 +105,8 @@ export default async function BooksCatalogPage({
                     aria-current={active ? 'page' : undefined}
                     className={
                       active
-                        ? 'min-h-[44px] min-w-[44px] px-3 inline-flex items-center justify-center rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold tabular-nums'
-                        : 'min-h-[44px] min-w-[44px] px-3 inline-flex items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-sm font-medium text-[var(--text-main)] hover:bg-[var(--bg-elevated)] tabular-nums'
+                        ? 'min-h-[48px] min-w-[48px] px-3 inline-flex items-center justify-center rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold tabular-nums'
+                        : 'min-h-[48px] min-w-[48px] px-3 inline-flex items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-sm font-medium text-[var(--text-main)] hover:bg-[var(--bg-elevated)] tabular-nums'
                     }
                   >
                     {p}

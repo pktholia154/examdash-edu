@@ -19,7 +19,7 @@ export function ViewToggle({
     <div
       role="group"
       aria-label={`${labelPrefix} view mode`}
-      className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 shrink-0"
+      className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5 shrink-0"
     >
       <button
         type="button"
@@ -27,7 +27,7 @@ export function ViewToggle({
         aria-pressed={value === 'grid'}
         onClick={() => onChange('grid')}
         className={cn(
-          'inline-flex items-center gap-1.5 min-h-[40px] min-w-[44px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
+          'inline-flex items-center justify-center gap-1.5 min-h-[48px] min-w-[48px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
           value === 'grid'
             ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
             : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -43,7 +43,7 @@ export function ViewToggle({
         aria-pressed={value === 'list'}
         onClick={() => onChange('list')}
         className={cn(
-          'inline-flex items-center gap-1.5 min-h-[40px] min-w-[44px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
+          'inline-flex items-center justify-center gap-1.5 min-h-[48px] min-w-[48px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
           value === 'list'
             ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
             : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'

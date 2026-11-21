@@ -48,16 +48,31 @@ import {
   recordCompletedAttemptSync,
   saveExamSessionSync,
 } from '../../lib/exam/storage';
+import {
+  readExamSetShardOffline,
+  requestSignedAssetUnlock,
+} from '../../lib/offline/offline-vault';
 import { makeCompositeKey } from '../../lib/registry/content-type-registry';
 import { registerLifecycleFlush } from '../reader/shared/platform-adapter';
+import dynamic from 'next/dynamic';
+import { apiUrl } from '../../lib/platform/api-base';
 import { useAuth } from '../auth/auth-provider';
 import { useTheme } from '../theme/theme-provider';
 import { useToast } from '../toast/toast-context';
-import { ExamQuestionWorkspace } from './exam-engine';
 import { CbtQuestionPalette } from './cbt-palette';
 import { CalculatorPopover } from './calculator-popover';
-import { ExamAnalyticsDashboard } from './exam-analytics-dashboard';
 import { cn } from '../../lib/utils';
+
+const ExamQuestionWorkspace = dynamic(
+  () => import('./exam-engine').then((m) => m.ExamQuestionWorkspace),
+  { ssr: false }
+);
+
+const ExamAnalyticsDashboard = dynamic(
+  () =>
+    import('./exam-analytics-dashboard').then((m) => m.ExamAnalyticsDashboard),
+  { ssr: false }
+);
 
 type RunnerStage = 'lobby' | 'active' | 'review';
 
@@ -102,11 +117,13 @@ export function ExamRunnerShell({
   exam,
   initialSetId,
   initialMode,
+  initialSource = 'online',
   autostart = false,
 }: {
   exam: PublicExamDTO;
   initialSetId?: string;
   initialMode: 'trial' | 'full';
+  initialSource?: 'online' | 'offline';
   autostart?: boolean;
 }) {
   const { user, isAuthReady, ownedCompositeKeys, getIdToken, signInWithGoogle } =
@@ -115,8 +132,9 @@ export function ExamRunnerShell({
   const { showToast } = useToast();
 
   const isOwned =
-    exam.buyPrice === 0 ||
-    ownedCompositeKeys.has(makeCompositeKey('ExamPackDocument', exam.id));
+    initialMode !== 'trial' &&
+    (ownedCompositeKeys.has(makeCompositeKey('ExamPackDocument', exam.id)) ||
+      (exam.buyPrice === 0 && Boolean(user)));
 
   const firstSampleSetId = exam.MocktestTitles[0]?.id || 'exam_set_1';
   const [selectedSetId, setSelectedSetId] = useState<string>(
@@ -162,7 +180,7 @@ export function ExamRunnerShell({
   useEffect(() => {
     const syncQueue = async () => {
       const token = user ? await getIdToken() : null;
-      await flushOfflineAttemptQueue(token);
+      await flushOfflineAttemptQueue(token, user?.uid);
     };
     void syncQueue();
     window.addEventListener('online', syncQueue);
@@ -203,7 +221,7 @@ export function ExamRunnerShell({
         updatedAtEpochMs: now,
       };
 
-      saveExamSessionSync(submittedSession);
+      saveExamSessionSync(submittedSession, user?.uid);
       setSession(submittedSession);
       setSubmitModalOpen(false);
       setCalcOpen(false);
@@ -218,25 +236,28 @@ export function ExamRunnerShell({
         fallbackTotalTimeMs: submittedSession.totalTimeSpentMs,
       });
 
-      recordCompletedAttemptSync({
-        packId: exam.id,
-        examSlug: exam.urlSlug,
-        examTitle: exam.title,
-        setId: targetSet.id,
-        setTitle: targetSet.title,
-        mode: submittedSession.mode,
-        totalScore: computed.evaluation.totalScore,
-        maxScore: computed.evaluation.maxScore,
-        accuracyPct: computed.accuracyPct,
-        totalAttempted: computed.totalAttempted,
-        totalQuestions: computed.totalQuestions,
-        totalTimeSpentMs: computed.totalTimeSpentMs,
-        completedAtIso: new Date(now).toISOString(),
-      });
+      recordCompletedAttemptSync(
+        {
+          packId: exam.id,
+          examSlug: exam.urlSlug,
+          examTitle: exam.title,
+          setId: targetSet.id,
+          setTitle: targetSet.title,
+          mode: submittedSession.mode,
+          totalScore: computed.evaluation.totalScore,
+          maxScore: computed.evaluation.maxScore,
+          accuracyPct: computed.accuracyPct,
+          totalAttempted: computed.totalAttempted,
+          totalQuestions: computed.totalQuestions,
+          totalTimeSpentMs: computed.totalTimeSpentMs,
+          completedAtIso: new Date(now).toISOString(),
+        },
+        user?.uid
+      );
 
       void (async () => {
         const token = user ? await getIdToken() : null;
-        await flushOfflineAttemptQueue(token);
+        await flushOfflineAttemptQueue(token, user?.uid);
       })();
 
       if (reason) {
@@ -253,7 +274,8 @@ export function ExamRunnerShell({
       const existing = loadExamSessionSync(
         exam.urlSlug,
         targetSet.id,
-        modeForSet
+        modeForSet,
+        user?.uid
       );
 
       if (existing) {
@@ -284,7 +306,7 @@ export function ExamRunnerShell({
           examSet: targetSet,
           mode: modeForSet,
         });
-        saveExamSessionSync(fresh);
+        saveExamSessionSync(fresh, user?.uid);
         questionEnteredAtRef.current = Date.now();
         setNowEpochMs(Date.now());
         setSession(fresh);
@@ -294,18 +316,20 @@ export function ExamRunnerShell({
 
       setStage('lobby');
     },
-    [autostart, exam, finalizeAndSubmit]
+    [autostart, exam, finalizeAndSubmit, user?.uid]
   );
 
-  // Fetch ExamSet[] from Server Boundary (or Eviction-Proof Offline Vault)
+  // Resolve target ExamSet from Per-Set Offline Shard (< 200 KB in < 10ms) or Verified Signed Endpoint
   useEffect(() => {
     if (!isAuthReady && initialMode === 'full') {
       return;
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
     const apiMode = isOwned ? 'full' : 'sample';
     const vaultMode: 'trial' | 'full' = isOwned ? 'full' : 'trial';
+    const targetSetId = selectedSetId;
 
     const applyResolvedSets = (sets: ExamSet[], savedOffline: boolean) => {
       if (cancelled) return;
@@ -315,10 +339,27 @@ export function ExamRunnerShell({
       setLoadingPack(false);
 
       const targetSet =
-        sets.find((s) => s.id === selectedSetIdRef.current) || sets[0];
+        sets.find((s) => s.id === targetSetId) || sets[0];
       if (targetSet) {
         hydrateSessionForSet(targetSet, vaultMode);
       }
+    };
+
+    const readOwnedSetOffline = async (): Promise<ExamSet[] | null> => {
+      if (isOwned && user?.uid) {
+        const shard = await readExamSetShardOffline(
+          user.uid,
+          exam.id,
+          targetSetId
+        );
+        if (shard) return [shard];
+      }
+      const legacy = await readCachedExamPackOffline(exam.urlSlug, vaultMode);
+      if (legacy && legacy.length > 0) {
+        const matched = legacy.filter((s) => s.id === targetSetId);
+        return matched.length > 0 ? matched : [legacy[0]];
+      }
+      return null;
     };
 
     const fetchSets = async () => {
@@ -327,35 +368,90 @@ export function ExamRunnerShell({
       setLoadingPack(true);
       setLoadError(null);
 
+      const preferOffline =
+        initialSource === 'offline' ||
+        (typeof navigator !== 'undefined' && !navigator.onLine);
+
+      // 1. Fast Path: Per-Set Offline Shard (< 200 KB, zero full-pack RAM spike)
+      if (preferOffline && isOwned && user?.uid) {
+        const localSlice = await readOwnedSetOffline();
+        if (cancelled) return;
+        if (localSlice && localSlice.length > 0) {
+          applyResolvedSets(localSlice, true);
+          return;
+        }
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setLoadError(
+            'You are offline and this mock set has not been saved to your device vault yet.'
+          );
+          setLoadingPack(false);
+          return;
+        }
+      }
+
+      // 2. Verified Online Fetch (Single-Set Filtered Slice to protect WebView RAM)
       try {
         const headers: Record<string, string> = {};
+        let endpointUrl = `/api/v1/exams/${encodeURIComponent(
+          exam.urlSlug
+        )}?mode=${apiMode}&setId=${encodeURIComponent(targetSetId)}`;
+
         if (user) {
           const token = await getIdToken();
           if (token) {
             headers.Authorization = `Bearer ${token}`;
           }
+          if (isOwned) {
+            try {
+              const grant = await requestSignedAssetUnlock({
+                uid: user.uid,
+                collectionName: 'ExamPackDocument',
+                urlSlug: exam.urlSlug,
+                getIdToken,
+                signal: abortController.signal,
+              });
+              if (grant.assets.jsonUrl) {
+                const sep = grant.assets.jsonUrl.includes('?') ? '&' : '?';
+                endpointUrl = `${grant.assets.jsonUrl}${sep}setId=${encodeURIComponent(
+                  targetSetId
+                )}`;
+              }
+            } catch {
+              // Bearer token header on /api/v1/exams/[packId] remains authoritative fallback
+            }
+          }
         }
 
-        const res = await fetch(
-          `/api/v1/exams/${encodeURIComponent(exam.urlSlug)}?mode=${apiMode}`,
-          { headers }
-        );
+        const res = await fetch(apiUrl(endpointUrl), {
+          headers,
+          signal: abortController.signal,
+        });
 
         if (res.ok) {
           const sets = (await res.json()) as ExamSet[];
           if (!cancelled && Array.isArray(sets) && sets.length > 0) {
-            const savedVault = await cacheExamPackOffline(
-              exam.urlSlug,
-              vaultMode,
-              sets
-            );
-            applyResolvedSets(sets, savedVault);
+            let hasLocalCopy = false;
+            if (isOwned && user?.uid) {
+              const existingShard = await readExamSetShardOffline(
+                user.uid,
+                exam.id,
+                sets[0].id
+              );
+              hasLocalCopy = Boolean(existingShard);
+            } else {
+              hasLocalCopy = await cacheExamPackOffline(
+                exam.urlSlug,
+                'trial',
+                sets
+              );
+            }
+            applyResolvedSets(sets, hasLocalCopy);
             return;
           }
         }
 
-        // Offline vault fallback
-        const cached = await readCachedExamPackOffline(exam.urlSlug, vaultMode);
+        // Automatic Offline Shard / Vault Fallback
+        const cached = await readOwnedSetOffline();
         if (!cancelled && cached && cached.length > 0) {
           applyResolvedSets(cached, true);
           return;
@@ -371,14 +467,15 @@ export function ExamRunnerShell({
           setLoadingPack(false);
         }
       } catch {
-        const cached = await readCachedExamPackOffline(exam.urlSlug, vaultMode);
+        if (cancelled) return;
+        const cached = await readOwnedSetOffline();
         if (!cancelled && cached && cached.length > 0) {
           applyResolvedSets(cached, true);
           return;
         }
         if (!cancelled) {
           setLoadError(
-            'You appear to be offline and this exam pack is not cached on this device yet.'
+            'You appear to be offline and this exam pack is not saved on this device yet.'
           );
           setLoadingPack(false);
         }
@@ -388,14 +485,18 @@ export function ExamRunnerShell({
     void fetchSets();
     return () => {
       cancelled = true;
+      abortController.abort();
     };
   }, [
+    exam.id,
     exam.urlSlug,
     getIdToken,
     hydrateSessionForSet,
     initialMode,
+    initialSource,
     isAuthReady,
     isOwned,
+    selectedSetId,
     user,
   ]);
 
@@ -409,10 +510,9 @@ export function ExamRunnerShell({
   const handleSelectSetId = useCallback(
     (nextSetId: string) => {
       setSelectedSetId(nextSetId);
-      const target =
-        loadedSets.find((s) => s.id === nextSetId) || loadedSets[0];
-      if (target) {
-        hydrateSessionForSet(target, sessionMode);
+      const alreadyLoaded = loadedSets.find((s) => s.id === nextSetId);
+      if (alreadyLoaded) {
+        hydrateSessionForSet(alreadyLoaded, sessionMode);
       }
     },
     [hydrateSessionForSet, loadedSets, sessionMode]
@@ -425,12 +525,12 @@ export function ExamRunnerShell({
       examSet: activeSet,
       mode: sessionMode,
     });
-    saveExamSessionSync(fresh);
+    saveExamSessionSync(fresh, user?.uid);
     questionEnteredAtRef.current = Date.now();
     setNowEpochMs(Date.now());
     setSession(fresh);
     setStage('active');
-  }, [activeSet, exam, sessionMode]);
+  }, [activeSet, exam, sessionMode, user?.uid]);
 
   const flushActiveDwellTime = useCallback(() => {
     const cur = sessionRef.current;
@@ -457,9 +557,9 @@ export function ExamRunnerShell({
       updatedAtEpochMs: now,
     };
     sessionRef.current = updated;
-    saveExamSessionSync(updated);
+    saveExamSessionSync(updated, user?.uid);
     setSession(updated);
-  }, []);
+  }, [user?.uid]);
 
   // Register lifecycle flush (visibilitychange + pagehide + Capacitor appStateChange)
   useEffect(() => {
@@ -554,7 +654,7 @@ export function ExamRunnerShell({
           };
 
           sessionRef.current = transitioned;
-          saveExamSessionSync(transitioned);
+          saveExamSessionSync(transitioned, user?.uid);
           setSession(transitioned);
           showToast(
             `Section time completed. Moved to "${nextSec.title}".`,
@@ -579,7 +679,7 @@ export function ExamRunnerShell({
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('focus', reconcileClock);
     };
-  }, [activeSet, finalizeAndSubmit, showToast, stage]);
+  }, [activeSet, finalizeAndSubmit, showToast, stage, user?.uid]);
 
   // Active Section & Question Resolution
   const activeSection: ExamSection | null = useMemo(() => {
@@ -620,10 +720,10 @@ export function ExamRunnerShell({
       const now = Date.now();
       const next = updater(cur, now);
       sessionRef.current = next;
-      saveExamSessionSync(next);
+      saveExamSessionSync(next, user?.uid);
       setSession(next);
     },
-    []
+    [user?.uid]
   );
 
   const navigateToQuestion = useCallback(
@@ -966,7 +1066,7 @@ export function ExamRunnerShell({
         isOwned={isOwned}
         backHref={backHref}
         onReattempt={() => {
-          clearExamSessionSync(exam.urlSlug, activeSet.id, sessionMode);
+          clearExamSessionSync(exam.urlSlug, activeSet.id, sessionMode, user?.uid);
           startFreshAttempt();
         }}
       />
@@ -1015,8 +1115,8 @@ export function ExamRunnerShell({
             </div>
           </div>
 
-          {/* Set Switcher when multiple sets are loaded */}
-          {loadedSets.length > 1 && (
+          {/* Set Switcher when multiple sets exist in owned pack */}
+          {(isOwned && exam.MocktestTitles.length > 1) || loadedSets.length > 1 ? (
             <div className="flex items-center gap-2 shrink-0">
               <label
                 htmlFor="cbt-set-selector"
@@ -1028,16 +1128,19 @@ export function ExamRunnerShell({
                 id="cbt-set-selector"
                 value={activeSet.id}
                 onChange={(e) => handleSelectSetId(e.target.value)}
-                className="min-h-11 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 text-xs sm:text-sm font-semibold text-[var(--text-main)]"
+                className="min-h-12 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 text-xs sm:text-sm font-semibold text-[var(--text-main)]"
               >
-                {loadedSets.map((s) => (
+                {(isOwned && exam.MocktestTitles.length > 1
+                  ? exam.MocktestTitles.map((m) => ({ id: m.id, title: m.title }))
+                  : loadedSets.map((s) => ({ id: s.id, title: s.title }))
+                ).map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.title}
                   </option>
                 ))}
               </select>
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

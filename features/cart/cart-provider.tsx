@@ -10,14 +10,10 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { deleteDoc, doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { auth, db } from '../../lib/firebase/client';
-import type {
-  CatalogItemDTO,
-  CartItem,
-  CollectionName,
-  UserPurchaseRecord,
-} from '../../lib/types/catalog';
+import {
+  claimFreeThroughCheckoutAdapter,
+  purchasePaidThroughCheckoutAdapter,
+} from '../../lib/payments/checkout-adapter';
 import {
   calculateCartSummary,
   makeCompositeKey,
@@ -25,10 +21,30 @@ import {
   reconcileCartAgainstOwned,
   type CartSummary,
 } from '../../lib/registry/content-type-registry';
-import { openRazorpayCheckoutModal } from '../../lib/payments/razorpay-client';
-import { createUuidV7 } from '../../lib/platform/capacitor-bridge';
+import type {
+  CartItem,
+  CatalogItemDTO,
+  CollectionName,
+} from '../../lib/types/catalog';
 import { useAuth } from '../auth/auth-provider';
 import { useToast } from '../toast/toast-context';
+
+/**
+ * Slim primitive-only purchase target so client islands (e.g. DetailBuyCard)
+ * never need to serialize `fullDescription` into RSC hydration payloads.
+ */
+export interface BuyTargetItem {
+  id: string;
+  collectionName: CollectionName;
+  title: string;
+  urlSlug: string;
+  currency: string;
+  buyPrice: number;
+  listPrice: number;
+  type?: string;
+  authorName?: string;
+  language?: string;
+}
 
 interface BuyNowOptions {
   redirectToPurchased?: boolean;
@@ -42,15 +58,15 @@ interface CartContextValue {
   openCart: () => void;
   closeCart: () => void;
   isInCart: (compositeKey: string) => boolean;
-  addItem: (catalogItem: CatalogItemDTO) => void;
+  addItem: (catalogItem: CatalogItemDTO | BuyTargetItem) => void;
   removeItem: (compositeKey: string) => void;
   clearCart: () => void;
   checkout: () => Promise<boolean>;
   buyNow: (
-    catalogItem: CatalogItemDTO,
+    targetItem: BuyTargetItem,
     options?: BuyNowOptions
   ) => Promise<boolean>;
-  claimFreeItem: (catalogItem: CatalogItemDTO) => Promise<boolean>;
+  claimFreeItem: (targetItem: BuyTargetItem) => Promise<boolean>;
 }
 
 const CartContext = createContext<CartContextValue>({
@@ -113,32 +129,6 @@ function writeCartStorage(nextItems: CartItem[]) {
   window.dispatchEvent(new Event(CART_EVENT));
 }
 
-interface RazorpayOrderApiResponse {
-  keyId: string;
-  orderId: string;
-  amount: number;
-  currency: string;
-  orderToken: string;
-  description: string;
-  itemCount: number;
-  prefill?: {
-    name?: string;
-    email?: string;
-  };
-}
-
-interface VerifyPaymentApiResponse {
-  verified: boolean;
-  razorpayOrderId: string;
-  razorpayPaymentId: string;
-  purchases: UserPurchaseRecord[];
-}
-
-interface ClaimFreeApiResponse {
-  claimed: boolean;
-  purchases: UserPurchaseRecord[];
-}
-
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -167,20 +157,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [rawCartJson]);
 
-  // Purely derive reconciled items against ownedCompositeKeys without cascading setState effects
   const items = useMemo(
     () => reconcileCartAgainstOwned(storedItems, ownedCompositeKeys).remaining,
     [ownedCompositeKeys, storedItems]
   );
 
-  // Sync reconciled items back to localStorage externally when owned items strip entries
   useEffect(() => {
     if (items.length !== storedItems.length) {
       writeCartStorage(items);
     }
   }, [items, storedItems.length]);
 
-  // Wire Android Predictive Back / browser history stack when drawer opens
   useEffect(() => {
     if (!isOpen) return;
     const handlePopState = () => {
@@ -208,42 +195,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [items]
   );
 
-  const syncCartItemToFirestore = useCallback(
-    async (cartItem: CartItem) => {
-      if (!user || !user.emailVerified) return;
-      try {
-        const cartRef = doc(db, 'users', user.uid, 'cart', cartItem.firestoreKey);
-        const cleanSlug = cartItem.urlSlug
-          .toLowerCase()
-          .replace(/[^a-z0-9-]/g, '-')
-          .slice(0, 200);
-        await setDoc(cartRef, {
-          cartKey: cartItem.firestoreKey,
-          userId: user.uid,
-          itemId: cartItem.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128),
-          collectionName: cartItem.collectionName,
-          urlSlug: cleanSlug || 'item',
-          title: cartItem.title.slice(0, 300),
-          authorName: (cartItem.authorName || 'ExamDash').slice(0, 160),
-          language: (cartItem.language || 'English').slice(0, 64),
-          type: (cartItem.type || 'Ebook').slice(0, 64),
-          currency: /^[A-Z]{3}$/.test((cartItem.currency || '').toUpperCase())
-            ? cartItem.currency.toUpperCase()
-            : 'INR',
-          listPrice: Math.max(0, cartItem.listPrice),
-          buyPrice: Math.max(0, cartItem.buyPrice),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      } catch {
-        // Non-blocking cloud sync fallback to localStorage
-      }
-    },
-    [user]
-  );
-
   const addItem = useCallback(
-    (catalogItem: CatalogItemDTO) => {
+    (catalogItem: CatalogItemDTO | BuyTargetItem) => {
       const compositeKey = makeCompositeKey(
         catalogItem.collectionName,
         catalogItem.id
@@ -281,48 +234,35 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         collectionName: catalogItem.collectionName,
         urlSlug: catalogItem.urlSlug,
         title: catalogItem.title,
-        authorName: catalogItem.authorName,
-        language: catalogItem.language,
-        type: catalogItem.type,
+        authorName: catalogItem.authorName || 'ExamDash',
+        language: catalogItem.language || 'English',
+        type:
+          catalogItem.type ||
+          (catalogItem.collectionName === 'ExamPackDocument' ? 'Exam' : 'Ebook'),
         currency: incomingCurrency,
         listPrice: catalogItem.listPrice,
         buyPrice: catalogItem.buyPrice,
       };
 
       writeCartStorage([...items, newItem]);
-      void syncCartItemToFirestore(newItem);
       showToast(`Added "${catalogItem.title}" to cart`, 'success');
     },
-    [items, openCart, ownedCompositeKeys, showToast, syncCartItemToFirestore]
+    [items, openCart, ownedCompositeKeys, showToast]
   );
 
   const removeItem = useCallback(
     (compositeKey: string) => {
-      const target = items.find((i) => i.compositeKey === compositeKey);
       writeCartStorage(items.filter((i) => i.compositeKey !== compositeKey));
-      if (target && user) {
-        void deleteDoc(doc(db, 'users', user.uid, 'cart', target.firestoreKey)).catch(
-          () => {}
-        );
-      }
     },
-    [items, user]
+    [items]
   );
 
   const clearCart = useCallback(() => {
-    const snapshot = [...items];
     writeCartStorage([]);
-    if (user) {
-      for (const item of snapshot) {
-        void deleteDoc(doc(db, 'users', user.uid, 'cart', item.firestoreKey)).catch(
-          () => {}
-        );
-      }
-    }
-  }, [items, user]);
+  }, []);
 
   const ensureAuthenticatedToken = useCallback(async () => {
-    let activeUser = auth.currentUser;
+    let activeUser = user;
     if (!activeUser) {
       activeUser = await signInWithGoogle();
     }
@@ -331,7 +271,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
     if (!activeUser.emailVerified) {
       showToast(
-        'Please sign in with a verified Google account to complete purchases.',
+        'Please sign in with a verified account to complete purchases.',
         'danger'
       );
       return null;
@@ -343,7 +283,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       showToast('Authentication session expired. Please sign in again.', 'danger');
       return null;
     }
-  }, [showToast, signInWithGoogle]);
+  }, [showToast, signInWithGoogle, user]);
 
   const executeFreeClaim = useCallback(
     async (
@@ -355,32 +295,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       setIsCheckingOut(true);
       try {
-        const res = await fetch('/api/v1/payments/claim-free', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.token}`,
-            'Idempotency-Key': createUuidV7(),
-          },
-          body: JSON.stringify({ items: refs }),
+        const outcome = await claimFreeThroughCheckoutAdapter({
+          refs,
+          token: session.token,
         });
 
-        const payload = (await res.json().catch(() => ({}))) as Partial<ClaimFreeApiResponse> & {
-          error?: string;
-        };
-
-        if (!res.ok || !Array.isArray(payload.purchases)) {
-          showToast(
-            payload.error || 'Could not claim free resource. Please try again.',
-            'danger'
-          );
+        if (outcome.status === 'error') {
+          showToast(outcome.message, 'danger');
+          return false;
+        }
+        if (outcome.status === 'cancelled') {
           return false;
         }
 
-        mergeVerifiedPurchases(payload.purchases);
+        mergeVerifiedPurchases(outcome.purchases);
 
         const purchasedKeys = new Set(
-          payload.purchases.map((p) => makeCompositeKey(p.collectionName, p.itemId))
+          outcome.purchases.map((p) =>
+            makeCompositeKey(p.collectionName, p.itemId)
+          )
         );
         const remaining = items.filter((i) => !purchasedKeys.has(i.compositeKey));
         if (remaining.length !== items.length) {
@@ -392,9 +325,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
 
         showToast(
-          payload.purchases.length === 1
-            ? `Added "${payload.purchases[0].title}" to your Purchased Library.`
-            : `Added ${payload.purchases.length} free resources to your Purchased Library.`,
+          outcome.purchases.length === 1
+            ? `Added "${outcome.purchases[0].title}" to your Purchased Library.`
+            : `Added ${outcome.purchases.length} free resources to your Purchased Library.`,
           'success'
         );
 
@@ -402,9 +335,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           router.push('/purchased');
         }
         return true;
-      } catch {
-        showToast('Network error while claiming free resource.', 'danger');
-        return false;
       } finally {
         setIsCheckingOut(false);
       }
@@ -412,7 +342,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [ensureAuthenticatedToken, items, mergeVerifiedPurchases, router, showToast]
   );
 
-  const executeRazorpayPurchase = useCallback(
+  const executePaidPurchase = useCallback(
     async (
       refs: Array<{ collectionName: CollectionName; id: string }>,
       options?: { redirectToPurchased?: boolean; closeDrawer?: boolean }
@@ -422,116 +352,37 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       setIsCheckingOut(true);
       try {
-        // 1. Create authoritative Razorpay Order on server
-        const orderRes = await fetch('/api/v1/payments/razorpay/order', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.token}`,
-            'Idempotency-Key': createUuidV7(),
-          },
-          body: JSON.stringify({ items: refs }),
+        const outcome = await purchasePaidThroughCheckoutAdapter({
+          refs,
+          user: session.activeUser,
+          initialToken: session.token,
         });
 
-        const orderData = (await orderRes.json().catch(() => ({}))) as Partial<
-          RazorpayOrderApiResponse
-        > & { error?: string; alreadyOwned?: boolean };
-
-        if (!orderRes.ok) {
-          if (orderRes.status === 409 && orderData.alreadyOwned) {
-            showToast(
-              orderData.error || 'You already own these items in your Purchased Library.'
-            );
-            if (options?.closeDrawer) setIsOpen(false);
-            if (options?.redirectToPurchased !== false) {
-              router.push('/purchased');
-            }
-            return true;
-          }
-          showToast(
-            orderData.error || 'Unable to start Razorpay checkout. Please try again.',
-            'danger'
-          );
-          return false;
-        }
-
-        if (
-          !orderData.keyId ||
-          !orderData.orderId ||
-          !orderData.amount ||
-          !orderData.currency ||
-          !orderData.orderToken
-        ) {
-          showToast('Incomplete order response from payment server.', 'danger');
-          return false;
-        }
-
-        // 2. Open production Razorpay Checkout modal
-        const modalOutcome = await openRazorpayCheckoutModal({
-          key: orderData.keyId,
-          amount: orderData.amount,
-          currency: orderData.currency,
-          name: 'ExamDash',
-          description: orderData.description || 'ExamDash Study Resources',
-          image: 'https://exam-dash.com/pwa-192x192.png',
-          order_id: orderData.orderId,
-          prefill: {
-            name: orderData.prefill?.name || session.activeUser.displayName || '',
-            email: orderData.prefill?.email || session.activeUser.email || '',
-          },
-          notes: {
-            website: 'https://exam-dash.com',
-          },
-          theme: {
-            color: '#0F172A',
-          },
-        });
-
-        if (modalOutcome.status === 'dismissed') {
+        if (outcome.status === 'cancelled') {
           showToast('Payment cancelled. Your items are still saved.');
           return false;
         }
 
-        if (modalOutcome.status === 'failed') {
-          showToast(modalOutcome.message, 'danger');
+        if (outcome.status === 'error') {
+          showToast(outcome.message, 'danger');
           return false;
         }
 
-        // 3. Verify payment signature & server-side capture, then unlock in Firestore `/users/{uid}/purchases`
-        const freshToken = await session.activeUser.getIdToken();
-        const verifyRes = await fetch('/api/v1/payments/razorpay/verify', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${freshToken}`,
-            'Idempotency-Key': createUuidV7(),
-          },
-          body: JSON.stringify({
-            razorpay_order_id: modalOutcome.payload.razorpay_order_id,
-            razorpay_payment_id: modalOutcome.payload.razorpay_payment_id,
-            razorpay_signature: modalOutcome.payload.razorpay_signature,
-            orderToken: orderData.orderToken,
-          }),
-        });
-
-        const verifyData = (await verifyRes.json().catch(() => ({}))) as Partial<
-          VerifyPaymentApiResponse
-        > & { error?: string };
-
-        if (!verifyRes.ok || !verifyData.verified || !Array.isArray(verifyData.purchases)) {
-          showToast(
-            verifyData.error ||
-              `Payment verification failed. Save payment ID ${modalOutcome.payload.razorpay_payment_id} and contact support.`,
-            'danger'
-          );
-          return false;
+        if (outcome.alreadyOwned) {
+          showToast('You already own these items in your Purchased Library.');
+          if (options?.closeDrawer) setIsOpen(false);
+          if (options?.redirectToPurchased !== false) {
+            router.push('/purchased');
+          }
+          return true;
         }
 
-        // 4. Immediately reflect newly purchased Books & Exam Packs in Auth state & clear from Cart
-        mergeVerifiedPurchases(verifyData.purchases);
+        mergeVerifiedPurchases(outcome.purchases);
 
         const purchasedKeys = new Set(
-          verifyData.purchases.map((p) => makeCompositeKey(p.collectionName, p.itemId))
+          outcome.purchases.map((p) =>
+            makeCompositeKey(p.collectionName, p.itemId)
+          )
         );
         const remaining = items.filter((i) => !purchasedKeys.has(i.compositeKey));
         if (remaining.length !== items.length) {
@@ -542,10 +393,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           setIsOpen(false);
         }
 
-        const count = verifyData.purchases.length;
+        const count = outcome.purchases.length;
         showToast(
           count === 1
-            ? `Payment verified! "${verifyData.purchases[0].title}" added to your Purchased Library.`
+            ? `Payment verified! "${outcome.purchases[0].title}" added to your Purchased Library.`
             : `Payment verified! ${count} items added to your Purchased Library.`,
           'success'
         );
@@ -554,14 +405,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           router.push('/purchased');
         }
         return true;
-      } catch (err) {
-        showToast(
-          err instanceof Error
-            ? err.message
-            : 'Unable to complete Razorpay checkout. Please try again.',
-          'danger'
-        );
-        return false;
       } finally {
         setIsCheckingOut(false);
       }
@@ -570,15 +413,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const claimFreeItem = useCallback(
-    async (catalogItem: CatalogItemDTO): Promise<boolean> => {
+    async (targetItem: BuyTargetItem): Promise<boolean> => {
       const compositeKey = makeCompositeKey(
-        catalogItem.collectionName,
-        catalogItem.id
+        targetItem.collectionName,
+        targetItem.id
       );
       if (ownedCompositeKeys.has(compositeKey)) return true;
 
       return executeFreeClaim(
-        [{ collectionName: catalogItem.collectionName, id: catalogItem.id }],
+        [{ collectionName: targetItem.collectionName, id: targetItem.id }],
         { redirectToPurchased: false, closeDrawer: false }
       );
     },
@@ -587,12 +430,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const buyNow = useCallback(
     async (
-      catalogItem: CatalogItemDTO,
+      targetItem: BuyTargetItem,
       options?: BuyNowOptions
     ): Promise<boolean> => {
       const compositeKey = makeCompositeKey(
-        catalogItem.collectionName,
-        catalogItem.id
+        targetItem.collectionName,
+        targetItem.id
       );
       if (ownedCompositeKeys.has(compositeKey)) {
         if (options?.redirectToPurchased !== false) {
@@ -601,22 +444,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return true;
       }
 
-      if (catalogItem.buyPrice === 0) {
+      if (targetItem.buyPrice === 0) {
         return executeFreeClaim(
-          [{ collectionName: catalogItem.collectionName, id: catalogItem.id }],
+          [{ collectionName: targetItem.collectionName, id: targetItem.id }],
           { redirectToPurchased: options?.redirectToPurchased === true }
         );
       }
 
-      return executeRazorpayPurchase(
-        [{ collectionName: catalogItem.collectionName, id: catalogItem.id }],
+      return executePaidPurchase(
+        [{ collectionName: targetItem.collectionName, id: targetItem.id }],
         {
           redirectToPurchased: options?.redirectToPurchased !== false,
           closeDrawer: false,
         }
       );
     },
-    [executeFreeClaim, executeRazorpayPurchase, ownedCompositeKeys, router]
+    [executeFreeClaim, executePaidPurchase, ownedCompositeKeys, router]
   );
 
   const checkout = useCallback(async (): Promise<boolean> => {
@@ -642,11 +485,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       });
     }
 
-    return executeRazorpayPurchase(refs, {
+    return executePaidPurchase(refs, {
       redirectToPurchased: true,
       closeDrawer: true,
     });
-  }, [executeFreeClaim, executeRazorpayPurchase, items, showToast]);
+  }, [executeFreeClaim, executePaidPurchase, items, showToast]);
 
   const summary = useMemo(() => calculateCartSummary(items), [items]);
 

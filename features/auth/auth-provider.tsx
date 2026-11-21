@@ -6,50 +6,45 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
-  deleteUser,
-  onAuthStateChanged,
-  signInWithPopup,
-  signOut,
-  type User,
-} from 'firebase/auth';
+  deleteCurrentAuthUserAdapter,
+  getActiveAuthUser,
+  signInWithGoogleAdapter,
+  signOutPlatformAdapter,
+  subscribeLazyAuthState,
+  type AppAuthUser,
+} from '../../lib/auth/auth-adapter';
+import { purgeUserExamLocalState } from '../../lib/exam/storage';
 import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  where,
-  writeBatch,
-} from 'firebase/firestore';
+  purgeOfflineVaultForUser,
+  readCachedUserEntitlements,
+  writeCachedUserEntitlements,
+} from '../../lib/offline/offline-vault';
+import { apiUrl } from '../../lib/platform/api-base';
 import {
-  auth,
-  db,
-  googleProvider,
-  handleFirestoreError,
-  OperationType,
-  testConnection,
-} from '../../lib/firebase/client';
-import type { UserPurchaseRecord } from '../../lib/types/catalog';
+  readPersistedAuthHint,
+  requestPersistentWebStorage,
+  writePersistedAuthHint,
+} from '../../lib/platform/capacitor-bridge';
 import { makeCompositeKey } from '../../lib/registry/content-type-registry';
-import { requestPersistentWebStorage } from '../../lib/platform/capacitor-bridge';
+import type { UserPurchaseRecord } from '../../lib/types/catalog';
 import { useToast } from '../toast/toast-context';
 
 interface AuthContextValue {
-  user: User | null;
+  user: AppAuthUser | null;
   isAuthReady: boolean;
   isSigningIn: boolean;
   purchases: UserPurchaseRecord[];
   ownedCompositeKeys: Set<string>;
   ownedSlugs: Set<string>;
-  signInWithGoogle: () => Promise<User | null>;
+  signInWithGoogle: () => Promise<AppAuthUser | null>;
   signOutUser: () => Promise<void>;
   deleteAccount: () => Promise<void>;
   mergeVerifiedPurchases: (records: UserPurchaseRecord[]) => void;
+  refreshLibraryEntitlements: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
 
@@ -64,170 +59,146 @@ const AuthContext = createContext<AuthContextValue>({
   signOutUser: async () => {},
   deleteAccount: async () => {},
   mergeVerifiedPurchases: () => {},
+  refreshLibraryEntitlements: async () => {},
   getIdToken: async () => null,
 });
 
-function sanitizeBoundedString(val: string | null | undefined, maxLen: number, fallback: string): string {
-  const trimmed = (val ?? '').trim();
-  if (!trimmed) return fallback;
-  return trimmed.slice(0, maxLen);
-}
-
-async function ensureUserProfileSynced(firebaseUser: User) {
-  if (!firebaseUser.emailVerified) return;
-
-  const uid = firebaseUser.uid;
-  const userRef = doc(db, 'users', uid);
-  const privateRef = doc(db, 'users', uid, 'private', 'contact');
-
-  try {
-    const existingSnap = await getDoc(userRef);
-    const batch = writeBatch(db);
-    const displayName = sanitizeBoundedString(
-      firebaseUser.displayName || firebaseUser.email?.split('@')[0],
-      120,
-      'ExamDash Learner'
-    );
-    const photoURL = sanitizeBoundedString(firebaseUser.photoURL, 1024, '');
-
-    if (!existingSnap.exists()) {
-      const profilePayload: Record<string, unknown> = {
-        uid,
-        displayName,
-        preferredView: 'grid',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      if (photoURL) {
-        profilePayload.photoURL = photoURL;
-      }
-      batch.set(userRef, profilePayload);
-    } else {
-      const updatePayload: Record<string, unknown> = {
-        displayName,
-        preferredView: existingSnap.data()?.preferredView === 'list' ? 'list' : 'grid',
-        updatedAt: serverTimestamp(),
-      };
-      if (photoURL) {
-        updatePayload.photoURL = photoURL;
-      }
-      batch.update(userRef, updatePayload);
-    }
-
-    if (firebaseUser.email) {
-      batch.set(privateRef, {
-        uid,
-        email: firebaseUser.email.slice(0, 254),
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `users/${uid}`);
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppAuthUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [purchases, setPurchases] = useState<UserPurchaseRecord[]>([]);
   const { showToast } = useToast();
 
-  useEffect(() => {
-    void testConnection();
-    void requestPersistentWebStorage();
+  const authUnsubRef = useRef<(() => void) | null>(null);
+  const fetchedUidRef = useRef<string | null>(null);
 
-    const unsub = onAuthStateChanged(auth, (current) => {
+  const fetchOneShotLibraryEntitlements = useCallback(
+    async (activeUser: AppAuthUser, syncProfile: boolean = false) => {
+      // 1. Hydrate local cached entitlements immediately for instant offline / zero-CLS UX
+      const cached = await readCachedUserEntitlements(activeUser.uid);
+      if (cached.length > 0) {
+        setPurchases((prev) => (prev.length > 0 ? prev : cached));
+      }
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return;
+      }
+
+      // 2. One-shot authenticated GET /api/v1/library (replaces Firestore Listen/channel XHR)
+      try {
+        const token = await activeUser.getIdToken();
+        const endpoint = syncProfile
+          ? apiUrl('/api/v1/library?syncProfile=1')
+          : apiUrl('/api/v1/library');
+
+        const res = await fetch(endpoint, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Cache-Control': 'no-store',
+          },
+          cache: 'no-store',
+        });
+
+        if (!res.ok) return;
+
+        const data = (await res.json().catch(() => ({}))) as {
+          purchases?: UserPurchaseRecord[];
+        };
+
+        if (Array.isArray(data.purchases)) {
+          const sorted = [...data.purchases].sort(
+            (a, b) =>
+              new Date(b.createdAtIso).getTime() -
+              new Date(a.createdAtIso).getTime()
+          );
+          setPurchases(sorted);
+          await writeCachedUserEntitlements(activeUser.uid, sorted);
+        }
+      } catch {
+        // Offline or transient network issue — cached entitlements remain active
+      }
+    },
+    []
+  );
+
+  const attachLazyAuthSubscription = useCallback(async () => {
+    if (authUnsubRef.current) return;
+
+    const unsub = await subscribeLazyAuthState((current) => {
       setUser(current);
       setIsAuthReady(true);
+
       if (current) {
-        void ensureUserProfileSynced(current);
+        void writePersistedAuthHint(true);
+        void requestPersistentWebStorage();
+        if (fetchedUidRef.current !== current.uid) {
+          fetchedUidRef.current = current.uid;
+          void fetchOneShotLibraryEntitlements(current, true);
+        }
       } else {
+        fetchedUidRef.current = null;
         setPurchases([]);
+        void writePersistedAuthHint(false);
       }
     });
 
-    return () => unsub();
-  }, []);
+    authUnsubRef.current = unsub;
+  }, [fetchOneShotLibraryEntitlements]);
 
   useEffect(() => {
-    if (!isAuthReady || !user) {
-      return;
-    }
+    let cancelled = false;
 
-    const purchasesPath = `users/${user.uid}/purchases`;
-    const purchasesQuery = query(
-      collection(db, 'users', user.uid, 'purchases'),
-      where('userId', '==', user.uid)
-    );
+    const bootAuthCheck = async () => {
+      const previouslyAuthed = await readPersistedAuthHint();
+      if (cancelled) return;
 
-    const unsub = onSnapshot(
-      purchasesQuery,
-      (snap) => {
-        const list: UserPurchaseRecord[] = [];
-        snap.forEach((docSnap) => {
-          const d = docSnap.data();
-          const createdMs =
-            d.createdAt && typeof d.createdAt.toMillis === 'function'
-              ? d.createdAt.toMillis()
-              : Date.now();
-          list.push({
-            purchaseId: String(d.purchaseId || docSnap.id),
-            userId: String(d.userId || user.uid),
-            itemId: String(d.itemId || ''),
-            collectionName:
-              d.collectionName === 'ExamPackDocument' ? 'ExamPackDocument' : 'books',
-            urlSlug: String(d.urlSlug || ''),
-            title: String(d.title || 'Untitled'),
-            type: String(d.type || 'Ebook'),
-            authorName: String(d.authorName || 'ExamDash'),
-            language: String(d.language || 'English'),
-            currency: String(d.currency || 'INR'),
-            listPrice: Number(d.listPrice) || 0,
-            paidPrice: Number(d.paidPrice) || 0,
-            totalMocktest:
-              typeof d.totalMocktest === 'number' ? d.totalMocktest : undefined,
-            paymentProvider:
-              d.paymentProvider === 'razorpay'
-                ? 'razorpay'
-                : d.paymentProvider === 'free'
-                ? 'free'
-                : undefined,
-            razorpayOrderId:
-              typeof d.razorpayOrderId === 'string'
-                ? d.razorpayOrderId
-                : undefined,
-            razorpayPaymentId:
-              typeof d.razorpayPaymentId === 'string'
-                ? d.razorpayPaymentId
-                : undefined,
-            status: 'completed',
-            createdAtIso: new Date(createdMs).toISOString(),
-          });
-        });
-        list.sort(
-          (a, b) =>
-            new Date(b.createdAtIso).getTime() - new Date(a.createdAtIso).getTime()
-        );
-        setPurchases(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, purchasesPath);
+      // Anonymous visitors & Googlebot: zero Firebase Auth/Firestore chunks, iframes, or XHRs!
+      if (!previouslyAuthed) {
+        setIsAuthReady(true);
+        return;
       }
-    );
 
-    return () => unsub();
-  }, [isAuthReady, user]);
+      try {
+        await attachLazyAuthSubscription();
+      } catch {
+        if (!cancelled) {
+          setIsAuthReady(true);
+        }
+      }
+    };
 
-  const signInWithGoogle = useCallback(async (): Promise<User | null> => {
+    void bootAuthCheck();
+
+    return () => {
+      cancelled = true;
+      if (authUnsubRef.current) {
+        authUnsubRef.current();
+        authUnsubRef.current = null;
+      }
+    };
+  }, [attachLazyAuthSubscription]);
+
+  const signInWithGoogle = useCallback(async (): Promise<AppAuthUser | null> => {
     setIsSigningIn(true);
     try {
-      const cred = await signInWithPopup(auth, googleProvider);
-      await ensureUserProfileSynced(cred.user);
-      showToast(`Signed in as ${cred.user.displayName || cred.user.email}`, 'success');
-      return cred.user;
+      const signedInUser = await signInWithGoogleAdapter();
+      if (!signedInUser) return null;
+
+      await writePersistedAuthHint(true);
+      setUser(signedInUser);
+      setIsAuthReady(true);
+      await attachLazyAuthSubscription();
+
+      fetchedUidRef.current = signedInUser.uid;
+      await fetchOneShotLibraryEntitlements(signedInUser, true);
+
+      showToast(
+        `Signed in as ${signedInUser.displayName || signedInUser.email}`,
+        'success'
+      );
+      return signedInUser;
     } catch (err) {
       const code = (err as { code?: string })?.code || '';
       if (code !== 'auth/popup-closed-by-user') {
@@ -237,21 +208,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsSigningIn(false);
     }
-  }, [showToast]);
+  }, [attachLazyAuthSubscription, fetchOneShotLibraryEntitlements, showToast]);
 
   const signOutUser = useCallback(async () => {
-    await signOut(auth);
+    const activeUid = user?.uid || (await getActiveAuthUser().catch(() => null))?.uid || '';
+    fetchedUidRef.current = null;
+    await writePersistedAuthHint(false);
+    if (activeUid) {
+      await purgeOfflineVaultForUser(activeUid).catch(() => {});
+      purgeUserExamLocalState(activeUid);
+    }
+    await signOutPlatformAdapter().catch(() => {});
+    setUser(null);
+    setPurchases([]);
     showToast('Signed out of ExamDash');
-  }, [showToast]);
+  }, [showToast, user?.uid]);
 
   const deleteAccount = useCallback(async () => {
-    const activeUser = auth.currentUser;
+    const activeUser = user || (await getActiveAuthUser().catch(() => null));
     if (!activeUser) return;
     const uid = activeUser.uid;
     try {
-      await deleteDoc(doc(db, 'users', uid, 'private', 'contact')).catch(() => {});
-      await deleteDoc(doc(db, 'users', uid)).catch(() => {});
-      await deleteUser(activeUser);
+      const token = await activeUser.getIdToken().catch(() => null);
+      if (token) {
+        await fetch(apiUrl('/api/v1/library'), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+      await purgeOfflineVaultForUser(uid).catch(() => {});
+      purgeUserExamLocalState(uid);
+      await writePersistedAuthHint(false);
+      await deleteCurrentAuthUserAdapter();
+      fetchedUidRef.current = null;
+      setUser(null);
+      setPurchases([]);
       showToast('Your ExamDash account and profile data have been deleted.', 'success');
     } catch {
       showToast(
@@ -259,11 +250,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         'danger'
       );
     }
-  }, [showToast]);
+  }, [showToast, user]);
 
   const mergeVerifiedPurchases = useCallback(
     (incomingRecords: UserPurchaseRecord[]) => {
       if (!Array.isArray(incomingRecords) || incomingRecords.length === 0) return;
+      const targetUid = incomingRecords[0]?.userId || user?.uid || '';
       setPurchases((prev) => {
         const byId = new Map<string, UserPurchaseRecord>();
         for (const item of prev) {
@@ -278,20 +270,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             new Date(b.createdAtIso).getTime() -
             new Date(a.createdAtIso).getTime()
         );
+        if (targetUid) {
+          void writeCachedUserEntitlements(targetUid, merged);
+        }
         return merged;
       });
     },
-    []
+    [user?.uid]
   );
 
+  const refreshLibraryEntitlements = useCallback(async () => {
+    if (!user) return;
+    await fetchOneShotLibraryEntitlements(user, false);
+  }, [fetchOneShotLibraryEntitlements, user]);
+
   const getIdToken = useCallback(async (): Promise<string | null> => {
-    if (!auth.currentUser) return null;
+    const active = user || (await getActiveAuthUser().catch(() => null));
+    if (!active) return null;
     try {
-      return await auth.currentUser.getIdToken();
+      return await active.getIdToken();
     } catch {
       return null;
     }
-  }, []);
+  }, [user]);
 
   const activePurchases = useMemo(
     () => (user ? purchases : []),
@@ -327,6 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signOutUser,
         deleteAccount,
         mergeVerifiedPurchases,
+        refreshLibraryEntitlements,
         getIdToken,
       }}
     >

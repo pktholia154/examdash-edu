@@ -38,7 +38,7 @@ export default async function ReadBookSlotPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ mode?: string; format?: string }>;
+  searchParams: Promise<{ mode?: string; format?: string; source?: string }>;
 }) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -58,6 +58,7 @@ export default async function ReadBookSlotPage({
       : book.hasFullPdf || book.samplePdfUrl
       ? 'pdf'
       : 'markdown';
+  const initialSource = sp.source === 'offline' ? 'offline' : 'online';
 
   const sampleMarkdownPreview =
     initialMode === 'sample' && book.sampleMarkdownUrl
@@ -69,6 +70,7 @@ export default async function ReadBookSlotPage({
       book={book}
       initialMode={initialMode}
       initialFormat={initialFormat}
+      initialSource={initialSource}
       sampleMarkdownPreview={sampleMarkdownPreview}
     />
   );

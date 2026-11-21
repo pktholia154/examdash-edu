@@ -208,8 +208,32 @@ export function CartDrawer() {
               <ArrowRight className="w-4 h-4 shrink-0" aria-hidden="true" />
             </button>
             {summary.buyTotal > 0 && (
-              <p className="text-center text-[11px] text-[var(--text-muted)]">
-                Secured by Razorpay · Verified purchases unlock immediately in your Library
+              <p className="text-center text-[11px] text-[var(--text-muted)] leading-relaxed">
+                Secured by Razorpay · Instant digital unlock. By paying, you agree to our{' '}
+                <a
+                  href="/terms-of-service"
+                  onClick={closeCart}
+                  className="underline underline-offset-2 hover:text-[var(--text-main)]"
+                >
+                  Terms
+                </a>
+                ,{' '}
+                <a
+                  href="/refund-cancellation-policy"
+                  onClick={closeCart}
+                  className="underline underline-offset-2 hover:text-[var(--text-main)]"
+                >
+                  Refund Policy
+                </a>
+                , and{' '}
+                <a
+                  href="/privacy-policy"
+                  onClick={closeCart}
+                  className="underline underline-offset-2 hover:text-[var(--text-main)]"
+                >
+                  Privacy Policy
+                </a>
+                .
               </p>
             )}
           </div>

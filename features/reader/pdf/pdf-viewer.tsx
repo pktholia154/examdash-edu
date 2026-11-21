@@ -27,6 +27,13 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { PublicBookDTO } from '../../../lib/types/catalog';
+import {
+  deleteBookFormatOffline,
+  hasBookFormatOffline,
+  OFFLINE_VAULT_UPDATED_EVENT,
+  readBookFormatOffline,
+  saveBookFormatOffline,
+} from '../../../lib/offline/offline-vault';
 import { cn } from '../../../lib/utils';
 import { useToast } from '../../toast/toast-context';
 import {
@@ -54,6 +61,8 @@ export interface PdfViewerProps {
   book: PublicBookDTO;
   streamUrl: string;
   isSample: boolean;
+  userId?: string;
+  preferOffline?: boolean;
   bearerTokenProvider?: () => Promise<string | null>;
   onRefreshSignedUrl?: () => Promise<string | null>;
   onSwitchToFullMode?: () => void;
@@ -80,6 +89,8 @@ export function PdfViewer({
   book,
   streamUrl,
   isSample,
+  userId,
+  preferOffline = false,
   bearerTokenProvider,
   onRefreshSignedUrl,
   onSwitchToFullMode,
@@ -275,16 +286,23 @@ export function PdfViewer({
     pageLayoutItemsRef.current = pageLayoutMetrics.items;
   }, [pageLayoutMetrics.items]);
 
-  // Check offline vault status on mount
+  // Check offline vault status on mount & vault updates
   useEffect(() => {
     let active = true;
-    void hasOfflineAsset(vaultKey).then((exists) => {
+    const syncVaultState = async () => {
+      const exists =
+        !isSample && userId
+          ? await hasBookFormatOffline(userId, book.id, 'pdf')
+          : await hasOfflineAsset(vaultKey);
       if (active) setIsSavedOffline(exists);
-    });
+    };
+    void syncVaultState();
+    window.addEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
     return () => {
       active = false;
+      window.removeEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
     };
-  }, [vaultKey]);
+  }, [book.id, isSample, userId, vaultKey]);
 
   // Measure .pdf-viewport width & maintain reading anchor on orientation/resize
   useEffect(() => {
@@ -564,7 +582,7 @@ export function PdfViewer({
     return spawnWorkerInstance();
   }, []);
 
-  // Fetch PDF Bytes (Offline Vault -> Online Stream w/ Silent 401/403 Refresh) & Open in Worker
+  // Fetch PDF Bytes (Offline Vault <-> Verified Online Stream w/ Silent 401/403 Refresh) & Open in Worker
   useEffect(() => {
     let cancelled = false;
     const abortController = new AbortController();
@@ -572,6 +590,70 @@ export function PdfViewer({
       () => abortController.abort(),
       FETCH_TIMEOUT_MS
     );
+
+    const readFromLocalVault = async (): Promise<ArrayBuffer | null> => {
+      if (!isSample && userId) {
+        const uidBuf = await readBookFormatOffline(userId, book.id, 'pdf');
+        if (uidBuf) return uidBuf;
+      }
+      return readOfflineAsset(vaultKey);
+    };
+
+    const fetchOnlinePdfStream = async (): Promise<ArrayBuffer> => {
+      let resolvedUrl = streamUrl;
+      if (!resolvedUrl && !isSample && onRefreshSignedUrlRef.current) {
+        resolvedUrl = (await onRefreshSignedUrlRef.current()) || '';
+      }
+      if (!resolvedUrl) {
+        throw new Error('No PDF stream URL configured for this book.');
+      }
+
+      const fetchWithUrl = async (targetUrl: string): Promise<Response> => {
+        const headers: Record<string, string> = {};
+        const tokenProvider = bearerTokenProviderRef.current;
+        if (tokenProvider) {
+          const token = await tokenProvider();
+          if (token) {
+            headers.Authorization = `Bearer ${token}`;
+          }
+        }
+        return fetch(targetUrl, {
+          method: 'GET',
+          headers,
+          signal: abortController.signal,
+        });
+      };
+
+      let res = await fetchWithUrl(resolvedUrl);
+
+      // Silent 401/403 expired signed-URL refresh retry before surfacing errors
+      if (
+        (res.status === 401 || res.status === 403) &&
+        !isSample &&
+        onRefreshSignedUrlRef.current
+      ) {
+        const refreshedUrl = await onRefreshSignedUrlRef.current();
+        if (refreshedUrl) {
+          res = await fetchWithUrl(refreshedUrl);
+        }
+      }
+
+      if (!res.ok) {
+        const errPayload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(
+          errPayload.error || `Failed to load PDF stream (HTTP ${res.status}).`
+        );
+      }
+
+      const contentLen = Number(res.headers.get('content-length') || '0');
+      if (contentLen > FETCH_MAX_BYTES) {
+        throw new Error('PDF file exceeds the 64 MB safe download budget.');
+      }
+
+      return res.arrayBuffer();
+    };
 
     const runLoad = async () => {
       await Promise.resolve();
@@ -581,61 +663,38 @@ export function PdfViewer({
       setErrorMessage('');
 
       try {
-        // 1. Check Offline Vault first
-        let pdfBuffer = await readOfflineAsset(vaultKey);
-        if (cancelled) return;
+        let pdfBuffer: ArrayBuffer | null = null;
+        const offlineFirst =
+          isSample ||
+          preferOffline ||
+          (typeof navigator !== 'undefined' && !navigator.onLine);
 
-        // 2. Fetch Online Stream if not in vault
-        if (!pdfBuffer) {
-          if (!streamUrl) {
-            throw new Error('No PDF stream URL configured for this book.');
-          }
-          const fetchWithUrl = async (targetUrl: string): Promise<Response> => {
-            const headers: Record<string, string> = {};
-            const tokenProvider = bearerTokenProviderRef.current;
-            if (tokenProvider) {
-              const token = await tokenProvider();
-              if (token) {
-                headers.Authorization = `Bearer ${token}`;
-              }
-            }
-            return fetch(targetUrl, {
-              method: 'GET',
-              headers,
-              signal: abortController.signal,
-            });
-          };
-
-          let res = await fetchWithUrl(streamUrl);
-
-          // Silent 401/403 expired signed-URL refresh retry before surfacing errors
+        if (offlineFirst) {
+          pdfBuffer = await readFromLocalVault();
+          if (cancelled) return;
           if (
-            (res.status === 401 || res.status === 403) &&
-            !isSample &&
-            onRefreshSignedUrlRef.current
+            !pdfBuffer &&
+            (typeof navigator === 'undefined' || navigator.onLine)
           ) {
-            const refreshedUrl = await onRefreshSignedUrlRef.current();
-            if (refreshedUrl) {
-              res = await fetchWithUrl(refreshedUrl);
-            }
+            pdfBuffer = await fetchOnlinePdfStream();
           }
-
-          if (!res.ok) {
-            const errPayload = (await res.json().catch(() => ({}))) as {
-              error?: string;
-            };
+          if (!pdfBuffer) {
             throw new Error(
-              errPayload.error ||
-                `Failed to load PDF stream (HTTP ${res.status}).`
+              'This PDF is not saved offline on this device yet. Reconnect to read online or save offline.'
             );
           }
-
-          const contentLen = Number(res.headers.get('content-length') || '0');
-          if (contentLen > FETCH_MAX_BYTES) {
-            throw new Error('PDF file exceeds the 64 MB safe download budget.');
+        } else {
+          try {
+            pdfBuffer = await fetchOnlinePdfStream();
+          } catch (onlineErr) {
+            if (cancelled) return;
+            const vaultFallback = await readFromLocalVault();
+            if (vaultFallback) {
+              pdfBuffer = vaultFallback;
+            } else {
+              throw onlineErr;
+            }
           }
-
-          pdfBuffer = await res.arrayBuffer();
         }
 
         if (cancelled) return;
@@ -679,11 +738,14 @@ export function PdfViewer({
       abortController.abort();
     };
   }, [
+    book.id,
     createAndBindWorker,
     isSample,
+    preferOffline,
     reloadNonce,
     streamUrl,
     submittedPassword,
+    userId,
     vaultKey,
   ]);
 
@@ -1087,7 +1149,11 @@ export function PdfViewer({
 
   const handleToggleOfflineVault = async () => {
     if (isSavedOffline) {
-      await removeOfflineAsset(vaultKey);
+      if (!isSample && userId) {
+        await deleteBookFormatOffline(userId, book.id, 'pdf');
+      } else {
+        await removeOfflineAsset(vaultKey);
+      }
       setIsSavedOffline(false);
       showToast('Removed offline PDF copy from device vault.');
       return;
@@ -1099,13 +1165,37 @@ export function PdfViewer({
     }
     setIsSavingOffline(true);
     try {
-      const ok = await saveOfflineAsset(vaultKey, buffer);
-      if (ok) {
+      if (!isSample && userId) {
+        const ctrl = new AbortController();
+        await saveBookFormatOffline({
+          uid: userId,
+          itemId: book.id,
+          urlSlug: book.urlSlug,
+          format: 'pdf',
+          remoteUpdatedAtMs:
+            new Date(book.updatedAtIso).getTime() || Date.now(),
+          getIdToken: bearerTokenProviderRef.current || (async () => null),
+          signal: ctrl.signal,
+          prebuiltBuffer: buffer.slice(0),
+        });
         setIsSavedOffline(true);
         showToast('Saved PDF to private offline study vault!', 'success');
       } else {
-        showToast('Unable to save offline copy on this browser.', 'danger');
+        const ok = await saveOfflineAsset(vaultKey, buffer);
+        if (ok) {
+          setIsSavedOffline(true);
+          showToast('Saved PDF to private offline study vault!', 'success');
+        } else {
+          showToast('Unable to save offline copy on this browser.', 'danger');
+        }
       }
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : 'Unable to save offline copy on this device.',
+        'danger'
+      );
     } finally {
       setIsSavingOffline(false);
     }

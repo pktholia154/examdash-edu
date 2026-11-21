@@ -1,88 +1,97 @@
 'use client';
 
 import React, {
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import {
-  Clock,
-  ExternalLink,
-  HardDriveDownload,
-  HelpCircle,
-  KeyRound,
+  ArrowRight,
+  ChevronDown,
+  Download,
+  HardDrive,
+  Loader2,
   Lock,
-  Play,
-  RotateCcw,
-  Trophy,
+  RefreshCw,
+  Trash2,
+  Wifi,
+  WifiOff,
+  X,
 } from 'lucide-react';
 import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
-import { ViewToggle } from '../../components/ui/view-toggle';
-import { CatalogGridSkeleton } from '../../components/ui/skeleton';
 import { EmptyState } from '../../components/ui/state-blocks';
-import type { UserPurchaseRecord, ViewMode } from '../../lib/types/catalog';
-import type {
-  CompletedAttemptSummary,
-  ExamSet,
-} from '../../lib/exam/types';
 import {
-  cacheExamPackOffline,
   EXAM_ATTEMPTS_UPDATED_EVENT,
-  getCompletedAttemptsSync,
   loadExamSessionSync,
-  readCachedExamPackOffline,
 } from '../../lib/exam/storage';
-import { formatPrice } from '../../lib/registry/content-type-registry';
-import { createUuidV7 } from '../../lib/platform/capacitor-bridge';
+import {
+  clearAllUserOfflineAssets,
+  deleteBookFormatOffline,
+  deleteExamPackOffline,
+  formatBytesCompact,
+  getStorageUsageSummary,
+  listUserOfflineAssets,
+  OFFLINE_VAULT_UPDATED_EVENT,
+  requestSignedAssetUnlock,
+  saveBookFormatOffline,
+  saveExamPackShardedOffline,
+  type OfflineAssetRecord,
+  type StorageUsageSummary,
+} from '../../lib/offline/offline-vault';
+import type {
+  MocktestTitleItem,
+  UserPurchaseRecord,
+} from '../../lib/types/catalog';
+import { cn } from '../../lib/utils';
 import { useAuth } from '../auth/auth-provider';
 import { useToast } from '../toast/toast-context';
-import { cn } from '../../lib/utils';
 
-type LibraryTab = 'all' | 'books' | 'ExamPackDocument';
-
-interface SignedGrantResponse {
-  expiresAtIso: string;
-  signature: string;
-  assets: {
-    pdfUrl?: string;
-    markdownUrl?: string;
-    jsonUrl?: string;
-  };
+export interface PurchasedBookCatalogMeta {
+  id: string;
+  urlSlug: string;
+  hasFullPdf: boolean;
+  hasFullMarkdown: boolean;
+  updatedAtMs: number;
 }
 
-export interface FlattenedExamSetEntry {
-  key: string;
-  packRecord: UserPurchaseRecord;
-  set: ExamSet;
-  setNumber: number;
-  totalSetsInPack: number;
-  offlineSaved: boolean;
+export interface PurchasedExamCatalogMeta {
+  id: string;
+  urlSlug: string;
+  totalMocktest: number;
+  hasFullJson: boolean;
+  updatedAtMs: number;
+  mocktestTitles: MocktestTitleItem[];
 }
 
-const LIB_VIEW_KEY = 'ed-view-library';
-const LIB_VIEW_EVENT = 'ed-view-library-change';
+type LibraryOfflineFilter = 'all' | 'offline';
 
-function subscribeLibView(cb: () => void) {
+function subscribeNetworkStatus(cb: () => void): () => void {
   if (typeof window === 'undefined') return () => {};
-  window.addEventListener(LIB_VIEW_EVENT, cb);
-  window.addEventListener('storage', cb);
+  window.addEventListener('online', cb);
+  window.addEventListener('offline', cb);
   return () => {
-    window.removeEventListener(LIB_VIEW_EVENT, cb);
-    window.removeEventListener('storage', cb);
+    window.removeEventListener('online', cb);
+    window.removeEventListener('offline', cb);
   };
 }
 
-function getLibViewSnapshot(): ViewMode {
-  if (typeof window === 'undefined') return 'grid';
-  try {
-    return localStorage.getItem(LIB_VIEW_KEY) === 'list' ? 'list' : 'grid';
-  } catch {
-    return 'grid';
-  }
+function getNetworkSnapshot(): boolean {
+  if (typeof navigator === 'undefined') return true;
+  return navigator.onLine;
 }
 
-export function PurchasedLibraryView() {
+export function PurchasedLibraryView({
+  booksMeta = [],
+  examsMeta = [],
+}: {
+  booksMeta?: PurchasedBookCatalogMeta[];
+  examsMeta?: PurchasedExamCatalogMeta[];
+}) {
+  const router = useRouter();
   const {
     user,
     isAuthReady,
@@ -93,36 +102,137 @@ export function PurchasedLibraryView() {
   } = useAuth();
   const { showToast } = useToast();
 
-  const viewMode = useSyncExternalStore(
-    subscribeLibView,
-    getLibViewSnapshot,
-    (): ViewMode => 'grid'
+  const isOnline = useSyncExternalStore(
+    subscribeNetworkStatus,
+    getNetworkSnapshot,
+    () => true
   );
-  const [activeTab, setActiveTab] = useState<LibraryTab>('all');
-  const [unlockingId, setUnlockingId] = useState<string | null>(null);
-  const [unlockedMap, setUnlockedMap] = useState<
-    Record<string, SignedGrantResponse>
-  >({});
 
-  const [examSetsByPurchaseId, setExamSetsByPurchaseId] = useState<
-    Record<string, { sets: ExamSet[]; offlineSaved: boolean }>
+  const [filterMode, setFilterMode] = useState<LibraryOfflineFilter>('all');
+  const [offlineAssets, setOfflineAssets] = useState<OfflineAssetRecord[]>([]);
+  const [storageUsage, setStorageUsage] = useState<StorageUsageSummary>({
+    vaultBytes: 0,
+    assetCount: 0,
+    browserUsageBytes: null,
+    browserQuotaBytes: null,
+  });
+  const [manageStorageOpen, setManageStorageOpen] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+
+  // Active download progress (0-100) keyed by taskId
+  const [downloadProgress, setDownloadProgress] = useState<
+    Record<string, number>
   >({});
-  const [loadingExamSets, setLoadingExamSets] = useState<boolean>(false);
-  const [attemptsByKey, setAttemptsByKey] = useState<
-    Record<string, CompletedAttemptSummary>
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  // Short-lived signed URL minting state for immediate Online launches
+  const [launchingTaskKey, setLaunchingTaskKey] = useState<string | null>(null);
+
+  // User-selected Online vs Offline preferences when online & saved
+  const [bookFormatPref, setBookFormatPref] = useState<
+    Record<string, 'online' | 'offline'>
   >({});
-  const [inProgressByKey, setInProgressByKey] = useState<
+  const [examOfflineReadyToggle, setExamOfflineReadyToggle] = useState<
     Record<string, boolean>
   >({});
 
-  const handleViewChange = (mode: ViewMode) => {
-    try {
-      localStorage.setItem(LIB_VIEW_KEY, mode);
-    } catch {
-      // Ignore storage quota errors
+  // Track resumable in-progress exam set IDs per slug
+  const [resumableSets, setResumableSets] = useState<Record<string, boolean>>(
+    {}
+  );
+
+  const booksMetaById = useMemo(() => {
+    const map = new Map<string, PurchasedBookCatalogMeta>();
+    for (const b of booksMeta) {
+      map.set(b.id, b);
+      map.set(b.urlSlug, b);
     }
-    window.dispatchEvent(new Event(LIB_VIEW_EVENT));
-  };
+    return map;
+  }, [booksMeta]);
+
+  const examsMetaById = useMemo(() => {
+    const map = new Map<string, PurchasedExamCatalogMeta>();
+    for (const e of examsMeta) {
+      map.set(e.id, e);
+      map.set(e.urlSlug, e);
+    }
+    return map;
+  }, [examsMeta]);
+
+  // Abort any in-flight downloads if component unmounts
+  useEffect(() => {
+    const controllers = abortControllersRef.current;
+    return () => {
+      controllers.forEach((ctrl) => ctrl.abort());
+      controllers.clear();
+    };
+  }, []);
+
+  const userId = user?.uid;
+
+  const refreshVaultSnapshot = useCallback(async () => {
+    if (!userId) {
+      setOfflineAssets([]);
+      setStorageUsage({
+        vaultBytes: 0,
+        assetCount: 0,
+        browserUsageBytes: null,
+        browserQuotaBytes: null,
+      });
+      return;
+    }
+    const [assets, summary] = await Promise.all([
+      listUserOfflineAssets(userId),
+      getStorageUsageSummary(userId),
+    ]);
+    setOfflineAssets(assets);
+    setStorageUsage(summary);
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+    const sync = async () => {
+      await Promise.resolve();
+      if (!active) return;
+      await refreshVaultSnapshot();
+    };
+    void sync();
+    window.addEventListener(OFFLINE_VAULT_UPDATED_EVENT, sync);
+    return () => {
+      active = false;
+      window.removeEventListener(OFFLINE_VAULT_UPDATED_EVENT, sync);
+    };
+  }, [refreshVaultSnapshot]);
+
+  // Fast O(1) lookup maps for saved book formats & saved exam packs/shards
+  const savedBookAssetsMap = useMemo(() => {
+    const map = new Map<string, OfflineAssetRecord>();
+    for (const asset of offlineAssets) {
+      if (
+        asset.collectionName === 'books' &&
+        (asset.format === 'pdf' || asset.format === 'markdown')
+      ) {
+        map.set(`${asset.itemId}::${asset.format}`, asset);
+      }
+    }
+    return map;
+  }, [offlineAssets]);
+
+  const savedExamPacksMap = useMemo(() => {
+    const manifestByPack = new Map<string, OfflineAssetRecord>();
+    const shardsByPack = new Map<string, OfflineAssetRecord[]>();
+    for (const asset of offlineAssets) {
+      if (asset.collectionName !== 'ExamPackDocument') continue;
+      if (asset.format === 'exam_pack') {
+        manifestByPack.set(asset.itemId, asset);
+      } else if (asset.format === 'exam_set') {
+        const list = shardsByPack.get(asset.itemId) || [];
+        list.push(asset);
+        shardsByPack.set(asset.itemId, list);
+      }
+    }
+    return { manifestByPack, shardsByPack };
+  }, [offlineAssets]);
 
   const bookPurchases = useMemo(
     () => purchases.filter((p) => p.collectionName === 'books'),
@@ -134,192 +244,388 @@ export function PurchasedLibraryView() {
     [purchases]
   );
 
-  // Resolve and flatten all ExamSet[] from fullJsonStoragePath for every purchased ExamPackDocument
+  // Resolve 0ms MocktestTitles list for each purchased exam pack without downloading fullJsonStoragePath
+  const resolvedExamRows = useMemo(() => {
+    return examPurchases.map((record) => {
+      const catalogMeta =
+        examsMetaById.get(record.itemId) || examsMetaById.get(record.urlSlug);
+      const localShards =
+        savedExamPacksMap.shardsByPack.get(record.itemId) || [];
+      const manifest = savedExamPacksMap.manifestByPack.get(record.itemId);
+      const isPackSavedOffline = Boolean(manifest || localShards.length > 0);
+
+      let sets: MocktestTitleItem[] = [];
+      if (catalogMeta && catalogMeta.mocktestTitles.length > 0) {
+        sets = catalogMeta.mocktestTitles;
+      } else if (localShards.length > 0) {
+        sets = localShards.map((s, idx) => ({
+          id: s.setId || `exam_set_${idx + 1}`,
+          title: s.setTitle || `Mock Set ${String(idx + 1).padStart(2, '0')}`,
+          duration: s.duration || 60,
+          totalQuestions: s.totalQuestions || 0,
+          totalMarks: s.totalMarks || 0,
+        }));
+      } else {
+        const fallbackCount = Math.max(1, record.totalMocktest || 1);
+        sets = Array.from({ length: fallbackCount }, (_, idx) => ({
+          id: `exam_set_${idx + 1}`,
+          title: `Mock Set ${String(idx + 1).padStart(2, '0')}`,
+          duration: 60,
+          totalQuestions: 50,
+          totalMarks: 100,
+        }));
+      }
+
+      const savedAt =
+        manifest?.savedAt ||
+        (localShards.length > 0 ? localShards[0].savedAt : 0);
+      const remoteAt =
+        manifest?.remoteUpdatedAt ||
+        (localShards.length > 0 ? localShards[0].remoteUpdatedAt : 0);
+      const latestFirestoreMs = catalogMeta?.updatedAtMs || 0;
+      const hasUpdateAvailable =
+        isPackSavedOffline &&
+        latestFirestoreMs > savedAt + 1000 &&
+        latestFirestoreMs > remoteAt + 1000;
+
+      return {
+        record,
+        sets,
+        isPackSavedOffline,
+        hasUpdateAvailable,
+        remoteUpdatedAtMs: latestFirestoreMs,
+      };
+    });
+  }, [examPurchases, examsMetaById, savedExamPacksMap]);
+
+  // Sync in-progress CBT status for instant Resume detection
   useEffect(() => {
-    if (!user || examPurchases.length === 0) {
+    if (!user?.uid) return;
+    const syncInProgress = () => {
+      const next: Record<string, boolean> = {};
+      for (const row of resolvedExamRows) {
+        for (const s of row.sets) {
+          const sess = loadExamSessionSync(
+            row.record.urlSlug,
+            s.id,
+            'full',
+            user.uid
+          );
+          if (sess?.status === 'in_progress') {
+            next[`${row.record.urlSlug}::${s.id}`] = true;
+          }
+        }
+      }
+      setResumableSets(next);
+    };
+    syncInProgress();
+    window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, syncInProgress);
+    window.addEventListener('storage', syncInProgress);
+    return () => {
+      window.removeEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, syncInProgress);
+      window.removeEventListener('storage', syncInProgress);
+    };
+  }, [resolvedExamRows, user?.uid]);
+
+  const cancelActiveDownload = (taskKey: string) => {
+    const ctrl = abortControllersRef.current.get(taskKey);
+    if (ctrl) {
+      ctrl.abort();
+      abortControllersRef.current.delete(taskKey);
+    }
+    setDownloadProgress((prev) => {
+      const next = { ...prev };
+      delete next[taskKey];
+      return next;
+    });
+  };
+
+  const handleSaveBookOffline = async (
+    record: UserPurchaseRecord,
+    format: 'pdf' | 'markdown',
+    remoteUpdatedAtMs: number
+  ) => {
+    if (!user?.uid) return;
+    if (!isOnline) {
+      showToast('Connect to the internet to save offline files.', 'danger');
       return;
     }
 
-    let cancelled = false;
+    const taskKey = `book:${record.itemId}:${format}`;
+    cancelActiveDownload(taskKey);
+    const controller = new AbortController();
+    abortControllersRef.current.set(taskKey, controller);
+    setDownloadProgress((prev) => ({ ...prev, [taskKey]: 2 }));
 
-    const loadAllPurchasedExamSets = async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      setLoadingExamSets(true);
-      const token = await getIdToken();
-
-      const entries = await Promise.all(
-        examPurchases.map(async (record) => {
-          try {
-            const headers: Record<string, string> = {};
-            if (token) {
-              headers.Authorization = `Bearer ${token}`;
-            }
-            const res = await fetch(
-              `/api/v1/exams/${encodeURIComponent(record.urlSlug)}?mode=full`,
-              { headers }
-            );
-            if (res.ok) {
-              const sets = (await res.json()) as ExamSet[];
-              if (Array.isArray(sets) && sets.length > 0) {
-                const offlineSaved = await cacheExamPackOffline(
-                  record.urlSlug,
-                  'full',
-                  sets
-                );
-                return [record.purchaseId, { sets, offlineSaved }] as const;
-              }
-            }
-          } catch {
-            // Fall through to offline vault
-          }
-
-          const cached = await readCachedExamPackOffline(
-            record.urlSlug,
-            'full'
-          );
-          if (cached && cached.length > 0) {
-            return [
-              record.purchaseId,
-              { sets: cached, offlineSaved: true },
-            ] as const;
-          }
-
-          return [
-            record.purchaseId,
-            { sets: [] as ExamSet[], offlineSaved: false },
-          ] as const;
-        })
-      );
-
-      if (!cancelled) {
-        const nextMap: Record<
-          string,
-          { sets: ExamSet[]; offlineSaved: boolean }
-        > = {};
-        for (const [pid, payload] of entries) {
-          nextMap[pid] = payload;
-        }
-        setExamSetsByPurchaseId(nextMap);
-        setLoadingExamSets(false);
-      }
-    };
-
-    void loadAllPurchasedExamSets();
-    return () => {
-      cancelled = true;
-    };
-  }, [examPurchases, getIdToken, user]);
-
-  const flattenedExamSets: FlattenedExamSetEntry[] = useMemo(() => {
-    const out: FlattenedExamSetEntry[] = [];
-    for (const record of examPurchases) {
-      const resolved = examSetsByPurchaseId[record.purchaseId];
-      if (resolved && resolved.sets.length > 0) {
-        resolved.sets.forEach((set, idx) => {
-          out.push({
-            key: `${record.purchaseId}::${set.id}`,
-            packRecord: record,
-            set,
-            setNumber: idx + 1,
-            totalSetsInPack: resolved.sets.length,
-            offlineSaved: resolved.offlineSaved,
-          });
-        });
-      }
-    }
-    return out;
-  }, [examPurchases, examSetsByPurchaseId]);
-
-  // Any purchased exam pack whose individual ExamSet[] payload wasn't expanded yet/is empty
-  // still renders as an unlocked pack card so NO purchased exam ever goes missing on /purchased.
-  const unresolvedExamPurchases = useMemo(
-    () =>
-      examPurchases.filter((record) => {
-        const resolved = examSetsByPurchaseId[record.purchaseId];
-        return !resolved || resolved.sets.length === 0;
-      }),
-    [examPurchases, examSetsByPurchaseId]
-  );
-
-  // Sync local CBT attempt scores and resumable sessions for flattened sets
-  useEffect(() => {
-    const syncAttempts = () => {
-      const all = getCompletedAttemptsSync();
-      const map: Record<string, CompletedAttemptSummary> = {};
-      for (const a of all) {
-        const k = `${a.examSlug}::${a.setId}`;
-        if (!map[k]) map[k] = a;
-      }
-
-      const prog: Record<string, boolean> = {};
-      for (const item of flattenedExamSets) {
-        const sess = loadExamSessionSync(
-          item.packRecord.urlSlug,
-          item.set.id,
-          'full'
-        );
-        if (sess?.status === 'in_progress') {
-          prog[`${item.packRecord.urlSlug}::${item.set.id}`] = true;
-        }
-      }
-
-      setAttemptsByKey(map);
-      setInProgressByKey(prog);
-    };
-
-    syncAttempts();
-    window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, syncAttempts);
-    window.addEventListener('storage', syncAttempts);
-    return () => {
-      window.removeEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, syncAttempts);
-      window.removeEventListener('storage', syncAttempts);
-    };
-  }, [flattenedExamSets]);
-
-  const handleServerUnlock = async (record: UserPurchaseRecord) => {
-    setUnlockingId(record.purchaseId);
     try {
-      const idToken = await getIdToken();
-      if (!idToken) {
-        showToast('Session expired. Please sign in again.', 'danger');
-        return;
-      }
-
-      const res = await fetch('/api/v1/library/unlock', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-          'Idempotency-Key': createUuidV7(),
+      await saveBookFormatOffline({
+        uid: user.uid,
+        itemId: record.itemId,
+        urlSlug: record.urlSlug,
+        format,
+        remoteUpdatedAtMs,
+        getIdToken,
+        signal: controller.signal,
+        onProgress: (pct) => {
+          setDownloadProgress((prev) => ({ ...prev, [taskKey]: pct }));
         },
-        body: JSON.stringify({
-          collectionName: record.collectionName,
-          urlSlug: record.urlSlug,
-          purchaseId: record.purchaseId,
-        }),
       });
-
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        showToast(err.error || 'Could not generate signed asset link.', 'danger');
-        return;
+      setBookFormatPref((prev) => ({ ...prev, [taskKey]: 'offline' }));
+      showToast(
+        `Saved ${format.toUpperCase()} edition for offline reading.`,
+        'success'
+      );
+    } catch (err) {
+      if (
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        controller.signal.aborted
+      ) {
+        showToast('Offline download cancelled.');
+      } else {
+        showToast(
+          err instanceof Error
+            ? err.message
+            : 'Failed to save offline book copy.',
+          'danger'
+        );
       }
-
-      const grant = (await res.json()) as SignedGrantResponse;
-      setUnlockedMap((prev) => ({ ...prev, [record.purchaseId]: grant }));
-      showToast('Short-lived (15m) signed delivery link ready.', 'success');
-    } catch {
-      showToast('Network error while unlocking resource.', 'danger');
     } finally {
-      setUnlockingId(null);
+      abortControllersRef.current.delete(taskKey);
+      setDownloadProgress((prev) => {
+        const next = { ...prev };
+        delete next[taskKey];
+        return next;
+      });
     }
   };
 
+  const handleDeleteBookOffline = async (
+    record: UserPurchaseRecord,
+    format: 'pdf' | 'markdown'
+  ) => {
+    if (!user?.uid) return;
+    const taskKey = `book:${record.itemId}:${format}`;
+    await deleteBookFormatOffline(user.uid, record.itemId, format);
+    setBookFormatPref((prev) => ({ ...prev, [taskKey]: 'online' }));
+    showToast(`Removed offline ${format.toUpperCase()} file from device.`);
+  };
+
+  const handleLaunchBookReader = async (
+    record: UserPurchaseRecord,
+    format: 'pdf' | 'markdown',
+    source: 'online' | 'offline'
+  ) => {
+    if (!user?.uid) return;
+    const taskKey = `book:${record.itemId}:${format}`;
+    setBookFormatPref((prev) => ({ ...prev, [taskKey]: source }));
+
+    if (source === 'offline') {
+      router.push(
+        `/read/${record.urlSlug}?mode=full&format=${format}&source=offline`
+      );
+      return;
+    }
+
+    if (!isOnline) {
+      showToast('Device is offline. Switch to Read Offline.', 'danger');
+      return;
+    }
+
+    const launchId = `launch:${record.itemId}:${format}`;
+    setLaunchingTaskKey(launchId);
+    try {
+      await requestSignedAssetUnlock({
+        uid: user.uid,
+        collectionName: 'books',
+        urlSlug: record.urlSlug,
+        getIdToken,
+      });
+      router.push(
+        `/read/${record.urlSlug}?mode=full&format=${format}&source=online`
+      );
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : 'Unable to verify purchase entitlement.',
+        'danger'
+      );
+    } finally {
+      setLaunchingTaskKey(null);
+    }
+  };
+
+  const handleSaveExamPackOffline = async (
+    record: UserPurchaseRecord,
+    remoteUpdatedAtMs: number
+  ) => {
+    if (!user?.uid) return;
+    if (!isOnline) {
+      showToast('Connect to the internet to save exam sets offline.', 'danger');
+      return;
+    }
+
+    const taskKey = `exam:${record.itemId}`;
+    cancelActiveDownload(taskKey);
+    const controller = new AbortController();
+    abortControllersRef.current.set(taskKey, controller);
+    setDownloadProgress((prev) => ({ ...prev, [taskKey]: 2 }));
+
+    try {
+      const shards = await saveExamPackShardedOffline({
+        uid: user.uid,
+        packId: record.itemId,
+        urlSlug: record.urlSlug,
+        remoteUpdatedAtMs,
+        getIdToken,
+        signal: controller.signal,
+        onProgress: (pct) => {
+          setDownloadProgress((prev) => ({ ...prev, [taskKey]: pct }));
+        },
+      });
+      setExamOfflineReadyToggle((prev) => ({
+        ...prev,
+        [record.itemId]: true,
+      }));
+      showToast(
+        `Saved & sharded ${shards.length} mock ${
+          shards.length === 1 ? 'set' : 'sets'
+        } for offline execution.`,
+        'success'
+      );
+    } catch (err) {
+      if (
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        controller.signal.aborted
+      ) {
+        showToast('Offline exam download cancelled.');
+      } else {
+        showToast(
+          err instanceof Error
+            ? err.message
+            : 'Unable to save exam pack offline.',
+          'danger'
+        );
+      }
+    } finally {
+      abortControllersRef.current.delete(taskKey);
+      setDownloadProgress((prev) => {
+        const next = { ...prev };
+        delete next[taskKey];
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteExamPackOffline = async (record: UserPurchaseRecord) => {
+    if (!user?.uid) return;
+    await deleteExamPackOffline(user.uid, record.itemId);
+    setExamOfflineReadyToggle((prev) => ({
+      ...prev,
+      [record.itemId]: false,
+    }));
+    showToast('Removed offline exam shards from device.');
+  };
+
+  const handleLaunchExamSet = async (
+    record: UserPurchaseRecord,
+    setId: string,
+    source: 'online' | 'offline'
+  ) => {
+    if (!user?.uid) return;
+    const encodedSetId = encodeURIComponent(setId);
+
+    if (source === 'offline') {
+      router.push(
+        `/attempt/${record.urlSlug}/${encodedSetId}?source=offline`
+      );
+      return;
+    }
+
+    if (!isOnline) {
+      showToast(
+        'Device is offline. Save this exam pack offline while connected first.',
+        'danger'
+      );
+      return;
+    }
+
+    const launchId = `launch:exam:${record.itemId}:${setId}`;
+    setLaunchingTaskKey(launchId);
+    try {
+      await requestSignedAssetUnlock({
+        uid: user.uid,
+        collectionName: 'ExamPackDocument',
+        urlSlug: record.urlSlug,
+        getIdToken,
+      });
+      router.push(`/attempt/${record.urlSlug}/${encodedSetId}?source=online`);
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : 'Unable to verify exam pack entitlement.',
+        'danger'
+      );
+    } finally {
+      setLaunchingTaskKey(null);
+    }
+  };
+
+  const handleClearAllCache = async () => {
+    if (!user?.uid) return;
+    setIsClearingCache(true);
+    try {
+      await clearAllUserOfflineAssets(user.uid);
+      setBookFormatPref({});
+      setExamOfflineReadyToggle({});
+      setManageStorageOpen(false);
+      showToast('Cleared all offline files from local storage.', 'success');
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
+  // Filtered Lists (All vs Saved Offline)
+  const visibleBookRows = useMemo(() => {
+    return bookPurchases.filter((record) => {
+      if (filterMode === 'all') return true;
+      return (
+        savedBookAssetsMap.has(`${record.itemId}::pdf`) ||
+        savedBookAssetsMap.has(`${record.itemId}::markdown`)
+      );
+    });
+  }, [bookPurchases, filterMode, savedBookAssetsMap]);
+
+  const visibleExamRows = useMemo(() => {
+    return resolvedExamRows.filter((row) => {
+      if (filterMode === 'all') return true;
+      return row.isPackSavedOffline;
+    });
+  }, [filterMode, resolvedExamRows]);
+
+  const savedItemCount = useMemo(() => {
+    let count = 0;
+    for (const b of bookPurchases) {
+      if (
+        savedBookAssetsMap.has(`${b.itemId}::pdf`) ||
+        savedBookAssetsMap.has(`${b.itemId}::markdown`)
+      ) {
+        count += 1;
+      }
+    }
+    for (const e of resolvedExamRows) {
+      if (e.isPackSavedOffline) count += 1;
+    }
+    return count;
+  }, [bookPurchases, resolvedExamRows, savedBookAssetsMap]);
+
   if (!isAuthReady) {
     return (
-      <div className="ed-container py-10">
-        <CatalogGridSkeleton count={4} />
+      <div className="ed-container py-8 space-y-3">
+        <div className="h-14 w-full rounded-xl ed-skeleton" />
+        <div className="h-24 w-full rounded-xl ed-skeleton" />
+        <div className="h-28 w-full rounded-xl ed-skeleton" />
       </div>
     );
   }
@@ -335,9 +641,8 @@ export function PurchasedLibraryView() {
             Sign in to access your Purchased Library
           </h1>
           <p className="mt-2 text-sm text-[var(--text-muted)]">
-            Authenticate with Google to view your unlocked ebooks, question
-            banks, and flattened full-length mock test sets across web and
-            mobile.
+            Authenticate with Google to view your unlocked ebooks and mock test
+            packs across online and offline study modes.
           </p>
           <button
             type="button"
@@ -352,423 +657,680 @@ export function PurchasedLibraryView() {
     );
   }
 
-  const booksCount = bookPurchases.length;
-  const examSetsCount =
-    flattenedExamSets.length > 0
-      ? flattenedExamSets.length
-      : examPurchases.reduce((acc, p) => acc + (p.totalMocktest || 1), 0);
-  const totalFlattenedItems = booksCount + examSetsCount;
-
-  const showBooks = activeTab === 'all' || activeTab === 'books';
-  const showExams = activeTab === 'all' || activeTab === 'ExamPackDocument';
-  const isEmptySelection =
-    (activeTab === 'books' && booksCount === 0) ||
-    (activeTab === 'ExamPackDocument' && examPurchases.length === 0) ||
-    (activeTab === 'all' && purchases.length === 0);
+  const totalPurchasesCount = bookPurchases.length + examPurchases.length;
 
   return (
-    <div className="ed-container py-10 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6 border-b border-[var(--border-subtle)]">
-        <div>
-          <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)]">
-            Purchased Library
-          </h1>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Every unlocked mock exam set is flattened below for direct CBT
-            execution, instant resume, and post-exam analytics.
-          </p>
+    <div className="ed-container py-6 sm:py-8 space-y-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[var(--text-main)]">
+          Purchased Library
+        </h1>
+        <span className="text-xs font-medium text-[var(--text-muted)] tabular-nums">
+          {totalPurchasesCount}{' '}
+          {totalPurchasesCount === 1 ? 'Item' : 'Items'} Unlocked
+        </span>
+      </div>
+
+      {/* Top Minimal Offline Control Strip */}
+      <div
+        role="region"
+        aria-label="Offline library controls"
+        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2.5 sm:p-3 space-y-2.5 tabular-nums"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          {/* All | Saved Offline Filter */}
+          <div
+            role="tablist"
+            aria-label="Filter library items"
+            className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={filterMode === 'all'}
+              onClick={() => setFilterMode('all')}
+              className={cn(
+                'min-h-[48px] px-4 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap',
+                filterMode === 'all'
+                  ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+              )}
+            >
+              All ({totalPurchasesCount})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={filterMode === 'offline'}
+              onClick={() => setFilterMode('offline')}
+              className={cn(
+                'min-h-[48px] px-4 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap',
+                filterMode === 'offline'
+                  ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+              )}
+            >
+              Saved Offline ({savedItemCount})
+            </button>
+          </div>
+
+          {/* Right Status + Compact Local Storage Manage / Clear Cache */}
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 ms-auto">
+            <span
+              role="status"
+              className={cn(
+                'inline-flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap px-2',
+                isOnline
+                  ? 'text-[var(--text-muted)]'
+                  : 'text-[var(--status-warning)]'
+              )}
+            >
+              {isOnline ? (
+                <>
+                  <Wifi
+                    className="w-3.5 h-3.5 text-[var(--status-success)] shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span>Online</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>Offline Mode</span>
+                </>
+              )}
+            </span>
+
+            <span
+              aria-hidden="true"
+              className="text-[var(--border-strong)] hidden sm:inline"
+            >
+              |
+            </span>
+
+            <button
+              type="button"
+              aria-expanded={manageStorageOpen}
+              onClick={() => setManageStorageOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 min-h-[48px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap"
+            >
+              <HardDrive
+                className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0"
+                aria-hidden="true"
+              />
+              <span>{formatBytesCompact(storageUsage.vaultBytes)}</span>
+              <span className="text-[var(--text-muted)]">· Manage</span>
+            </button>
+          </div>
         </div>
 
-        <ViewToggle
-          value={viewMode}
-          onChange={handleViewChange}
-          labelPrefix="Library"
-        />
+        {/* Inline Storage Management Drawer (Zero window.confirm) */}
+        {manageStorageOpen && (
+          <div className="pt-2.5 border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="text-[var(--text-muted)]">
+              <span>
+                Offline Vault:{' '}
+                <strong className="text-[var(--text-main)]">
+                  {formatBytesCompact(storageUsage.vaultBytes)}
+                </strong>{' '}
+                across {storageUsage.assetCount} saved{' '}
+                {storageUsage.assetCount === 1 ? 'bundle' : 'bundles'}
+              </span>
+              {storageUsage.browserQuotaBytes ? (
+                <span>
+                  {' '}
+                  · Device quota{' '}
+                  {formatBytesCompact(storageUsage.browserQuotaBytes)}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 ms-auto">
+              <button
+                type="button"
+                disabled={storageUsage.vaultBytes === 0 || isClearingCache}
+                onClick={() => void handleClearAllCache()}
+                className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--status-danger)] text-[var(--status-danger)] hover:bg-[var(--status-danger-bg)] disabled:opacity-40 text-xs font-semibold transition-colors whitespace-nowrap"
+              >
+                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>
+                  {isClearingCache ? 'Clearing...' : 'Clear Cache'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setManageStorageOpen(false)}
+                className="inline-flex items-center justify-center min-h-[48px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Collection Tabs */}
-      <div
-        role="tablist"
-        aria-label="Filter purchased items by collection"
-        className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'all'}
-          onClick={() => setActiveTab('all')}
-          className={cn(
-            'min-h-[38px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap tabular-nums',
-            activeTab === 'all'
-              ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-          )}
-        >
-          All ({totalFlattenedItems})
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'books'}
-          onClick={() => setActiveTab('books')}
-          className={cn(
-            'min-h-[38px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap tabular-nums',
-            activeTab === 'books'
-              ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-          )}
-        >
-          Books ({booksCount})
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'ExamPackDocument'}
-          onClick={() => setActiveTab('ExamPackDocument')}
-          className={cn(
-            'min-h-[38px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap tabular-nums',
-            activeTab === 'ExamPackDocument'
-              ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-          )}
-        >
-          Exam Sets ({examSetsCount})
-        </button>
-      </div>
-
-      {isEmptySelection ? (
+      {/* Empty States */}
+      {totalPurchasesCount === 0 ? (
         <EmptyState
-          title="No purchased items in this tab yet"
-          description="Explore the live Books and Exam Packs catalogs to unlock ebooks and full-length mock test sets."
+          title="Your Purchased Library is empty"
+          description="Explore Books and Exam Packs to unlock digital study editions and full-length mock test sets."
           actionLabel="Explore Catalog"
           actionHref="/"
         />
+      ) : visibleBookRows.length === 0 && visibleExamRows.length === 0 ? (
+        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-8 text-center space-y-3">
+          <p className="text-base font-bold text-[var(--text-main)]">
+            No items saved offline yet
+          </p>
+          <p className="text-xs sm:text-sm text-[var(--text-muted)] max-w-md mx-auto">
+            Switch to All and tap Save Offline on any book or exam pack to store
+            an eviction-proof local copy on this device.
+          </p>
+          <button
+            type="button"
+            onClick={() => setFilterMode('all')}
+            className="inline-flex items-center justify-center min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs sm:text-sm font-semibold"
+          >
+            Show All Purchased Items
+          </button>
+        </div>
       ) : (
-        <div className="space-y-8">
-          {/* Flattened Individual Exam Sets Section */}
-          {showExams && examPurchases.length > 0 && (
-            <section aria-label="Unlocked exam sets" className="space-y-4">
-              {activeTab === 'all' && booksCount > 0 && (
-                <h2 className="text-base font-bold text-[var(--text-main)]">
-                  Unlocked Mock Exam Sets ({examSetsCount})
-                </h2>
-              )}
+        /* 100% Locked Strict Minimal ListView */
+        <div
+          role="list"
+          aria-label="Purchased items list"
+          className="divide-y divide-[var(--border-subtle)] rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden tabular-nums"
+        >
+          {/* A. Purchased Book Rows (books) */}
+          {visibleBookRows.map((record) => {
+            const meta =
+              booksMetaById.get(record.itemId) ||
+              booksMetaById.get(record.urlSlug);
+            const showPdf = meta ? meta.hasFullPdf : true;
+            const showMarkdown = meta ? meta.hasFullMarkdown : false;
+            const formatsToRender: Array<'pdf' | 'markdown'> = [];
+            if (showPdf) formatsToRender.push('pdf');
+            if (showMarkdown) formatsToRender.push('markdown');
+            if (formatsToRender.length === 0) formatsToRender.push('pdf');
 
-              {loadingExamSets && flattenedExamSets.length === 0 ? (
-                <CatalogGridSkeleton count={2} />
-              ) : (
-                <div
-                  className={
-                    viewMode === 'grid'
-                      ? 'ed-catalog-grid'
-                      : 'flex flex-col gap-3'
-                  }
-                >
-                  {flattenedExamSets.map((entry) => {
-                    const attemptHref = `/attempt/${entry.packRecord.urlSlug}/${encodeURIComponent(entry.set.id)}`;
-                    const statusKey = `${entry.packRecord.urlSlug}::${entry.set.id}`;
-                    const lastAttempt = attemptsByKey[statusKey];
-                    const isResumable = Boolean(inProgressByKey[statusKey]);
+            const remoteUpdatedAtMs = meta?.updatedAtMs || 0;
 
-                    return (
-                      <article
-                        key={entry.key}
-                        className={cn(
-                          'rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 tabular-nums',
-                          viewMode === 'list'
-                            ? 'flex flex-col sm:flex-row sm:items-center gap-4'
-                            : 'flex flex-col gap-3.5'
-                        )}
-                      >
-                        <a href={attemptHref} className="shrink-0 block">
-                          <MonogramThumbnail
-                            title={entry.set.title}
-                            type={`Set ${entry.setNumber}/${entry.totalSetsInPack}`}
-                            collectionName="ExamPackDocument"
-                            size={viewMode === 'list' ? 'sm' : 'md'}
-                          />
-                        </a>
+            return (
+              <div
+                key={record.purchaseId}
+                role="listitem"
+                className="p-3.5 sm:p-4 flex items-start gap-3.5"
+              >
+                <MonogramThumbnail
+                  title={record.title}
+                  type="EB"
+                  collectionName="books"
+                  size="xs"
+                  showBadge={false}
+                />
 
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-[var(--text-muted)] truncate">
-                            {entry.packRecord.title} · Set {entry.setNumber} of{' '}
-                            {entry.totalSetsInPack}
-                            {entry.offlineSaved ? ' · Offline Vault' : ''}
-                          </p>
-                          <h3 className="mt-0.5 text-base font-bold text-[var(--text-main)] line-clamp-2">
-                            <a href={attemptHref} className="hover:underline">
-                              {entry.set.title}
-                            </a>
-                          </h3>
+                <div className="flex-1 min-w-0 space-y-2.5">
+                  <h2 className="text-sm sm:text-base font-bold text-[var(--text-main)] line-clamp-1 sm:line-clamp-2 leading-snug">
+                    {record.title}
+                  </h2>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-muted)]">
-                            <span className="inline-flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                              <span>{entry.set.duration} min</span>
-                            </span>
-                            <span aria-hidden="true">·</span>
-                            <span className="inline-flex items-center gap-1">
-                              <HelpCircle
-                                className="w-3.5 h-3.5"
+                  {/* Side-by-side PDF & Markdown Action Clusters (stacking cleanly on narrow mobile) */}
+                  <div className="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2.5 lg:gap-5">
+                    {formatsToRender.map((fmt) => {
+                      const label = fmt === 'pdf' ? 'PDF:' : 'Markdown:';
+                      const taskKey = `book:${record.itemId}:${fmt}`;
+                      const launchKey = `launch:${record.itemId}:${fmt}`;
+                      const activePct = downloadProgress[taskKey];
+                      const isDownloading = typeof activePct === 'number';
+                      const savedAsset = savedBookAssetsMap.get(
+                        `${record.itemId}::${fmt}`
+                      );
+                      const isSaved = Boolean(savedAsset);
+                      const hasUpdate =
+                        isSaved &&
+                        savedAsset !== undefined &&
+                        remoteUpdatedAtMs > savedAsset.savedAt + 1000 &&
+                        remoteUpdatedAtMs > savedAsset.remoteUpdatedAt + 1000;
+
+                      const selectedMode: 'online' | 'offline' = !isOnline
+                        ? 'offline'
+                        : bookFormatPref[taskKey] || 'offline';
+
+                      return (
+                        <div
+                          key={fmt}
+                          className="flex flex-wrap items-center gap-2"
+                        >
+                          <span className="text-xs font-semibold text-[var(--text-muted)] min-w-[4.5rem]">
+                            {label}
+                          </span>
+
+                          {isDownloading ? (
+                            <button
+                              type="button"
+                              onClick={() => cancelActiveDownload(taskKey)}
+                              aria-label={`Cancel ${fmt.toUpperCase()} download (${activePct}%)`}
+                              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs font-bold text-[var(--text-main)] whitespace-nowrap"
+                            >
+                              <Loader2
+                                className="w-3.5 h-3.5 animate-spin shrink-0"
                                 aria-hidden="true"
                               />
-                              <span>{entry.set.totalQuestions} Qs</span>
-                            </span>
-                            <span aria-hidden="true">·</span>
-                            <span className="inline-flex items-center gap-1">
-                              <Trophy className="w-3.5 h-3.5" aria-hidden="true" />
-                              <span>{entry.set.totalMarks} Marks</span>
-                            </span>
-                          </div>
-
-                          {entry.packRecord.razorpayPaymentId && (
-                            <p className="mt-1.5 text-[11px] font-mono text-[var(--text-muted)] truncate">
-                              Receipt: {entry.packRecord.razorpayPaymentId}
-                            </p>
-                          )}
-
-                          {lastAttempt && (
-                            <p className="mt-2 text-xs font-semibold text-[var(--status-success)]">
-                              Last Score: {lastAttempt.totalScore} /{' '}
-                              {lastAttempt.maxScore} ({lastAttempt.accuracyPct}%
-                              accuracy)
-                            </p>
-                          )}
-
-                          {entry.offlineSaved && !lastAttempt && (
-                            <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)]">
-                              <HardDriveDownload
-                                className="w-3 h-3 text-[var(--status-success)]"
+                              <span>Saving {activePct}%</span>
+                              <X
+                                className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0"
                                 aria-hidden="true"
                               />
-                              <span>Ready for offline attempt</span>
-                            </p>
-                          )}
-                        </div>
+                            </button>
+                          ) : isSaved ? (
+                            <div className="inline-flex flex-wrap items-center gap-1.5">
+                              {/* [ Read Online | ● Read Offline ] */}
+                              <div
+                                role="group"
+                                aria-label={`${record.title} ${fmt.toUpperCase()} reading mode`}
+                                className="inline-flex items-center rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] overflow-hidden"
+                              >
+                                <button
+                                  type="button"
+                                  disabled={
+                                    !isOnline || launchingTaskKey === launchKey
+                                  }
+                                  onClick={() =>
+                                    void handleLaunchBookReader(
+                                      record,
+                                      fmt,
+                                      'online'
+                                    )
+                                  }
+                                  className={cn(
+                                    'inline-flex items-center justify-center min-h-[48px] px-3 sm:px-3.5 text-xs font-semibold transition-colors whitespace-nowrap disabled:opacity-40',
+                                    isOnline && selectedMode === 'online'
+                                      ? 'bg-[var(--bg-elevated)] text-[var(--text-main)]'
+                                      : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)]/60'
+                                  )}
+                                >
+                                  {launchingTaskKey === launchKey
+                                    ? 'Opening...'
+                                    : 'Read Online'}
+                                </button>
+                                <span
+                                  aria-hidden="true"
+                                  className="w-px h-6 bg-[var(--border-subtle)]"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleLaunchBookReader(
+                                      record,
+                                      fmt,
+                                      'offline'
+                                    )
+                                  }
+                                  className={cn(
+                                    'inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3 sm:px-3.5 text-xs font-semibold transition-colors whitespace-nowrap',
+                                    selectedMode === 'offline'
+                                      ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
+                                      : 'text-[var(--text-main)] hover:bg-[var(--bg-elevated)]'
+                                  )}
+                                >
+                                  <span
+                                    aria-hidden="true"
+                                    className="w-2 h-2 rounded-full bg-current shrink-0"
+                                  />
+                                  <span>Read Offline</span>
+                                </button>
+                              </div>
 
-                        <div className="mt-auto pt-3 border-t sm:border-t-0 border-[var(--border-subtle)] flex flex-wrap items-center gap-2 shrink-0">
-                          <a
-                            href={attemptHref}
-                            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
-                          >
-                            {isResumable ? (
-                              <>
-                                <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                                <span>Resume Set</span>
-                              </>
-                            ) : lastAttempt ? (
-                              <>
-                                <RotateCcw
-                                  className="w-3.5 h-3.5"
+                              {hasUpdate && isOnline && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleSaveBookOffline(
+                                      record,
+                                      fmt,
+                                      remoteUpdatedAtMs
+                                    )
+                                  }
+                                  aria-label={`Update offline ${fmt.toUpperCase()} for ${record.title}`}
+                                  className="inline-flex items-center justify-center gap-1 min-h-[48px] px-3 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
+                                >
+                                  <RefreshCw
+                                    className="w-3.5 h-3.5 shrink-0"
+                                    aria-hidden="true"
+                                  />
+                                  <span>Update</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handleDeleteBookOffline(record, fmt)
+                                }
+                                aria-label={`Delete offline ${fmt.toUpperCase()} copy of ${record.title}`}
+                                className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:border-[var(--status-danger)] transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" aria-hidden="true" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline-flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={
+                                  !isOnline || launchingTaskKey === launchKey
+                                }
+                                onClick={() =>
+                                  void handleLaunchBookReader(
+                                    record,
+                                    fmt,
+                                    'online'
+                                  )
+                                }
+                                className="inline-flex items-center justify-center min-h-[48px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap"
+                              >
+                                {launchingTaskKey === launchKey
+                                  ? 'Opening...'
+                                  : 'Read Online'}
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={!isOnline}
+                                onClick={() =>
+                                  void handleSaveBookOffline(
+                                    record,
+                                    fmt,
+                                    remoteUpdatedAtMs
+                                  )
+                                }
+                                className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap"
+                              >
+                                <Download
+                                  className="w-3.5 h-3.5 shrink-0"
                                   aria-hidden="true"
                                 />
-                                <span>Review / Retry</span>
-                              </>
-                            ) : (
-                              <>
-                                <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                                <span>Attempt Set</span>
-                              </>
-                            )}
-                          </a>
-                        </div>
-                      </article>
-                    );
-                  })}
-
-                  {unresolvedExamPurchases.map((record) => {
-                    const attemptHref = `/attempt/${record.urlSlug}`;
-                    const detailHref = `/exams/${record.urlSlug}`;
-
-                    return (
-                      <article
-                        key={record.purchaseId}
-                        className={cn(
-                          'rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 tabular-nums',
-                          viewMode === 'list'
-                            ? 'flex flex-col sm:flex-row sm:items-center gap-4'
-                            : 'flex flex-col gap-3.5'
-                        )}
-                      >
-                        <a href={attemptHref} className="shrink-0 block">
-                          <MonogramThumbnail
-                            title={record.title}
-                            type={record.type}
-                            collectionName="ExamPackDocument"
-                            size={viewMode === 'list' ? 'sm' : 'md'}
-                          />
-                        </a>
-
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-base font-bold text-[var(--text-main)] line-clamp-2">
-                            <a href={attemptHref} className="hover:underline">
-                              {record.title}
-                            </a>
-                          </h3>
-                          <p className="mt-1 text-xs text-[var(--text-muted)]">
-                            {record.authorName} · {record.language}
-                            {record.totalMocktest
-                              ? ` · ${record.totalMocktest} Mock ${
-                                  record.totalMocktest === 1 ? 'Test' : 'Tests'
-                                }`
-                              : ''}
-                            {' · '}Paid{' '}
-                            {record.paidPrice === 0
-                              ? 'Free'
-                              : formatPrice(record.paidPrice, record.currency)}
-                          </p>
-                          {record.razorpayPaymentId && (
-                            <p className="mt-1 text-[11px] font-mono text-[var(--text-muted)] truncate">
-                              Receipt: {record.razorpayPaymentId}
-                            </p>
+                                <span>Save Offline</span>
+                              </button>
+                            </div>
                           )}
                         </div>
-
-                        <div className="mt-auto pt-3 border-t sm:border-t-0 border-[var(--border-subtle)] flex flex-wrap items-center gap-2 shrink-0">
-                          <a
-                            href={attemptHref}
-                            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
-                          >
-                            <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                            <span>Open Exam Pack</span>
-                          </a>
-                          <a
-                            href={detailHref}
-                            className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
-                          >
-                            <span>Syllabus</span>
-                            <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                          </a>
-                        </div>
-                      </article>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-            </section>
-          )}
+              </div>
+            );
+          })}
 
-          {/* Purchased Books Section */}
-          {showBooks && bookPurchases.length > 0 && (
-            <section aria-label="Unlocked study books" className="space-y-4">
-              {activeTab === 'all' && examPurchases.length > 0 && (
-                <h2 className="text-base font-bold text-[var(--text-main)]">
-                  Unlocked Books &amp; Notes ({booksCount})
-                </h2>
-              )}
+          {/* B. Purchased Exam Rows (ExamPackDocument — Set-1 Pinned + Collapsible Sets 2..N) */}
+          {visibleExamRows.map((row) => {
+            const {
+              record,
+              sets,
+              isPackSavedOffline,
+              hasUpdateAvailable,
+              remoteUpdatedAtMs,
+            } = row;
+            const firstSet = sets[0];
+            const remainingSets = sets.slice(1);
 
-              <div
-                className={
-                  viewMode === 'grid'
-                    ? 'ed-catalog-grid'
-                    : 'flex flex-col gap-3'
-                }
-              >
-                {bookPurchases.map((record) => {
-                  const slotHref = `/read/${record.urlSlug}`;
-                  const grant = unlockedMap[record.purchaseId];
+            // Quick-launch target for Header [ Attempt Online ]: resume last in_progress set or Set 1
+            const resumableMatch = sets.find(
+              (s) => resumableSets[`${record.urlSlug}::${s.id}`]
+            );
+            const quickOnlineSetId =
+              resumableMatch?.id || firstSet?.id || 'exam_set_1';
 
-                  return (
-                    <article
-                      key={record.purchaseId}
-                      className={cn(
-                        'rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4',
-                        viewMode === 'list'
-                          ? 'flex flex-col sm:flex-row sm:items-center gap-4'
-                          : 'flex flex-col gap-3.5'
-                      )}
+            const packTaskKey = `exam:${record.itemId}`;
+            const activePackPct = downloadProgress[packTaskKey];
+            const isSavingPack = typeof activePackPct === 'number';
+            const headerLaunchKey = `launch:exam:${record.itemId}:${quickOnlineSetId}`;
+
+            const effectivePackOffline =
+              isPackSavedOffline &&
+              (!isOnline || (examOfflineReadyToggle[record.itemId] ?? true));
+
+            const renderSetRow = (
+              mockSet: MocktestTitleItem,
+              isLastBranch: boolean
+            ) => {
+              const isResumable = Boolean(
+                resumableSets[`${record.urlSlug}::${mockSet.id}`]
+              );
+              const setLaunchKey = `launch:exam:${record.itemId}:${mockSet.id}`;
+              const setSource: 'online' | 'offline' = effectivePackOffline
+                ? 'offline'
+                : 'online';
+              const canAttemptSet = isOnline || isPackSavedOffline;
+
+              return (
+                <div
+                  key={mockSet.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 border-t border-[var(--border-subtle)]/70 first:border-t-0"
+                >
+                  <div className="min-w-0 flex items-baseline gap-2">
+                    <span
+                      aria-hidden="true"
+                      className="font-mono text-xs text-[var(--text-muted)] shrink-0 select-none"
                     >
-                      <a href={slotHref} className="shrink-0 block">
-                        <MonogramThumbnail
-                          title={record.title}
-                          type={record.type}
-                          collectionName="books"
-                          size={viewMode === 'list' ? 'sm' : 'md'}
+                      {isLastBranch ? '└─' : '├─'}
+                    </span>
+                    <div className="min-w-0 text-xs sm:text-sm">
+                      <span className="font-semibold text-[var(--text-main)]">
+                        {mockSet.title}
+                      </span>{' '}
+                      <span className="text-xs text-[var(--text-muted)] whitespace-nowrap">
+                        ({mockSet.duration}m · {mockSet.totalQuestions}Q ·{' '}
+                        {mockSet.totalMarks}M)
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={
+                      !canAttemptSet || launchingTaskKey === setLaunchKey
+                    }
+                    onClick={() =>
+                      void handleLaunchExamSet(record, mockSet.id, setSource)
+                    }
+                    className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto"
+                  >
+                    <span>
+                      {launchingTaskKey === setLaunchKey
+                        ? 'Opening...'
+                        : isResumable
+                        ? 'Resume'
+                        : 'Attempt Now'}
+                    </span>
+                    <ArrowRight
+                      className="w-3.5 h-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+              );
+            };
+
+            return (
+              <div
+                key={record.purchaseId}
+                role="listitem"
+                className="p-3.5 sm:p-4 space-y-3"
+              >
+                {/* Pack Header Row */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <MonogramThumbnail
+                      title={record.title}
+                      type="EX"
+                      collectionName="ExamPackDocument"
+                      size="xs"
+                      showBadge={false}
+                    />
+                    <h2 className="text-sm sm:text-base font-bold text-[var(--text-main)] line-clamp-1 sm:line-clamp-2 leading-snug">
+                      {record.title}
+                    </h2>
+                  </div>
+
+                  {/* Pack Header Actions */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 sm:ms-auto">
+                    <button
+                      type="button"
+                      disabled={
+                        !isOnline || launchingTaskKey === headerLaunchKey
+                      }
+                      onClick={() =>
+                        void handleLaunchExamSet(
+                          record,
+                          quickOnlineSetId,
+                          'online'
+                        )
+                      }
+                      className="inline-flex items-center justify-center min-h-[48px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap"
+                    >
+                      {launchingTaskKey === headerLaunchKey
+                        ? 'Opening...'
+                        : resumableMatch
+                        ? 'Resume Online'
+                        : 'Attempt Online'}
+                    </button>
+
+                    {isSavingPack ? (
+                      <button
+                        type="button"
+                        onClick={() => cancelActiveDownload(packTaskKey)}
+                        aria-label={`Cancel exam pack download (${activePackPct}%)`}
+                        className="inline-flex items-center justify-center gap-2 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs font-bold text-[var(--text-main)] whitespace-nowrap"
+                      >
+                        <Loader2
+                          className="w-3.5 h-3.5 animate-spin shrink-0"
+                          aria-hidden="true"
                         />
-                      </a>
-
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-base font-bold text-[var(--text-main)] line-clamp-2">
-                          <a href={slotHref} className="hover:underline">
-                            {record.title}
-                          </a>
-                        </h3>
-                        <p className="mt-1 text-xs text-[var(--text-muted)]">
-                          {record.authorName} · {record.language} · Paid{' '}
-                          {record.paidPrice === 0
-                            ? 'Free'
-                            : formatPrice(record.paidPrice, record.currency)}
-                        </p>
-                        {record.razorpayPaymentId && (
-                          <p className="mt-1 text-[11px] font-mono text-[var(--text-muted)] truncate">
-                            Receipt: {record.razorpayPaymentId}
-                          </p>
-                        )}
-
-                        {grant && (
-                          <div className="mt-2.5 p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-xs space-y-1">
-                            <p className="font-semibold text-[var(--status-success)]">
-                              Signed access active (expires{' '}
-                              {new Date(
-                                grant.expiresAtIso
-                              ).toLocaleTimeString()}
-                              )
-                            </p>
-                            <div className="flex flex-wrap gap-3">
-                              {grant.assets.pdfUrl && (
-                                <a
-                                  href={`${slotHref}?format=pdf`}
-                                  className="underline font-medium text-[var(--text-main)]"
-                                >
-                                  Open Full PDF Slot
-                                </a>
-                              )}
-                              {grant.assets.markdownUrl && (
-                                <a
-                                  href={`${slotHref}?format=markdown`}
-                                  className="underline font-medium text-[var(--text-main)]"
-                                >
-                                  Open Full Markdown Slot
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-auto pt-3 border-t sm:border-t-0 border-[var(--border-subtle)] flex flex-wrap items-center gap-2 shrink-0">
-                        <a
-                          href={slotHref}
-                          className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+                        <span>Saving {activePackPct}%</span>
+                        <X
+                          className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    ) : isPackSavedOffline ? (
+                      <div className="inline-flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          aria-pressed={effectivePackOffline}
+                          disabled={!isOnline}
+                          onClick={() =>
+                            setExamOfflineReadyToggle((prev) => ({
+                              ...prev,
+                              [record.itemId]: !(
+                                prev[record.itemId] ?? true
+                              ),
+                            }))
+                          }
+                          className={cn(
+                            'inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap',
+                            effectivePackOffline
+                              ? 'border-[var(--status-success)] bg-[var(--status-success)] text-white'
+                              : 'border-[var(--border-strong)] bg-[var(--bg-canvas)] text-[var(--text-main)] hover:bg-[var(--bg-elevated)]'
+                          )}
                         >
-                          <span>Open Reader</span>
-                          <ExternalLink
-                            className="w-3.5 h-3.5"
+                          <span
                             aria-hidden="true"
+                            className="w-2 h-2 rounded-full bg-current shrink-0"
                           />
-                        </a>
+                          <span>Offline Ready</span>
+                        </button>
+
+                        {hasUpdateAvailable && isOnline && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleSaveExamPackOffline(
+                                record,
+                                remoteUpdatedAtMs
+                              )
+                            }
+                            aria-label={`Update offline exam sets for ${record.title}`}
+                            className="inline-flex items-center justify-center gap-1 min-h-[48px] px-3 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
+                          >
+                            <RefreshCw
+                              className="w-3.5 h-3.5 shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span>Update</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"
-                          disabled={unlockingId === record.purchaseId}
-                          onClick={() => void handleServerUnlock(record)}
-                          aria-label={`Verify signed URL for ${record.title}`}
-                          className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] disabled:opacity-50 transition-colors whitespace-nowrap"
+                          onClick={() =>
+                            void handleDeleteExamPackOffline(record)
+                          }
+                          aria-label={`Delete offline exam sets for ${record.title}`}
+                          className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:border-[var(--status-danger)] transition-colors"
                         >
-                          <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>
-                            {unlockingId === record.purchaseId
-                              ? 'Signing...'
-                              : 'Signed Link'}
-                          </span>
+                          <Trash2 className="w-4 h-4" aria-hidden="true" />
                         </button>
                       </div>
-                    </article>
-                  );
-                })}
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isOnline}
+                        onClick={() =>
+                          void handleSaveExamPackOffline(
+                            record,
+                            remoteUpdatedAtMs
+                          )
+                        }
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap"
+                      >
+                        <Download
+                          className="w-3.5 h-3.5 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span>Save Offline</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Set-1 Always Pinned + Collapsible Sets 2..N */}
+                {firstSet && (
+                  <div className="ps-2 sm:ps-14 space-y-1">
+                    {renderSetRow(firstSet, remainingSets.length === 0)}
+
+                    {remainingSets.length > 0 && (
+                      <details className="group">
+                        <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer select-none inline-flex items-center gap-2 min-h-[48px] px-2 -ms-2 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)]/60 transition-colors">
+                          <span
+                            aria-hidden="true"
+                            className="font-mono text-[var(--text-muted)]"
+                          >
+                            └─
+                          </span>
+                          <ChevronDown
+                            className="w-3.5 h-3.5 transition-transform duration-150 group-open:rotate-180 shrink-0"
+                            aria-hidden="true"
+                          />
+                          <span>
+                            Show {remainingSets.length} More Mock{' '}
+                            {remainingSets.length === 1 ? 'Set' : 'Sets'}
+                          </span>
+                        </summary>
+
+                        <div className="ps-4 sm:ps-6 pt-1 divide-y divide-[var(--border-subtle)]/70">
+                          {remainingSets.map((s, idx) =>
+                            renderSetRow(s, idx === remainingSets.length - 1)
+                          )}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                )}
               </div>
-            </section>
-          )}
+            );
+          })}
         </div>
       )}
     </div>

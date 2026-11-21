@@ -4,10 +4,15 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useSyncExternalStore,
 } from 'react';
+import { syncNativeSystemBars } from '../../lib/platform/capacitor-bridge';
 
 export type ThemeMode = 'light' | 'dark';
+
+export const DARK_THEME_HEX = '#0B1120';
+export const LIGHT_THEME_HEX = '#F8FAFC';
 
 interface ThemeContextValue {
   theme: ThemeMode;
@@ -41,12 +46,31 @@ function getServerThemeSnapshot(): ThemeMode {
   return 'light';
 }
 
+function syncMetaThemeColor(mode: ThemeMode) {
+  if (typeof document === 'undefined') return;
+  const hex = mode === 'dark' ? DARK_THEME_HEX : LIGHT_THEME_HEX;
+  document.documentElement.style.colorScheme = mode;
+  let metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (!metaTheme) {
+    metaTheme = document.createElement('meta');
+    metaTheme.setAttribute('name', 'theme-color');
+    document.head.appendChild(metaTheme);
+  }
+  metaTheme.setAttribute('content', hex);
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const theme = useSyncExternalStore(
     subscribeTheme,
     getThemeSnapshot,
     getServerThemeSnapshot
   );
+
+  // Mirror active theme to <meta name="theme-color"> & Capacitor StatusBar/SystemBars on boot and change
+  useEffect(() => {
+    syncMetaThemeColor(theme);
+    void syncNativeSystemBars(theme);
+  }, [theme]);
 
   const applyTheme = useCallback((next: ThemeMode) => {
     const root = document.documentElement;
@@ -60,10 +84,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Ignore storage quota / private mode errors
     }
-    const metaTheme = document.querySelector('meta[name="theme-color"]');
-    if (metaTheme) {
-      metaTheme.setAttribute('content', next === 'dark' ? '#090D16' : '#F8FAFC');
-    }
+    syncMetaThemeColor(next);
+    void syncNativeSystemBars(next);
     window.dispatchEvent(new Event(THEME_EVENT));
   }, []);
 

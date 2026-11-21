@@ -83,6 +83,25 @@ export function middleware(req: NextRequest) {
   res.headers.delete('set-cookie');
   res.headers.set('X-Content-Type-Options', 'nosniff');
   res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  const rawHost = (
+    req.headers.get('x-forwarded-host') ||
+    req.headers.get('host') ||
+    ''
+  )
+    .split(',')[0]
+    .trim()
+    .toLowerCase()
+    .replace(/:\d+$/, '');
+
+  if (
+    rawHost &&
+    rawHost !== 'exam-dash.com' &&
+    rawHost !== 'www.exam-dash.com'
+  ) {
+    res.headers.set('X-Robots-Tag', 'noindex, nofollow');
+  }
+
   return res;
 }
 

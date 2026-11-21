@@ -1,13 +1,10 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { BookOpen, ExternalLink, FileText, Loader2, X } from 'lucide-react';
+import { BookOpen, FileText, Loader2, X } from 'lucide-react';
+import { apiUrl } from '../../lib/platform/api-base';
 import type { PublicBookDTO } from '../../lib/types/catalog';
-import { makeCompositeKey } from '../../lib/registry/content-type-registry';
-import { createUuidV7 } from '../../lib/platform/capacitor-bridge';
-import { useAuth } from '../auth/auth-provider';
-import { useToast } from '../toast/toast-context';
 import { cn } from '../../lib/utils';
 
 const PdfViewer = dynamic(
@@ -17,7 +14,7 @@ const PdfViewer = dynamic(
     loading: () => (
       <div className="flex items-center justify-center h-[72svh] text-sm text-[var(--text-muted)]">
         <Loader2 className="w-5 h-5 animate-spin me-2" aria-hidden="true" />
-        <span>Loading PDF Engine...</span>
+        <span>Loading PDF Sample...</span>
       </div>
     ),
   }
@@ -31,53 +28,45 @@ const MarkdownViewer = dynamic(
     loading: () => (
       <div className="flex items-center justify-center h-[72svh] text-sm text-[var(--text-muted)]">
         <Loader2 className="w-5 h-5 animate-spin me-2" aria-hidden="true" />
-        <span>Loading Study Reader...</span>
+        <span>Loading Sample Reader...</span>
       </div>
     ),
   }
 );
 
+export interface BookSampleModalItem {
+  id: string;
+  title: string;
+  urlSlug: string;
+  currency: string;
+  buyPrice: number;
+  listPrice: number;
+  samplePdfUrl?: string;
+  sampleMarkdownUrl?: string;
+}
+
 export interface BookInlineReaderModalProps {
-  book: PublicBookDTO;
+  book: BookSampleModalItem;
   initialFormat: 'pdf' | 'markdown';
-  initialMode: 'sample' | 'full';
   onClose: () => void;
 }
 
 /**
- * In-page Book Preview & Full Reader Sheet/Modal on `/books/[urlSlug]`.
- * Lets learners inspect PDF & Markdown samples or read purchased editions without leaving the detail page.
+ * Focused In-Page Book Sample Preview Modal on `/books/[urlSlug]`.
+ * Accepts primitive book fields so `DetailBuyCard` never serializes `fullDescription`.
  */
 export function BookInlineReaderModal({
   book,
   initialFormat,
-  initialMode,
   onClose,
 }: BookInlineReaderModalProps) {
-  const { user, ownedCompositeKeys, getIdToken } = useAuth();
-  const { showToast } = useToast();
-
-  const isOwned =
-    book.buyPrice === 0 ||
-    ownedCompositeKeys.has(makeCompositeKey('books', book.id));
-
   const [format, setFormat] = useState<'pdf' | 'markdown'>(initialFormat);
-  const [mode, setMode] = useState<'sample' | 'full'>(
-    initialMode === 'full' && isOwned ? 'full' : 'sample'
-  );
-  const [signedAssets, setSignedAssets] = useState<{
-    pdfUrl?: string;
-    markdownUrl?: string;
-    expiresAtIso?: string;
-  } | null>(null);
-  const [mintingSignedUrl, setMintingSignedUrl] = useState(false);
 
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  // Lock body scroll & wire Predictive Back / Escape without Strict Mode history.back() races
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -102,127 +91,51 @@ export function BookInlineReaderModal({
     };
   }, []);
 
-  const mintSignedUrls = useCallback(async (): Promise<{
-    pdfUrl?: string;
-    markdownUrl?: string;
-  } | null> => {
-    if (!user) return null;
-    setMintingSignedUrl(true);
-    try {
-      const token = await getIdToken();
-      if (!token) return null;
-      const res = await fetch('/api/v1/library/unlock', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          'Idempotency-Key': createUuidV7(),
-        },
-        body: JSON.stringify({
-          collectionName: 'books',
-          urlSlug: book.urlSlug,
-        }),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        showToast(err.error || 'Could not unlock full book stream.', 'danger');
-        return null;
-      }
-      const data = (await res.json()) as {
-        expiresAtIso: string;
-        assets: { pdfUrl?: string; markdownUrl?: string };
-      };
-      const next = {
-        pdfUrl: data.assets.pdfUrl,
-        markdownUrl: data.assets.markdownUrl,
-        expiresAtIso: data.expiresAtIso,
-      };
-      setSignedAssets(next);
-      return next;
-    } catch {
-      showToast('Network error while minting signed reader URL.', 'danger');
-      return null;
-    } finally {
-      setMintingSignedUrl(false);
-    }
-  }, [book.urlSlug, getIdToken, showToast, user]);
+  const viewerBookDto = useMemo<PublicBookDTO>(
+    () => ({
+      id: book.id,
+      collectionName: 'books',
+      title: book.title,
+      urlSlug: book.urlSlug,
+      seoDescription: '',
+      fullDescription: '',
+      type: 'Ebook',
+      language: 'English',
+      publisher: 'ExamDash',
+      authorName: 'ExamDash',
+      tags: [],
+      currency: book.currency,
+      listPrice: book.listPrice,
+      buyPrice: book.buyPrice,
+      publishAtIso: '',
+      updatedAtIso: '',
+      createdAtIso: '',
+      samplePdfUrl: book.samplePdfUrl || '',
+      sampleMarkdownUrl: book.sampleMarkdownUrl || '',
+      hasFullPdf: true,
+      hasFullMarkdown: true,
+    }),
+    [book]
+  );
 
-  useEffect(() => {
-    if (mode !== 'full' || !isOwned || !user || signedAssets) return;
-    let cancelled = false;
+  const samplePdfStreamUrl = apiUrl(
+    `/api/v1/library/stream?collection=books&slug=${encodeURIComponent(
+      book.urlSlug
+    )}&mode=sample&format=pdf`
+  );
+  const sampleMdStreamUrl = apiUrl(
+    `/api/v1/library/stream?collection=books&slug=${encodeURIComponent(
+      book.urlSlug
+    )}&mode=sample&format=markdown`
+  );
 
-    const autoMint = async () => {
-      try {
-        const token = await getIdToken();
-        if (!token || cancelled) return;
-        setMintingSignedUrl(true);
-        const res = await fetch('/api/v1/library/unlock', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-            'Idempotency-Key': createUuidV7(),
-          },
-          body: JSON.stringify({
-            collectionName: 'books',
-            urlSlug: book.urlSlug,
-          }),
-        });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as {
-          expiresAtIso: string;
-          assets: { pdfUrl?: string; markdownUrl?: string };
-        };
-        if (!cancelled) {
-          setSignedAssets({
-            pdfUrl: data.assets.pdfUrl,
-            markdownUrl: data.assets.markdownUrl,
-            expiresAtIso: data.expiresAtIso,
-          });
-        }
-      } catch {
-        // Retry button remains available
-      } finally {
-        if (!cancelled) setMintingSignedUrl(false);
-      }
-    };
-
-    void autoMint();
-    return () => {
-      cancelled = true;
-    };
-  }, [book.urlSlug, getIdToken, isOwned, mode, signedAssets, user]);
-
-  const samplePdfStreamUrl = `/api/v1/library/stream?collection=books&slug=${encodeURIComponent(
-    book.urlSlug
-  )}&mode=sample&format=pdf`;
-  const sampleMdStreamUrl = `/api/v1/library/stream?collection=books&slug=${encodeURIComponent(
-    book.urlSlug
-  )}&mode=sample&format=markdown`;
-
-  const handleRefreshPdfUrl = useCallback(async () => {
-    const next = await mintSignedUrls();
-    return next?.pdfUrl ?? null;
-  }, [mintSignedUrls]);
-
-  const handleRefreshMarkdownUrl = useCallback(async () => {
-    const next = await mintSignedUrls();
-    return next?.markdownUrl ?? null;
-  }, [mintSignedUrls]);
-
-  const isSampleActive = mode === 'sample' || !isOwned;
-  const activePdfUrl = isSampleActive
-    ? samplePdfStreamUrl
-    : signedAssets?.pdfUrl || '';
-  const activeMdUrl = isSampleActive
-    ? sampleMdStreamUrl
-    : signedAssets?.markdownUrl || '';
+  const hasBothSamples = Boolean(book.samplePdfUrl && book.sampleMarkdownUrl);
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`${book.title} inline reader`}
+      aria-label={`${book.title} sample preview`}
       data-nosnippet=""
       className="fixed inset-0 z-50 h-[100dvh] w-screen bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
       onClick={onClose}
@@ -231,68 +144,29 @@ export function BookInlineReaderModal({
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-6xl h-[94dvh] sm:h-[90dvh] rounded-t-2xl sm:rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] flex flex-col overflow-hidden shadow-xl"
       >
-        {/* Modal Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-[var(--text-muted)]">
-              {isSampleActive ? 'Instant Sample Preview' : 'Full Library Edition'} ·{' '}
-              {book.language}
+              Sample Preview
             </p>
             <h2 className="text-sm sm:text-base font-extrabold text-[var(--text-main)] truncate">
               {book.title}
             </h2>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {/* Sample vs Full Edition Switcher (when owned) */}
-            {isOwned && (
+          <div className="flex items-center gap-2 shrink-0">
+            {hasBothSamples && (
               <div
                 role="group"
-                aria-label="Edition mode"
+                aria-label="Sample format"
                 className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5"
               >
-                <button
-                  type="button"
-                  aria-pressed={mode === 'sample'}
-                  onClick={() => setMode('sample')}
-                  className={cn(
-                    'min-h-[38px] px-2.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
-                    mode === 'sample'
-                      ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-                      : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                  )}
-                >
-                  Sample
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={mode === 'full'}
-                  onClick={() => setMode('full')}
-                  className={cn(
-                    'min-h-[38px] px-2.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
-                    mode === 'full'
-                      ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-                      : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                  )}
-                >
-                  Full Book
-                </button>
-              </div>
-            )}
-
-            {/* PDF <-> Markdown Switcher */}
-            <div
-              role="group"
-              aria-label="Reader format"
-              className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5"
-            >
-              {(book.samplePdfUrl || (isOwned && book.hasFullPdf)) && (
                 <button
                   type="button"
                   aria-pressed={format === 'pdf'}
                   onClick={() => setFormat('pdf')}
                   className={cn(
-                    'inline-flex items-center gap-1.5 min-h-[38px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
+                    'inline-flex items-center gap-1.5 min-h-[48px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
                     format === 'pdf'
                       ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -301,14 +175,12 @@ export function BookInlineReaderModal({
                   <FileText className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>PDF</span>
                 </button>
-              )}
-              {(book.sampleMarkdownUrl || (isOwned && book.hasFullMarkdown)) && (
                 <button
                   type="button"
                   aria-pressed={format === 'markdown'}
                   onClick={() => setFormat('markdown')}
                   className={cn(
-                    'inline-flex items-center gap-1.5 min-h-[38px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
+                    'inline-flex items-center gap-1.5 min-h-[48px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
                     format === 'markdown'
                       ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -317,62 +189,33 @@ export function BookInlineReaderModal({
                   <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Markdown</span>
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
-            {/* Dedicated Reader Route Link */}
-            <a
-              href={`/read/${book.urlSlug}?mode=${
-                isSampleActive ? 'sample' : 'full'
-              }&format=${format}`}
-              className="hidden md:inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
-            >
-              <span>Dedicated Tab</span>
-              <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-            </a>
-
-            {/* Close Modal Button (returns to exact scroll position on Book Details page) */}
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close reader preview"
-              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
+              aria-label="Close sample preview"
+              className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
             >
               <X className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
         </div>
 
-        {/* Viewer Body */}
         <div className="flex-1 min-h-0 p-2 sm:p-3 bg-[var(--bg-canvas)]">
-          {!isSampleActive && mintingSignedUrl && !signedAssets ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <Loader2
-                className="w-6 h-6 animate-spin text-[var(--text-muted)] mb-2.5"
-                aria-hidden="true"
-              />
-              <p className="text-sm font-semibold text-[var(--text-main)]">
-                Verifying purchase & minting 15-minute signed stream...
-              </p>
-            </div>
-          ) : format === 'pdf' ? (
+          {format === 'pdf' ? (
             <PdfViewer
-              book={book}
-              streamUrl={activePdfUrl}
-              isSample={isSampleActive}
-              bearerTokenProvider={getIdToken}
-              onRefreshSignedUrl={handleRefreshPdfUrl}
-              onSwitchToFullMode={() => setMode('full')}
+              book={viewerBookDto}
+              streamUrl={samplePdfStreamUrl}
+              isSample={true}
               embeddedHeightClass="h-full"
             />
           ) : (
             <MarkdownViewer
-              book={book}
-              streamUrl={activeMdUrl}
-              isSample={isSampleActive}
-              bearerTokenProvider={getIdToken}
-              onRefreshSignedUrl={handleRefreshMarkdownUrl}
-              onSwitchToFullMode={() => setMode('full')}
+              book={viewerBookDto}
+              streamUrl={sampleMdStreamUrl}
+              isSample={true}
               embeddedHeightClass="h-full"
             />
           )}

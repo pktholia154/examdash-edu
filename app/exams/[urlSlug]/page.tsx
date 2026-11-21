@@ -1,21 +1,23 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import React from 'react';
-import Markdown from 'react-markdown';
+import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
+import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
+import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
+import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
+import { SyllabusTable } from '../../../features/catalog/syllabus-table';
+import { formatPrice } from '../../../lib/registry/content-type-registry';
+import {
+  buildExamDetailJsonLd,
+  buildThumbUrls,
+  getCanonicalOrigin,
+  serializeSafeJsonLd,
+} from '../../../lib/seo/schema';
 import {
   getExamBySlug,
   getLiveBooks,
   getLiveExams,
 } from '../../../server/repositories/catalog-repository';
-import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
-import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
-import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
-import { SyllabusTable } from '../../../features/catalog/syllabus-table';
-import {
-  buildExamDetailJsonLd,
-  serializeSafeJsonLd,
-} from '../../../lib/seo/schema';
-import { formatPrice } from '../../../lib/registry/content-type-registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +34,14 @@ export async function generateMetadata({
   }
 
   const exam = lookup.data;
+  const origin = getCanonicalOrigin();
+  const canonicalUrl = `${origin}/exams/${exam.urlSlug}`;
+  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
+    'exams',
+    exam.urlSlug,
+    exam.updatedAtIso
+  );
+
   const description =
     exam.seoDescription ||
     exam.fullDescription.slice(0, 155) ||
@@ -41,18 +51,35 @@ export async function generateMetadata({
     title: exam.title,
     description,
     alternates: {
-      canonical: `/exams/${exam.urlSlug}`,
+      canonical: canonicalUrl,
     },
     openGraph: {
       title: `${exam.title} | ExamDash`,
       description,
       type: 'website',
-      url: `/exams/${exam.urlSlug}`,
+      url: canonicalUrl,
+      images: [
+        {
+          url: ogPngUrl,
+          width: 1200,
+          height: 675,
+          alt: exam.title,
+          type: 'image/png',
+        },
+        {
+          url: sqPngUrl,
+          width: 1200,
+          height: 1200,
+          alt: exam.title,
+          type: 'image/png',
+        },
+      ],
     },
     twitter: {
       card: 'summary_large_image',
       title: `${exam.title} | ExamDash`,
       description,
+      images: [ogPngUrl],
     },
   };
 }
@@ -102,8 +129,13 @@ export default async function ExamDetailPage({
     0
   );
 
+  const firstExamSetId = exam.MocktestTitles[0]?.id || 'exam_set_1';
+  const sampleTrialHref = exam.sampleJsonStoragePath
+    ? `/attempt/${exam.urlSlug}/${encodeURIComponent(firstExamSetId)}?mode=trial`
+    : undefined;
+
   return (
-    <div className="ed-container py-8 sm:py-10">
+    <div className="ed-container pt-8 sm:pt-10 pb-24 lg:pb-10">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: jsonLd }}
@@ -118,7 +150,7 @@ export default async function ExamDetailPage({
       />
 
       <article className="w-full">
-        {/* Header Block */}
+        {/* Header Block (UI stays 100% zero-KB CSS/SVG MonogramThumbnail) */}
         <div className="flex flex-col sm:flex-row items-start gap-5 pb-6 border-b border-[var(--border-subtle)]">
           <MonogramThumbnail
             title={exam.title}
@@ -180,20 +212,26 @@ export default async function ExamDetailPage({
           </div>
         </div>
 
-        {/* Seamless Purchase & Sample Action Bar */}
-        <DetailBuyCard item={exam} />
+        {/* Primitive-Only Client Island (Zero fullDescription duplication in self.__next_f) */}
+        <DetailBuyCard
+          id={exam.id}
+          collectionName="ExamPackDocument"
+          title={exam.title}
+          urlSlug={exam.urlSlug}
+          currency={exam.currency}
+          buyPrice={exam.buyPrice}
+          listPrice={exam.listPrice}
+          sampleJsonUrl={sampleTrialHref}
+        />
 
         {/* Sortable MocktestTitles Syllabus Table */}
         <SyllabusTable
           items={exam.MocktestTitles}
           totalMocktest={exam.totalMocktest}
-          examSlug={exam.urlSlug}
-          examId={exam.id}
-          buyPrice={exam.buyPrice}
           hasSample={Boolean(exam.sampleJsonStoragePath)}
         />
 
-        {/* Full Description */}
+        {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
         <section aria-labelledby="exam-description-heading" className="mt-10">
           <h2
             id="exam-description-heading"
@@ -202,13 +240,14 @@ export default async function ExamDetailPage({
             Exam Series Overview & Instructions
           </h2>
           <div className="text-sm sm:text-base leading-relaxed text-[var(--text-main)]">
-            <div className="markdown-body space-y-3">
-              <Markdown>
-                {exam.fullDescription ||
-                  exam.seoDescription ||
-                  'Full-length mock test pack aligned with latest exam pattern.'}
-              </Markdown>
-            </div>
+            <DescriptionMarkdown
+              markdown={
+                exam.fullDescription ||
+                exam.seoDescription ||
+                'Full-length mock test pack aligned with latest exam pattern.'
+              }
+              heroTitle={exam.title}
+            />
           </div>
         </section>
 

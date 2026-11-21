@@ -74,6 +74,46 @@ export interface PublicExamDTO {
 
 export type CatalogItemDTO = PublicBookDTO | PublicExamDTO;
 
+/**
+ * Slim card projection for catalog grids/lists so client islands never serialize
+ * `fullDescription`, `seoDescription`, or `MocktestTitles` into `self.__next_f`.
+ */
+export interface CatalogCardDTO {
+  id: string;
+  collectionName: CollectionName;
+  title: string;
+  urlSlug: string;
+  type: string;
+  language: string;
+  authorName: string;
+  tags: string[];
+  currency: string;
+  listPrice: number;
+  buyPrice: number;
+  publishAtIso: string;
+  totalMocktest?: number;
+}
+
+export function toCatalogCardDTO(item: CatalogItemDTO): CatalogCardDTO {
+  return {
+    id: item.id,
+    collectionName: item.collectionName,
+    title: item.title,
+    urlSlug: item.urlSlug,
+    type: item.type,
+    language: item.language,
+    authorName: item.authorName,
+    tags: item.tags,
+    currency: item.currency,
+    listPrice: item.listPrice,
+    buyPrice: item.buyPrice,
+    publishAtIso: item.publishAtIso,
+    ...(item.collectionName === 'ExamPackDocument'
+      ? { totalMocktest: item.totalMocktest }
+      : {}),
+  };
+}
+
 export interface CartItem {
   compositeKey: string; // `${collectionName}:${id}`
   firestoreKey: string; // `${collectionName}__${id}`
@@ -103,7 +143,7 @@ export interface UserPurchaseRecord {
   listPrice: number;
   paidPrice: number;
   totalMocktest?: number;
-  paymentProvider?: 'razorpay' | 'free';
+  paymentProvider?: 'razorpay' | 'free' | 'apple_iap' | 'google_play';
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   status: 'completed';

@@ -26,6 +26,7 @@ const sourceSerif = Source_Serif_4({
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   display: 'swap',
+  preload: false,
   variable: '--font-mono',
   weight: ['400', '500', '600'],
 });
@@ -35,7 +36,6 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: 'cover',
   interactiveWidget: 'resizes-content',
-  themeColor: '#F8FAFC',
 };
 
 const SITE_TITLE = 'ExamDash — Books, Mock Exams & Study Library';
@@ -50,7 +50,7 @@ export const metadata: Metadata = {
   },
   description: SITE_DESC,
   alternates: {
-    canonical: '/',
+    canonical: getCanonicalOrigin(),
   },
   robots: {
     index: true,
@@ -77,16 +77,25 @@ export const metadata: Metadata = {
     url: getCanonicalOrigin(),
     siteName: 'ExamDash',
     type: 'website',
+    images: [
+      {
+        url: `${getCanonicalOrigin()}/pwa-512x512.png`,
+        width: 512,
+        height: 512,
+        alt: 'ExamDash',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: SITE_TITLE,
     description: SITE_DESC,
+    images: [`${getCanonicalOrigin()}/pwa-512x512.png`],
   },
 };
 
-// < 600B synchronous pre-paint theme script preventing FOIT/flash on cookie-free cached HTML
-const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme');var d=s?s==='dark':window.matchMedia('(prefers-color-scheme:dark)').matches;if(d){document.documentElement.classList.add('dark');}}catch(e){}})();`;
+// < 600B synchronous pre-paint theme script syncing .dark, color-scheme, and <meta name="theme-color"> (#0B1120 / #F8FAFC)
+const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme'),d=s?s==='dark':matchMedia('(prefers-color-scheme:dark)').matches,r=document.documentElement;r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';var m=document.querySelector('meta[name="theme-color"]');if(m)m.content=d?'#0B1120':'#F8FAFC';}catch(e){}})();`;
 
 // Speculation Rules for instant MPA transitions (excluding /api/* and authenticated routes)
 const SPECULATION_RULES_JSON = JSON.stringify({
@@ -120,6 +129,7 @@ export default function RootLayout({
       className={`${plusJakarta.variable} ${sourceSerif.variable} ${jetbrainsMono.variable}`}
     >
       <head>
+        <meta name="theme-color" content="#F8FAFC" />
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <script
           type="speculationrules"

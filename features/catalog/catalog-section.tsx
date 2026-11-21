@@ -2,7 +2,12 @@
 
 import React, { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { ArrowUpDown, RotateCcw } from 'lucide-react';
-import type { CatalogItemDTO, SortOption, ViewMode } from '../../lib/types/catalog';
+import type {
+  CatalogCardDTO,
+  CatalogItemDTO,
+  SortOption,
+  ViewMode,
+} from '../../lib/types/catalog';
 import { ViewToggle } from '../../components/ui/view-toggle';
 import { EmptyState } from '../../components/ui/state-blocks';
 import { CatalogCard } from './catalog-card';
@@ -13,7 +18,7 @@ export interface CatalogSectionProps {
   heading: string;
   subheading: string;
   storageKey: string;
-  items: CatalogItemDTO[];
+  items: Array<CatalogCardDTO | CatalogItemDTO>;
   viewAllHref?: string;
   viewAllLabel?: string;
 }
@@ -168,13 +173,13 @@ export function CatalogSection({
       {/* Button-Driven Filter & Sort Controls (Zero Crawlable Filter Query Links) */}
       {items.length > 0 && (
         <div className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-6">
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={resetFilters}
               aria-pressed={!hasActiveFilters}
               className={cn(
-                'min-h-[38px] px-3 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
+                'min-h-[48px] px-3.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
                 !hasActiveFilters
                   ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
                   : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -192,7 +197,7 @@ export function CatalogSection({
                   setSelectedType((prev) => (prev === t ? 'ALL' : t))
                 }
                 className={cn(
-                  'min-h-[38px] px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[48px] px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   selectedType === t
                     ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] font-semibold'
                     : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -211,7 +216,7 @@ export function CatalogSection({
                   setSelectedLanguage((prev) => (prev === lang ? 'ALL' : lang))
                 }
                 className={cn(
-                  'min-h-[38px] px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[48px] px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   selectedLanguage === lang
                     ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] font-semibold'
                     : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -230,7 +235,7 @@ export function CatalogSection({
                   setSelectedTag((prev) => (prev === tag ? 'ALL' : tag))
                 }
                 className={cn(
-                  'min-h-[38px] px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[48px] px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   selectedTag === tag
                     ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] font-semibold'
                     : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -244,7 +249,7 @@ export function CatalogSection({
               <button
                 type="button"
                 onClick={resetFilters}
-                className="inline-flex items-center gap-1 min-h-[38px] px-2.5 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1 min-h-[48px] px-3 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] whitespace-nowrap shrink-0"
               >
                 <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Reset</span>
@@ -256,7 +261,7 @@ export function CatalogSection({
           <div
             role="group"
             aria-label={`Sort ${heading}`}
-            className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 self-start lg:self-auto shrink-0"
+            className="inline-flex items-center gap-1 min-h-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 self-start lg:self-auto shrink-0"
           >
             <ArrowUpDown
               className="w-3.5 h-3.5 text-[var(--text-muted)] ml-2 mr-1 shrink-0"
@@ -269,7 +274,7 @@ export function CatalogSection({
                 aria-pressed={sortBy === opt.value}
                 onClick={() => setSortBy(opt.value)}
                 className={cn(
-                  'min-h-[34px] px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[40px] px-3 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   sortBy === opt.value
                     ? 'bg-[var(--bg-surface)] text-[var(--text-main)] font-semibold shadow-xs'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
