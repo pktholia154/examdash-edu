@@ -74,10 +74,15 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
   const discountPct = computeDiscountPercent(item.listPrice, item.buyPrice);
   const savingsAmount = Math.max(0, item.listPrice - item.buyPrice);
 
+  const firstExamSetId =
+    item.collectionName === 'ExamPackDocument'
+      ? item.MocktestTitles[0]?.id || 'exam_set_1'
+      : '';
+
   const openHref =
     item.collectionName === 'books'
       ? `/read/${item.urlSlug}`
-      : `/attempt/${item.urlSlug}`;
+      : `/attempt/${item.urlSlug}/${encodeURIComponent(firstExamSetId)}`;
 
   const handleInstantBuy = async () => {
     if (isFree) {
@@ -182,13 +187,22 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
                   </a>
                 </>
               ) : (
-                <a
-                  href={openHref}
-                  className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
-                >
-                  <span>Start Mock Exam</span>
-                  <ExternalLink className="w-4 h-4 shrink-0" aria-hidden="true" />
-                </a>
+                <>
+                  <a
+                    href={openHref}
+                    className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+                  >
+                    <Play className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    <span>Start 1st Mock</span>
+                  </a>
+                  <a
+                    href="/purchased"
+                    className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
+                  >
+                    <span>All {item.totalMocktest} Sets in Library</span>
+                    <ExternalLink className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  </a>
+                </>
               )}
             </>
           ) : isFree ? (
@@ -261,15 +275,16 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
             </button>
           )}
 
-          {/* Exam Sample Trial Button */}
+          {/* Exam Sample Trial Button (1st Mock Test Free Sample) */}
           {item.collectionName === 'ExamPackDocument' &&
+            !isOwned &&
             item.sampleJsonStoragePath && (
               <a
-                href={`/attempt/${item.urlSlug}?mode=trial`}
+                href={`/attempt/${item.urlSlug}/${encodeURIComponent(firstExamSetId)}?mode=trial`}
                 className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-subtle)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]/60 transition-colors whitespace-nowrap"
               >
                 <Play className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>Sample Mock</span>
+                <span>Try 1st Sample Mock</span>
               </a>
             )}
         </div>
@@ -302,6 +317,18 @@ export function DetailBuyCard({ item }: { item: CatalogItemDTO }) {
               <span>Sample</span>
             </button>
           )}
+
+          {!isOwned &&
+            item.collectionName === 'ExamPackDocument' &&
+            item.sampleJsonStoragePath && (
+              <a
+                href={`/attempt/${item.urlSlug}/${encodeURIComponent(firstExamSetId)}?mode=trial`}
+                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
+              >
+                <Play className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Sample</span>
+              </a>
+            )}
 
           {isOwned ? (
             item.collectionName === 'books' ? (

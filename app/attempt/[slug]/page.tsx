@@ -19,7 +19,7 @@ export default async function AttemptExamSlotPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ set?: string; mode?: string }>;
+  searchParams: Promise<{ set?: string; mode?: string; autostart?: string }>;
 }) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -34,6 +34,7 @@ export default async function AttemptExamSlotPage({
       exam={lookup.data}
       initialSetId={sp.set}
       initialMode={sp.mode === 'trial' ? 'trial' : 'full'}
+      autostart={sp.autostart === '1'}
     />
   );
 }

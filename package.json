@@ -26,12 +26,15 @@
     "katex": "^0.19.1",
     "lucide-react": "^0.553.0",
     "markdown-it": "^15.0.3",
+    "mermaid": "^12.3.0",
     "motion": "^12.23.24",
     "next": "^15.4.9",
     "postcss": "^8.5.6",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.11.0",
+    "smiles-drawer": "^2.4.2",
     "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {

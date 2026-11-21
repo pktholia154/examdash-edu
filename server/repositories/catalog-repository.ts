@@ -622,6 +622,16 @@ export async function issueShortLivedAssetGrant(
     typeof raw.fullJsonStoragePath === 'string'
       ? raw.fullJsonStoragePath.trim()
       : '';
+  const sampleJson =
+    typeof raw.sampleJsonStoragePath === 'string'
+      ? raw.sampleJsonStoragePath.trim()
+      : '';
+
+  const examStreamUrl = `/api/v1/exams/${encodeURIComponent(
+    cleanSlug
+  )}?mode=full&uid=${encodeURIComponent(
+    userId
+  )}&exp=${expiresMs}&sig=${signature}`;
 
   return {
     status: 'ok',
@@ -632,12 +642,151 @@ export async function issueShortLivedAssetGrant(
       expiresAtIso,
       signature,
       assets: {
-        ...(fullJson
-          ? {
-              jsonUrl: `${buildStorageMediaUrl(fullJson)}&ed_sig=${signature}&ed_exp=${expiresMs}`,
-            }
-          : {}),
+        ...(fullJson || sampleJson ? { jsonUrl: examStreamUrl } : {}),
       },
+    },
+  };
+}
+
+export interface ExamUpstreamResolution {
+  docId: string;
+  itemId: string;
+  urlSlug: string;
+  title: string;
+  buyPrice: number;
+  mocktestTitles: PublicExamDTO['MocktestTitles'];
+  upstreamUrl: string;
+  fallbackSampleUrl?: string;
+}
+
+/**
+ * Resolves ExamPack JSON upstream URLs on the server for `/api/v1/exams/[packId]`
+ * so `fullJsonStoragePath` never leaks into public HTML/RSC payloads and full packs
+ * strictly enforce user authentication & purchase ownership.
+ */
+export async function resolveExamPackUpstream(params: {
+  packIdentifier: string;
+  mode: 'sample' | 'full';
+  uid?: string;
+  expMs?: number;
+  sig?: string;
+  verifiedTokenUid?: string | null;
+  bearerIdToken?: string | null;
+}): Promise<
+  | { status: 'ok'; target: ExamUpstreamResolution }
+  | { status: 'not_found' }
+  | { status: 'unauthorized' }
+  | { status: 'forbidden' }
+> {
+  const cleanIdent = (params.packIdentifier || '').trim();
+  if (!cleanIdent) return { status: 'not_found' };
+
+  // Match by urlSlug first, then by id if needed
+  let docs = await runDefaultFirestoreQuery(
+    {
+      from: [{ collectionId: 'ExamPackDocument' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'urlSlug' },
+          op: 'EQUAL',
+          value: { stringValue: cleanIdent },
+        },
+      },
+    },
+    { includePrivateStoragePaths: true }
+  );
+
+  if (docs.length === 0) {
+    docs = await runDefaultFirestoreQuery(
+      {
+        from: [{ collectionId: 'ExamPackDocument' }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'id' },
+            op: 'EQUAL',
+            value: { stringValue: cleanIdent },
+          },
+        },
+      },
+      { includePrivateStoragePaths: true }
+    );
+  }
+
+  if (docs.length === 0) return { status: 'not_found' };
+  const docSnap = docs[0];
+  const raw = docSnap.data;
+  if (!isDocumentLive(raw)) return { status: 'not_found' };
+
+  const mappedDto = mapExamToPublicDTO(docSnap.docId, raw);
+  const samplePath =
+    typeof raw.sampleJsonStoragePath === 'string'
+      ? raw.sampleJsonStoragePath.trim()
+      : '';
+  const fullPath =
+    typeof raw.fullJsonStoragePath === 'string'
+      ? raw.fullJsonStoragePath.trim()
+      : '';
+
+  const sampleUrl = samplePath ? buildStorageMediaUrl(samplePath) : '';
+  const fullUrl = fullPath ? buildStorageMediaUrl(fullPath) : '';
+
+  if (params.mode === 'sample') {
+    return {
+      status: 'ok',
+      target: {
+        docId: docSnap.docId,
+        itemId: mappedDto.id,
+        urlSlug: mappedDto.urlSlug,
+        title: mappedDto.title,
+        buyPrice: mappedDto.buyPrice,
+        mocktestTitles: mappedDto.MocktestTitles,
+        upstreamUrl: sampleUrl,
+      },
+    };
+  }
+
+  // Full mode requires EITHER a valid <= 15m HMAC grant OR verified Bearer token + ownership
+  const hasValidSignedGrant = Boolean(
+    params.uid &&
+      params.expMs &&
+      params.sig &&
+      verifyAssetGrantSignature(
+        params.uid,
+        'ExamPackDocument',
+        docSnap.docId,
+        params.expMs,
+        params.sig
+      )
+  );
+
+  if (!hasValidSignedGrant) {
+    if (!params.verifiedTokenUid || !params.bearerIdToken) {
+      return { status: 'unauthorized' };
+    }
+    if (mappedDto.buyPrice > 0) {
+      const entitled = await verifyCallerPurchaseRecord(
+        params.verifiedTokenUid,
+        'ExamPackDocument',
+        mappedDto.id,
+        params.bearerIdToken
+      );
+      if (!entitled) {
+        return { status: 'forbidden' };
+      }
+    }
+  }
+
+  return {
+    status: 'ok',
+    target: {
+      docId: docSnap.docId,
+      itemId: mappedDto.id,
+      urlSlug: mappedDto.urlSlug,
+      title: mappedDto.title,
+      buyPrice: mappedDto.buyPrice,
+      mocktestTitles: mappedDto.MocktestTitles,
+      upstreamUrl: fullUrl || sampleUrl,
+      fallbackSampleUrl: sampleUrl || undefined,
     },
   };
 }

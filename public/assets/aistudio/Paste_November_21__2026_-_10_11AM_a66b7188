@@ -1,0 +1,1308 @@
+Role: Act as a Principal Systems Architect specializing in Indian Computer-Based Testing (CBT) platforms like TCS iON, Think Exam, and Eklavvya.
+
+Objective: Design and implement a high-performance online exam engine.
+
+Core Requirements:
+- Seamless UX & Fast Rendering: Mirror standard Indian CBT ergonomics—sectional tabs, a color-coded question palette (Not Visited, Not Answered, Answered, Marked for Review, Answered & Marked), Clear/Save & Next controls, and keyboard shortcuts. Guarantee zero-lag switching using pre-rendering/memoization with crisp support for images, tables, and math (LaTeX/KaTeX).
+- Robustness & State Management: Build deterministic state management with instant local persistence (IndexedDB/LocalStorage) and a drift-free, timestamp-based countdown timer so accidental refreshes or browser crashes never lose answers, question statuses, or exact remaining time.
+- Post-Exam Analytics: Track per-question time spent, revisit counts, attempt accuracy, section-wise breakdowns, and configurable negative marking to generate a detailed post-exam review dashboard.
+
+Scope Exclusions: Completely omit anti-cheating, proctoring, browser lockdown, DRM, and commercial multi-tenant features. Optimize strictly for speed, stability, and distraction-free usability.
+
+based on above intent develop the system; .
+we are providing you a sample online examination flow; develop in a robust sytem however do not change any firebase/json data schemas as they already have data in firebase the format...; implement what is required for front end UI.
+
+Also on exam detals page ...show 1st test as sample sampleJsonStoragePath: and add the product to puchage page aftersuccessful purchase and flatout all exam sets seperately for full json file so that a user can attempt all exam sets after purchase.
+Improvise other critical aspects keep exam data schema as it is.
+
+
+
+
+
+
+
+
+## Pillar 1: Firebase Firestore Collection Schema (`exam_packs/{id}`)
+
+Kept **100% unchanged** in field names and lightweight structure.
+
+export interface ExamPackDocument {
+  id: string;
+  isPublished: boolean;
+  isDeleted: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  publishAt: Timestamp;
+  title: string;
+  urlSlug: string;
+  seoDescription: string;
+  fullDescription: string;
+  type: string;
+  language: string;
+  publisher: string;
+  authorName: string;
+  tags: string[];
+  currency: string;
+  listPrice: number;
+  buyPrice: number;
+  totalMocktest: number;
+  MocktestTitles: Array<{
+    id: string;
+    title: string;
+    duration: number;
+    totalQuestions: number;
+    totalMarks: number;
+  }>;
+  fullJsonStoragePath: string;
+  sampleJsonStoragePath: string;
+}
+
+
+### Pillar 1 ↔ Pillar 2 Zero-Drift Invariants
+1. **Identical Payload Format:** Both `sampleJsonStoragePath` (public preview) and `fullJsonStoragePath` (purchased pack) point to a UTF-8 JSON file containing an `ExamSet[]` array (`[ ... ]`).
+2. **Metadata Parity:** `totalMocktest === fullJson.length === MocktestTitles.length`, where each `MocktestTitles[i]` mirrors `{ id, title, duration, totalQuestions, totalMarks }` of `fullJson[i]`.
+3. **Count & Marks Formula:**
+   * `section.totalQuestions = section.questions.length`
+   * `exam.totalQuestions = sum(section.totalQuestions)`
+   * `exam.totalMarks = sum(section.maxAttempts ? sumTopK(section.questions, section.maxAttempts) : sumAll(section.questions))`
+
+---
+
+## Pillar 2: Universal Single-File Multi-Set JSON Schema (`ExamSet[]`)
+
+Stored at `fullJsonStoragePath` and `sampleJsonStoragePath` as a JSON array `[ ... ]`. The benchmark below demonstrates **multi-visual DI (`pie` + dual-axis `combo` + merged-header `table`)**, **multi-context combination (`["sec_1_ctx_1", "sec_1_ctx_2"]`)**, **NAT/TITA**, **5-option Banking MCQ with `__underline__`**, **standalone GATE CS MCQ with C pointers + SVG + Mermaid (`-2/3` penalty)**, and **JEE Advanced MSQ with `smiles` diagrams inside options + `explanationVisuals`**:
+
+```json
+[
+  {
+    "id": "exam_set_1",
+    "title": "Mock Set 01: Pan-India Multi-Pattern Benchmark",
+    "duration": 60,
+    "totalQuestions": 4,
+    "totalMarks": 11,
+    "sectionalTiming": true,
+    "calculator": "scientific",
+    "sections": [
+      {
+        "id": "sec_1",
+        "title": "Data Interpretation, Engineering Logic & Chemical Sciences",
+        "duration": 60,
+        "totalQuestions": 4,
+        "maxAttempts": null,
+        "contexts": [
+          {
+            "id": "sec_1_ctx_1",
+            "title": "Base Caselet (Q1 – Q2): Cloud Infrastructure Telemetry",
+            "text": "**Directions:** Study the **three interconnected visuals** (Chart 1, Chart 2, and Table 1) carefully.",
+            "visuals": [
+              {
+                "id": "v1",
+                "type": "chart",
+                "chartType": "pie",
+                "title": "Chart 1: Share of Total Cloud Server Traffic (Total = 8,000 TB)",
+                "note": "**Note:** Regional traffic consists solely of Web and API requests.",
+                "xAxisKey": "region",
+                "series": [{ "key": "share", "label": "Traffic Share (%)" }],
+                "data": [
+                  { "region": "Region X", "share": 35 },
+                  { "region": "Region Y", "share": 45 },
+                  { "region": "Region Z", "share": 20 }
+                ]
+              },
+              {
+                "id": "v2",
+                "type": "chart",
+                "chartType": "combo",
+                "title": "Chart 2: Base Cost per TB (₹ '000) & SLA Outage (Hours)",
+                "note": "**Formula:** $\\text{Total SLA Penalty} = \\text{Outage Hours} \\times ₹15,000$.",
+                "xAxisKey": "region",
+                "yAxisLabel": "Cost/TB (₹ '000)",
+                "rightYAxisLabel": "Outage (Hrs)",
+                "series": [
+                  { "key": "cost", "label": "Cost/TB (₹ '000)", "type": "bar", "yAxis": "left" },
+                  { "key": "outage", "label": "Outage (Hrs)", "type": "line", "yAxis": "right" }
+                ],
+                "data": [
+                  { "region": "Region X", "cost": 12, "outage": 4 },
+                  { "region": "Region Y", "cost": 10, "outage": 6 },
+                  { "region": "Region Z", "cost": 15, "outage": 2 }
+                ]
+              },
+              {
+                "id": "v3",
+                "type": "table",
+                "title": "Table 1: Traffic Split & Enterprise Discount",
+                "note": "Discount applies on gross traffic cost prior to adding SLA penalty.",
+                "headers": [
+                  [
+                    { "text": "Region", "rowSpan": 2 },
+                    { "text": "Billing Parameters", "colSpan": 2, "align": "center" }
+                  ],
+                  ["Web : API Ratio", "Discount on Gross Cost"]
+                ],
+                "rows": [
+                  ["Region X", "$4 : 3$", "$10\\%$"],
+                  ["Region Y", "$5 : 4$", "$20\\%$"],
+                  ["Region Z", "$3 : 2$", "$15\\%$"]
+                ]
+              }
+            ]
+          },
+          {
+            "id": "sec_1_ctx_2",
+            "title": "Supplementary Scenario (Applicable to Q2 Only)",
+            "text": "In **Q2 FY27**, tariff revision increases Base Cost/TB in __Region Y__ by $25\\%$, while automated failover cuts its SLA outage to $0\\text{ hours}$.",
+            "visuals": []
+          }
+        ],
+        "questions": [
+          {
+            "id": "sec_1_q_1",
+            "contextIds": ["sec_1_ctx_1"],
+            "type": "NAT",
+            "marks": { "correct": 3, "wrong": 0, "partial": 0 },
+            "prompt": "Find the net amount payable (in ₹ Lakh) for **API Traffic** in **Region X** after applying its discount and adding $50\\%$ of Region X's total SLA penalty.",
+            "visuals": [],
+            "options": [],
+            "answer": [129.9, 129.9],
+            "explanation": "1. **Region X Traffic:** $35\\% \\text{ of } 8000 = 2800\\text{ TB}$.\n2. **API Traffic:** $\\frac{3}{4+3} \\times 2800 = 1200\\text{ TB}$.\n3. **Gross Cost:** $1200 \\times ₹12,000 = ₹144\\text{ Lakh}$.\n4. **After 10% Discount:** $144 \\times 0.90 = ₹129.6\\text{ Lakh}$.\n5. **50% SLA Penalty:** $0.5 \\times (4 \\times ₹15,000) = ₹0.3\\text{ Lakh}$.\n6. **Net Payable:** $129.6 + 0.3 = ₹129.9\\text{ Lakh}$.",
+            "explanationVisuals": []
+          },
+          {
+            "id": "sec_1_q_2",
+            "contextIds": ["sec_1_ctx_1", "sec_1_ctx_2"],
+            "type": "MCQ",
+            "marks": { "correct": 2, "wrong": -0.5, "partial": 0 },
+            "prompt": "Under the **Q2 FY27** scenario, what is the net amount payable (in ₹ Lakh) for __Web Traffic__ in **Region Y** after applying its standard discount?",
+            "visuals": [],
+            "options": [
+              { "id": "A", "text": "$₹180\\text{ Lakh}$", "visuals": [] },
+              { "id": "B", "text": "$₹192\\text{ Lakh}$", "visuals": [] },
+              { "id": "C", "text": "$₹200\\text{ Lakh}$", "visuals": [] },
+              { "id": "D", "text": "$₹225\\text{ Lakh}$", "visuals": [] },
+              { "id": "E", "text": "None of these", "visuals": [] }
+            ],
+            "answer": "C",
+            "explanation": "Web Traffic in Region Y $= \\frac{5}{9} \\times (45\\% \\text{ of } 8000) = 2000\\text{ TB}$. Revised Cost/TB $= ₹10,000 \\times 1.25 = ₹12,500$. Gross $= ₹250\\text{ Lakh}$. After $20\\%$ discount and $₹0$ SLA penalty, Net Payable $= ₹200\\text{ Lakh}$.",
+            "explanationVisuals": []
+          },
+          {
+            "id": "sec_1_q_3",
+            "contextIds": [],
+            "type": "MCQ",
+            "marks": { "correct": 2, "wrong": -0.666667, "partial": 0 },
+            "prompt": "A C routine computes control bits `A` and `B`:\n```c\nint x = 2, *p = &x;\nint A = (*p >> 1) & 1;\nint B = (*p) & 1;\n```\nThese drive the combinational circuit {{v1}} and controller FSM {{v2}}. Starting in $S_0$, find output $Y$ and the next state.",
+            "visuals": [
+              {
+                "id": "v1",
+                "type": "svg",
+                "title": "Figure 1: Combinational Front-End",
+                "note": "Ideal AND gate.",
+                "data": "<svg viewBox='0 0 320 120' xmlns='http://www.w3.org/2000/svg'><line x1='20' y1='40' x2='90' y2='40' stroke='#0f172a' stroke-width='2'/><text x='10' y='44' font-size='12'>A</text><line x1='20' y1='80' x2='90' y2='80' stroke='#0f172a' stroke-width='2'/><text x='10' y='84' font-size='12'>B</text><path d='M90,25 L130,25 A35,35 0 0,1 130,95 L90,95 Z' fill='#e0f2fe' stroke='#0284c7' stroke-width='2'/><text x='104' y='65' font-size='12'>AND</text><line x1='165' y1='60' x2='240' y2='60' stroke='#0f172a' stroke-width='2'/><text x='246' y='64' font-size='12'>Y = A·B</text></svg>"
+              },
+              {
+                "id": "v2",
+                "type": "mermaid",
+                "title": "Figure 2: Downstream Controller FSM",
+                "note": "Transitions occur on rising clock edge.",
+                "data": "stateDiagram-v2\n direction LR\n S0 --> S1 : Y = 1\n S0 --> S0 : Y = 0"
+              }
+            ],
+            "options": [
+              { "id": "A", "text": "$Y = 0$, Controller stays in $S_0$", "visuals": [] },
+              { "id": "B", "text": "$Y = 1$, Controller moves to $S_1$", "visuals": [] },
+              { "id": "C", "text": "$Y = 1$, Controller stays in $S_0$", "visuals": [] },
+              { "id": "D", "text": "$Y = 0$, Controller moves to $S_1$", "visuals": [] }
+            ],
+            "answer": "A",
+            "explanation": "Since `*p = 2` (`10` in binary), `A = 1` and `B = 0`. Thus $Y = A \\cdot B = 0$, keeping the controller in $S_0$.",
+            "explanationVisuals": []
+          },
+          {
+            "id": "sec_1_q_4",
+            "contextIds": [],
+            "type": "MSQ",
+            "marks": { "correct": 4, "wrong": -2, "partial": 1 },
+            "prompt": "Select **all** compounds below that give a yellow precipitate of $\\ce{CHI3}$ (**iodoform test**) on warming with $\\ce{I2}$ and aqueous $\\ce{NaOH}$.",
+            "visuals": [],
+            "options": [
+              {
+                "id": "A",
+                "text": "Ethanol",
+                "visuals": [{ "id": "oa1", "type": "smiles", "title": null, "note": null, "data": "CCO" }]
+              },
+              {
+                "id": "B",
+                "text": "Methanol",
+                "visuals": [{ "id": "ob1", "type": "smiles", "title": null, "note": null, "data": "CO" }]
+              },
+              {
+                "id": "C",
+                "text": "Acetophenone",
+                "visuals": [{ "id": "oc1", "type": "smiles", "title": null, "note": null, "data": "CC(=O)c1ccccc1" }]
+              },
+              {
+                "id": "D",
+                "text": "Benzophenone",
+                "visuals": [{ "id": "od1", "type": "smiles", "title": null, "note": null, "data": "O=C(c1ccccc1)c2ccccc2" }]
+              }
+            ],
+            "answer": ["A", "C"],
+            "explanation": "Compounds possessing $\\ce{CH3-C(=O)-}$ or oxidizable $\\ce{CH3-CH(OH)-}$ groups yield $\\ce{CHI3}$:",
+            "explanationVisuals": [
+              {
+                "id": "ev1",
+                "type": "table",
+                "title": "Haloform Structural Summary",
+                "note": null,
+                "headers": ["Option", "Formula", "Reactive Moiety", "Result"],
+                "rows": [
+                  ["A", "$\\ce{CH3CH2OH}$", "$\\ce{CH3CH(OH)-H}$", "**Positive**"],
+                  ["B", "$\\ce{CH3OH}$", "Absent", "Negative"],
+                  ["C", "$\\ce{PhCOCH3}$", "$\\ce{CH3CO-Ph}$", "**Positive**"],
+                  ["D", "$\\ce{PhCOPh}$", "Absent", "Negative"]
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
+```
+
+---
+
+## Pillar 3: Universal WebApp Renderer, Workspace & Grading Engine (`ExamEngine.tsx`)
+
+Complete, self-contained single-file React/TypeScript engine:
+
+```tsx
+"use client";
+
+import React, { useEffect, useId, useRef, useState } from "react";
+import {
+  ResponsiveContainer, ComposedChart, Bar, Line, Area, Scatter, PieChart, Pie, Cell,
+  XAxis, YAxis, Tooltip, Legend, CartesianGrid, RadarChart, Radar,
+  PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+} from "recharts";
+import katex from "katex";
+import "katex/contrib/mhchem";
+
+const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2"];
+let mermaidRenderSeq = 0;
+
+// ============================================================================
+// 1. STRICT TYPESCRIPT CONTRACTS
+// ============================================================================
+export type TableCellObject = {
+  text: string;
+  colSpan?: number;
+  rowSpan?: number;
+  align?: "left" | "center" | "right";
+};
+export type TableCellInput = string | number | TableCellObject;
+
+export type VisualBlock =
+  | {
+      id: string;
+      type: "chart";
+      chartType: "bar" | "stacked_bar" | "line" | "area" | "scatter" | "combo" | "pie" | "radar";
+      title?: string | null;
+      note?: string | null;
+      xAxisKey: string;
+      xAxisLabel?: string;
+      yAxisLabel?: string;
+      rightYAxisLabel?: string;
+      series: Array<{
+        key: string;
+        label: string;
+        type?: "bar" | "line" | "area" | "scatter";
+        yAxis?: "left" | "right";
+      }>;
+      data: Array<Record<string, string | number>>;
+    }
+  | {
+      id: string;
+      type: "table";
+      title?: string | null;
+      note?: string | null;
+      headers?: TableCellInput[] | TableCellInput[][];
+      rows: TableCellInput[][];
+    }
+  | {
+      id: string;
+      type: "svg" | "mermaid" | "smiles" | "image";
+      title?: string | null;
+      note?: string | null;
+      data: string;
+      alt?: string;
+    };
+
+export interface ExamContext {
+  id: string;
+  title?: string | null;
+  text: string;
+  visuals: VisualBlock[];
+}
+
+export interface ExamOption {
+  id: string;
+  text: string;
+  visuals: VisualBlock[];
+}
+
+export interface ExamQuestion {
+  id: string;
+  contextIds: string[];
+  type: "MCQ" | "MSQ" | "NAT";
+  marks: { correct: number; wrong: number; partial: number };
+  prompt: string;
+  visuals: VisualBlock[];
+  options: ExamOption[];
+  answer: string | string[] | [number, number];
+  explanation: string;
+  explanationVisuals: VisualBlock[];
+}
+
+export interface ExamSection {
+  id: string;
+  title: string;
+  duration: number | null;
+  totalQuestions: number;
+  maxAttempts: number | null;
+  contexts: ExamContext[];
+  questions: ExamQuestion[];
+}
+
+export interface ExamSet {
+  id: string;
+  title: string;
+  duration: number;
+  totalQuestions: number;
+  totalMarks: number;
+  sectionalTiming: boolean;
+  calculator: "none" | "basic" | "scientific";
+  sections: ExamSection[];
+}
+
+export interface QuestionEvaluation {
+  status: "UNATTEMPTED" | "CORRECT" | "PARTIAL" | "WRONG";
+  marksAwarded: number;
+  ignoredByCap?: boolean;
+}
+
+export interface ExamEvaluationResult {
+  totalScore: number;
+  maxScore: number;
+  sectionResults: Record<
+    string,
+    { score: number; attempted: number; correct: number; partial: number; wrong: number; unattempted: number }
+  >;
+  questionResults: Record<string, QuestionEvaluation>;
+}
+
+// ============================================================================
+// 2. SVG SANITIZER & CODE + LATEX (\ce) + MARKDOWN RENDERER
+// ============================================================================
+function sanitizeSvg(raw: string, allowForeignObject = false): string {
+  let clean = String(raw || "")
+    .replace(/<(?:script|iframe|object|embed|link|meta|animate\w*|set)\b[\s\S]*?(?:<\/(?:script|iframe|object|embed|link|meta|animate\w*|set)>|\/>)/gi, "")
+    .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(?:href|xlink:href|src|action)\s*=\s*(?:"\s*(?:javascript|vbscript|data:text\/html)[^"]*"|'\s*(?:javascript|vbscript|data:text\/html)[^']*')/gi, "");
+
+  if (!allowForeignObject) {
+    clean = clean.replace(/<foreignObject[\s\S]*?>[\s\S]*?<\/foreignObject>/gi, "");
+  }
+  return clean;
+}
+
+const ESC_DOLLAR = "\uE000";
+
+function renderFormattedText(plain: string, keyPrefix: string): React.ReactNode {
+  const restored = plain.replaceAll(ESC_DOLLAR, "$");
+  const tokens = restored.split(/(\*\*[^*\n]+?\*\*|__[^_\n]+?__|\*(?!\s)(?:[^*\n]*?[^\s*\n])?\*)/g);
+
+  return tokens.map((part, idx) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={`${keyPrefix}-b-${idx}`} className="font-semibold text-slate-900">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("__") && part.endsWith("__") && part.length > 4) {
+      return <u key={`${keyPrefix}-u-${idx}`} className="underline decoration-slate-700 decoration-2 underline-offset-4">{part.slice(2, -2)}</u>;
+    }
+    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+      return <em key={`${keyPrefix}-i-${idx}`} className="italic">{part.slice(1, -1)}</em>;
+    }
+    return part.split("\n").map((line, lIdx, arr) => (
+      <React.Fragment key={`${keyPrefix}-l-${idx}-${lIdx}`}>
+        {line}
+        {lIdx < arr.length - 1 && <br />}
+      </React.Fragment>
+    ));
+  });
+}
+
+export function defaultRenderLatex(input: unknown): React.ReactNode {
+  if (input === null || input === undefined || input === "") return null;
+  const raw = String(input);
+
+  // 1. Isolate code blocks & inline code first (protects C pointers, SQL, $, *)
+  const codeParts = raw.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+
+  return codeParts.map((seg, cIdx) => {
+    if (seg.startsWith("```") && seg.endsWith("```") && seg.length >= 6) {
+      const code = seg.slice(3, -3).replace(/^[a-zA-Z0-9_+-]*\r?\n/, "");
+      return (
+        <pre key={`cb-${cIdx}`} className="my-2 overflow-x-auto rounded-lg bg-slate-900 p-3 font-mono text-xs leading-relaxed text-slate-100">
+          <code>{code}</code>
+        </pre>
+      );
+    }
+    if (seg.startsWith("`") && seg.endsWith("`") && seg.length >= 2) {
+      return (
+        <code key={`ic-${cIdx}`} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-medium text-slate-800">
+          {seg.slice(1, -1)}
+        </code>
+      );
+    }
+
+    // 2. Protect escaped \$ then tokenize display ($$...$$) & inline ($...$) LaTeX
+    const safeSeg = seg.replace(/\\\$/g, ESC_DOLLAR);
+    const mathParts = safeSeg.split(/(\$\$[\s\S]+?\$\$|\$(?!\s)(?:[^$\n]*?[^\s$\n])\$)/g);
+
+    return (
+      <React.Fragment key={`seg-${cIdx}`}>
+        {mathParts.map((mToken, mIdx) => {
+          if (mToken.startsWith("$$") && mToken.endsWith("$$") && mToken.length > 4) {
+            const tex = mToken.slice(2, -2).replaceAll(ESC_DOLLAR, "\\$");
+            const html = katex.renderToString(tex, { displayMode: true, throwOnError: false });
+            return <span key={`dm-${mIdx}`} className="my-2 block overflow-x-auto" dangerouslySetInnerHTML={{ __html: html }} />;
+          }
+          if (mToken.startsWith("$") && mToken.endsWith("$") && mToken.length >= 3) {
+            const tex = mToken.slice(1, -1).replaceAll(ESC_DOLLAR, "\\$");
+            const html = katex.renderToString(tex, { displayMode: false, throwOnError: false });
+            return <span key={`im-${mIdx}`} dangerouslySetInnerHTML={{ __html: html }} />;
+          }
+          return renderFormattedText(mToken, `${cIdx}-${mIdx}`);
+        })}
+      </React.Fragment>
+    );
+  });
+}
+
+// ============================================================================
+// 3. CLIENT DIAGRAM MOUNT (Mermaid FSM/Flowcharts & SMILES Molecules/Reactions)
+// ============================================================================
+function DeclarativeDiagramMount({ type, data }: { type: "smiles" | "mermaid"; data: string }) {
+  const baseId = useId().replace(/[^a-zA-Z0-9_-]/g, "_");
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [mermaidSvg, setMermaidSvg] = useState<string>("");
+  const [smilesError, setSmilesError] = useState<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+
+    if (type === "mermaid" && data) {
+      import("mermaid")
+        .then(async (m) => {
+          const mermaid = m.default;
+          mermaid.initialize({
+            startOnLoad: false,
+            suppressErrorRendering: true,
+            theme: "neutral",
+            securityLevel: "strict",
+            flowchart: { htmlLabels: false },
+          });
+          const renderId = `mmd_${baseId}_${++mermaidRenderSeq}`;
+          const { svg } = await mermaid.render(renderId, String(data));
+          if (active) setMermaidSvg(sanitizeSvg(svg, true));
+        })
+        .catch(() => {
+          if (active) setMermaidSvg("");
+        });
+    } else if (type === "smiles" && data && svgRef.current) {
+      setSmilesError(false);
+      svgRef.current.innerHTML = "";
+      import("smiles-drawer")
+        .then((mod: any) => {
+          const SD = mod.default || mod;
+          if (!active || !svgRef.current) return;
+          if (SD.SmiDrawer) {
+            const smiDrawer = new SD.SmiDrawer({ width: 260, height: 160 });
+            smiDrawer.draw(String(data), svgRef.current, "light", undefined, () => {
+              if (active) setSmilesError(true);
+            });
+          } else {
+            const drawer = new SD.SvgDrawer({ width: 260, height: 160 });
+            SD.parse(
+              String(data),
+              (tree: any) => {
+                if (active && svgRef.current) {
+                  svgRef.current.innerHTML = "";
+                  drawer.draw(tree, svgRef.current, "light");
+                }
+              },
+              () => {
+                if (active) setSmilesError(true);
+              }
+            );
+          }
+        })
+        .catch(() => {
+          if (active) setSmilesError(true);
+        });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [type, data, baseId]);
+
+  if (type === "mermaid") {
+    return mermaidSvg ? (
+      <div className="flex justify-center overflow-x-auto py-2 [&>svg]:h-auto [&>svg]:max-w-full" dangerouslySetInnerHTML={{ __html: mermaidSvg }} />
+    ) : (
+      <pre className="overflow-x-auto rounded bg-slate-50 p-2 text-xs text-slate-600">{data}</pre>
+    );
+  }
+
+  if (smilesError) {
+    return <code className="block rounded bg-slate-50 p-2 text-xs text-slate-700">{data}</code>;
+  }
+
+  return (
+    <div className="flex justify-center overflow-x-auto py-1">
+      <svg ref={svgRef} viewBox="0 0 260 160" className="h-auto max-h-40 w-full max-w-[260px]" />
+    </div>
+  );
+}
+
+// ============================================================================
+// 4. SINGLE VISUAL CARD (Chart, Merged-Header Table, SVG, Mermaid, SMILES, Image)
+// ============================================================================
+function normalizeCell(cell: TableCellInput): TableCellObject {
+  if (cell !== null && typeof cell === "object" && "text" in cell) return cell;
+  return { text: cell === null || cell === undefined ? "" : String(cell) };
+}
+
+export function SingleVisualCard({
+  visual,
+  renderLatex = defaultRenderLatex,
+}: {
+  visual: VisualBlock;
+  renderLatex?: (txt: unknown) => React.ReactNode;
+}) {
+  if (!visual || typeof visual !== "object") return null;
+
+  const isNumericScatterX =
+    visual.type === "chart" &&
+    visual.chartType === "scatter" &&
+    typeof visual.data?.[0]?.[visual.xAxisKey] === "number";
+
+  const headerRows: TableCellInput[][] =
+    visual.type === "table" && Array.isArray(visual.headers) && visual.headers.length > 0
+      ? Array.isArray(visual.headers[0])
+        ? (visual.headers as TableCellInput[][])
+        : [visual.headers as TableCellInput[]]
+      : [];
+
+  return (
+    <div className="my-2.5 min-w-0 rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+      {visual.title && (
+        <h4 className="mb-2.5 border-b pb-1.5 text-sm font-bold text-slate-800">{renderLatex(visual.title)}</h4>
+      )}
+
+      {visual.type === "chart" && Array.isArray(visual.data) && (
+        <div className="h-72 w-full min-w-0">
+          <ResponsiveContainer width="100%" height="100%">
+            {visual.chartType === "pie" ? (
+              <PieChart>
+                <Pie
+                  data={visual.data}
+                  dataKey={visual.series?.[0]?.key || "value"}
+                  nameKey={visual.xAxisKey || "name"}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={82}
+                  label={({ name, value }) => `${name}: ${value}`}
+                >
+                  {visual.data.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            ) : visual.chartType === "radar" ? (
+              <RadarChart data={visual.data}>
+                <PolarGrid />
+                <PolarAngleAxis dataKey={visual.xAxisKey} />
+                <PolarRadiusAxis />
+                {(visual.series || []).map((s, i) => (
+                  <Radar
+                    key={s.key || i}
+                    name={s.label || s.key}
+                    dataKey={s.key}
+                    stroke={COLORS[i % COLORS.length]}
+                    fill={COLORS[i % COLORS.length]}
+                    fillOpacity={0.3}
+                  />
+                ))}
+                <Legend />
+                <Tooltip />
+              </RadarChart>
+            ) : (
+              <ComposedChart data={visual.data}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey={visual.xAxisKey}
+                  type={isNumericScatterX ? "number" : "category"}
+                  domain={isNumericScatterX ? ["auto", "auto"] : undefined}
+                  label={visual.xAxisLabel ? { value: visual.xAxisLabel, position: "insideBottom", offset: -4, fontSize: 11 } : undefined}
+                />
+                <YAxis
+                  yAxisId="left"
+                  orientation="left"
+                  label={visual.yAxisLabel ? { value: visual.yAxisLabel, angle: -90, position: "insideLeft", fontSize: 11 } : undefined}
+                />
+                {(visual.series || []).some((s) => s.yAxis === "right") && (
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    label={visual.rightYAxisLabel ? { value: visual.rightYAxisLabel, angle: 90, position: "insideRight", fontSize: 11 } : undefined}
+                  />
+                )}
+                <Tooltip />
+                <Legend />
+                {(visual.series || []).map((s, i) => {
+                  const yAxisId = s.yAxis || "left";
+                  const color = COLORS[i % COLORS.length];
+                  const kind = s.type || visual.chartType;
+
+                  if (kind === "scatter") {
+                    return <Scatter key={s.key || i} yAxisId={yAxisId} name={s.label} dataKey={s.key} fill={color} />;
+                  }
+                  if (kind === "line") {
+                    return <Line key={s.key || i} yAxisId={yAxisId} type="monotone" dataKey={s.key} name={s.label} stroke={color} strokeWidth={2.5} />;
+                  }
+                  if (kind === "area") {
+                    return <Area key={s.key || i} yAxisId={yAxisId} type="monotone" dataKey={s.key} name={s.label} stroke={color} fill={color} fillOpacity={0.25} />;
+                  }
+                  return (
+                    <Bar
+                      key={s.key || i}
+                      yAxisId={yAxisId}
+                      dataKey={s.key}
+                      name={s.label}
+                      stackId={visual.chartType === "stacked_bar" ? "stack" : undefined}
+                      fill={color}
+                    />
+                  );
+                })}
+              </ComposedChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {visual.type === "table" && (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            {headerRows.length > 0 && (
+              <thead>
+                {headerRows.map((hRow, rIdx) => (
+                  <tr key={rIdx} className="bg-slate-100">
+                    {hRow.map((rawCell, cIdx) => {
+                      const c = normalizeCell(rawCell);
+                      const alignCls = c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : "text-left";
+                      return (
+                        <th key={cIdx} colSpan={c.colSpan} rowSpan={c.rowSpan} className={`border border-slate-300 px-3 py-2 font-semibold text-slate-800 ${alignCls}`}>
+                          {renderLatex(c.text)}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </thead>
+            )}
+            <tbody>
+              {(visual.rows || []).map((row, rIdx) => (
+                <tr key={rIdx} className="even:bg-slate-50">
+                  {(row || []).map((rawCell, cIdx) => {
+                    const c = normalizeCell(rawCell);
+                    const alignCls = c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : "text-left";
+                    return (
+                      <td key={cIdx} colSpan={c.colSpan} rowSpan={c.rowSpan} className={`border border-slate-300 px-3 py-2 text-slate-700 ${alignCls}`}>
+                        {renderLatex(c.text)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {visual.type === "svg" && visual.data && (
+        <div
+          className="overflow-x-auto py-2 [&>svg]:mx-auto [&>svg]:block [&>svg]:h-auto [&>svg]:max-h-80 [&>svg]:w-full [&>svg]:max-w-xl"
+          dangerouslySetInnerHTML={{ __html: sanitizeSvg(visual.data, false) }}
+        />
+      )}
+
+      {(visual.type === "smiles" || visual.type === "mermaid") && visual.data && (
+        <DeclarativeDiagramMount type={visual.type} data={String(visual.data)} />
+      )}
+
+      {visual.type === "image" && visual.data && (
+        <div className="flex justify-center py-2">
+          <img src={visual.data} alt={visual.alt || visual.title || "Exam diagram"} loading="lazy" className="max-h-80 w-auto rounded-lg object-contain" />
+        </div>
+      )}
+
+      {visual.note && (
+        <div className="mt-2.5 rounded border-l-4 border-amber-400 bg-amber-50/70 px-3 py-1.5 text-xs text-slate-700">
+          {renderLatex(visual.note)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// 5. MULTI-VISUAL CONTENT BLOCK (Safe Dynamic {{id}} Interleaving + Fallback)
+// ============================================================================
+export function MultiVisualContentBlock({
+  text,
+  visuals = [],
+  renderLatex = defaultRenderLatex,
+}: {
+  text?: string | null;
+  visuals?: VisualBlock[] | null;
+  renderLatex?: (txt: unknown) => React.ReactNode;
+}) {
+  const safeVisuals = Array.isArray(visuals) ? visuals.filter(Boolean) : [];
+  const visualMap = new Map(safeVisuals.map((v) => [v.id, v]));
+  const renderedIds = new Set<string>();
+
+  let parts: string[] = text ? [String(text)] : [];
+  if (text && visualMap.size > 0) {
+    const escapedIds = Array.from(visualMap.keys()).map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const splitRegex = new RegExp(`(\\{\\{(?:${escapedIds.join("|")})\\}\\})`, "g");
+    parts = String(text).split(splitRegex);
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {parts.map((part, idx) => {
+        const match = part.match(/^\{\{(.+)\}\}$/);
+        if (match && visualMap.has(match[1])) {
+          const target = visualMap.get(match[1])!;
+          renderedIds.add(target.id);
+          return <SingleVisualCard key={`v-${idx}`} visual={target} renderLatex={renderLatex} />;
+        }
+        const trimmed = part.replace(/^\r?\n+|\r?\n+$/g, "");
+        return trimmed ? (
+          <div key={`t-${idx}`} className="leading-relaxed text-slate-800">
+            {renderLatex(trimmed)}
+          </div>
+        ) : null;
+      })}
+
+      {safeVisuals
+        .filter((v) => !renderedIds.has(v.id))
+        .map((v, idx) => (
+          <SingleVisualCard key={v.id || `rem-${idx}`} visual={v} renderLatex={renderLatex} />
+        ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// 6. ATTEMPT TRACKING, RESPONSE BLOCK (Exam + Review Mode) & GRADING ENGINE
+// ============================================================================
+export function isQuestionAttempted(question: { type: string }, rawAnswer: unknown): boolean {
+  if (rawAnswer === null || rawAnswer === undefined) return false;
+  if (question.type === "MSQ") {
+    return Array.isArray(rawAnswer) && rawAnswer.some((v) => String(v).trim() !== "");
+  }
+  const str = String(rawAnswer).trim();
+  if (str === "" || (question.type === "NAT" && (str === "-" || str === "." || str === "-."))) {
+    return false;
+  }
+  return question.type === "NAT" ? Number.isFinite(Number(str)) : true;
+}
+
+export function hasActiveSlot(question: { type: string }, rawAnswer: unknown): boolean {
+  if (isQuestionAttempted(question, rawAnswer)) return true;
+  if (question.type === "NAT" && rawAnswer !== null && rawAnswer !== undefined) {
+    return String(rawAnswer).trim() !== "";
+  }
+  return false;
+}
+
+export function isQuestionLockedBySectionCap(
+  section: Pick<ExamSection, "maxAttempts" | "questions">,
+  questionId: string,
+  sectionResponses: Record<string, unknown>
+): boolean {
+  const cap = section.maxAttempts ? Number(section.maxAttempts) : null;
+  if (!cap) return false;
+  let activeCount = 0;
+  let currentHasSlot = false;
+  for (const q of section.questions || []) {
+    const active = hasActiveSlot(q, sectionResponses[q.id]);
+    if (active) activeCount++;
+    if (q.id === questionId && active) currentHasSlot = true;
+  }
+  return activeCount >= cap && !currentHasSlot;
+}
+
+export function QuestionResponseBlock({
+  question,
+  userAnswer,
+  onChange,
+  mode = "exam",
+  isAttemptCapReached = false,
+  showVirtualKeypad = true,
+  renderLatex = defaultRenderLatex,
+}: {
+  question: ExamQuestion;
+  userAnswer: unknown;
+  onChange: (val: unknown) => void;
+  mode?: "exam" | "review";
+  isAttemptCapReached?: boolean;
+  showVirtualKeypad?: boolean;
+  renderLatex?: (txt: unknown) => React.ReactNode;
+}) {
+  const isReview = mode === "review";
+  const isLocked = isReview || (isAttemptCapReached && !hasActiveSlot(question, userAnswer));
+
+  if (question.type === "NAT") {
+    const valStr = userAnswer !== null && userAnswer !== undefined ? String(userAnswer) : "";
+    const range = Array.isArray(question.answer) ? question.answer : [question.answer, question.answer];
+
+    const handleNumericInput = (next: string) => {
+      if (isLocked) return;
+      if (next === "" || /^-?\d*\.?\d*$/.test(next)) onChange(next);
+    };
+
+    const handleKeyPress = (key: string) => {
+      if (isLocked) return;
+      if (key === "CLEAR") return onChange("");
+      if (key === "BACKSPACE") return onChange(valStr.slice(0, -1));
+      if (key === "-") return onChange(valStr.startsWith("-") ? valStr.slice(1) : "-" + valStr);
+      if (key === "." && valStr.includes(".")) return;
+      handleNumericInput(valStr + key);
+    };
+
+    return (
+      <div className="mt-4 space-y-3">
+        {!isReview && isLocked && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs font-medium text-amber-800">
+            Section attempt limit reached. Clear an existing response in this section to attempt this question.
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Numerical Answer:
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              disabled={isLocked}
+              value={valStr}
+              onChange={(e) => handleNumericInput(e.target.value)}
+              placeholder={isReview ? "Unattempted" : "Enter numerical value"}
+              className="w-60 rounded-lg border border-slate-300 px-3 py-2 text-base font-semibold text-slate-900 focus:border-blue-600 focus:outline-none disabled:bg-slate-100"
+            />
+          </div>
+          {isReview && (
+            <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900">
+              Accepted Answer:{" "}
+              {Number(range[0]) === Number(range[1]) ? range[0] : `${range[0]} to ${range[1]}`}
+            </div>
+          )}
+        </div>
+
+        {!isReview && showVirtualKeypad && !isLocked && (
+          <div className="inline-grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+            {["7", "8", "9", "BACKSPACE", "4", "5", "6", "-", "1", "2", "3", ".", "0", "CLEAR"].map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => handleKeyPress(k)}
+                className={`rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-100 ${
+                  k === "CLEAR" || k === "BACKSPACE" ? "col-span-2 text-red-600" : ""
+                }`}
+              >
+                {k === "BACKSPACE" ? "⌫" : k}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const isMSQ = question.type === "MSQ";
+  const selectedSet = new Set(
+    isMSQ ? (Array.isArray(userAnswer) ? userAnswer.map(String) : []) : userAnswer ? [String(userAnswer)] : []
+  );
+  const correctSet = new Set(
+    isMSQ
+      ? (Array.isArray(question.answer) ? question.answer.map(String) : [])
+      : [String(question.answer)]
+  );
+
+  return (
+    <div className="mt-4 space-y-2.5" role={isMSQ ? "group" : "radiogroup"}>
+      {!isReview && isLocked && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs font-medium text-amber-800">
+          Section attempt limit reached. Clear an existing response in this section to attempt this question.
+        </div>
+      )}
+
+      {(question.options || []).map((opt) => {
+        const isSelected = selectedSet.has(opt.id);
+        const isCorrectOpt = correctSet.has(opt.id);
+
+        const toggleOption = () => {
+          if (isLocked) return;
+          if (!isMSQ) {
+            onChange(isSelected ? null : opt.id);
+          } else {
+            const next = isSelected
+              ? Array.from(selectedSet).filter((id) => id !== opt.id)
+              : Array.from(new Set([...selectedSet, opt.id])).sort();
+            onChange(next);
+          }
+        };
+
+        let cardCls = "border-slate-200 bg-white hover:bg-slate-50";
+        let badgeCls = "border-slate-300 text-slate-600";
+
+        if (isReview) {
+          if (isCorrectOpt && isSelected) {
+            cardCls = "border-emerald-600 bg-emerald-50/80 ring-1 ring-emerald-600";
+            badgeCls = "border-emerald-600 bg-emerald-600 text-white";
+          } else if (isCorrectOpt && !isSelected) {
+            cardCls = "border-dashed border-emerald-500 bg-emerald-50/40";
+            badgeCls = "border-emerald-600 text-emerald-700";
+          } else if (!isCorrectOpt && isSelected) {
+            cardCls = "border-rose-600 bg-rose-50/80 ring-1 ring-rose-600";
+            badgeCls = "border-rose-600 bg-rose-600 text-white";
+          }
+        } else if (isSelected) {
+          cardCls = "border-blue-600 bg-blue-50/70 ring-1 ring-blue-600";
+          badgeCls = "border-blue-600 bg-blue-600 text-white";
+        }
+
+        return (
+          <div
+            key={opt.id}
+            role={isMSQ ? "checkbox" : "radio"}
+            aria-checked={isSelected}
+            aria-disabled={isLocked}
+            tabIndex={isLocked ? -1 : 0}
+            onClick={toggleOption}
+            onKeyDown={(e) => {
+              if (!isLocked && (e.key === " " || e.key === "Enter")) {
+                e.preventDefault();
+                toggleOption();
+              }
+            }}
+            className={`flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-left transition select-none ${cardCls} ${
+              isLocked ? "cursor-default opacity-90" : ""
+            }`}
+          >
+            <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold ${badgeCls}`}>
+              {opt.id}
+            </span>
+            <div className="min-w-0 flex-1 text-sm">
+              <MultiVisualContentBlock text={opt.text} visuals={opt.visuals} renderLatex={renderLatex} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function evaluateQuestion(
+  question: Pick<ExamQuestion, "type" | "marks" | "answer">,
+  userAnswer: unknown
+): QuestionEvaluation {
+  const { type, marks, answer } = question;
+  const correctMarks = Number(marks?.correct ?? 1);
+  const wrongPenalty = -Math.abs(Number(marks?.wrong ?? 0));
+
+  if (!isQuestionAttempted(question, userAnswer)) {
+    return { status: "UNATTEMPTED", marksAwarded: 0 };
+  }
+
+  if (type === "MCQ") {
+    const isCorrect = String(userAnswer).trim() === String(answer).trim();
+    return {
+      status: isCorrect ? "CORRECT" : "WRONG",
+      marksAwarded: Number((isCorrect ? correctMarks : wrongPenalty).toFixed(6)),
+    };
+  }
+
+  if (type === "NAT") {
+    const num = Number(String(userAnswer).trim());
+    const bounds = Array.isArray(answer)
+      ? [Number(answer[0]), Number(answer[1] ?? answer[0])]
+      : [Number(answer), Number(answer)];
+    if (!Number.isFinite(num) || !Number.isFinite(bounds[0]) || !Number.isFinite(bounds[1])) {
+      return { status: "WRONG", marksAwarded: Number(wrongPenalty.toFixed(6)) };
+    }
+    const min = Math.min(bounds[0], bounds[1]);
+    const max = Math.max(bounds[0], bounds[1]);
+    const isCorrect = num >= min - 1e-6 && num <= max + 1e-6;
+    return {
+      status: isCorrect ? "CORRECT" : "WRONG",
+      marksAwarded: Number((isCorrect ? correctMarks : wrongPenalty).toFixed(6)),
+    };
+  }
+
+  if (type === "MSQ") {
+    const correctSet = new Set((Array.isArray(answer) ? answer : []).map((v) => String(v).trim()).filter(Boolean));
+    const userSet = new Set((Array.isArray(userAnswer) ? userAnswer : []).map((v) => String(v).trim()).filter(Boolean));
+
+    if (correctSet.size === 0 || userSet.size === 0) {
+      return { status: "UNATTEMPTED", marksAwarded: 0 };
+    }
+    for (const opt of userSet) {
+      if (!correctSet.has(opt)) {
+        return { status: "WRONG", marksAwarded: Number(wrongPenalty.toFixed(6)) };
+      }
+    }
+    if (userSet.size === correctSet.size) {
+      return { status: "CORRECT", marksAwarded: Number(correctMarks.toFixed(6)) };
+    }
+    const partialRate = Number(marks?.partial ?? 0);
+    if (partialRate > 0) {
+      const awarded = Math.min(userSet.size * partialRate, (userSet.size / correctSet.size) * correctMarks);
+      return { status: "PARTIAL", marksAwarded: Number(awarded.toFixed(6)) };
+    }
+    return { status: "WRONG", marksAwarded: Number(wrongPenalty.toFixed(6)) };
+  }
+
+  return { status: "UNATTEMPTED", marksAwarded: 0 };
+}
+
+export function evaluateFullExam(
+  exam: ExamSet,
+  userResponses: Record<string, unknown>
+): ExamEvaluationResult {
+  let totalScore = 0;
+  let computedMaxScore = 0;
+  const sectionResults: ExamEvaluationResult["sectionResults"] = {};
+  const questionResults: Record<string, QuestionEvaluation> = {};
+
+  for (const section of exam.sections || []) {
+    let sectionScore = 0;
+    let attempted = 0, correct = 0, partial = 0, wrong = 0, unattempted = 0;
+    const cap = section.maxAttempts ? Number(section.maxAttempts) : null;
+
+    const sortedMarks = (section.questions || []).map((q) => Number(q.marks?.correct ?? 0)).sort((a, b) => b - a);
+    computedMaxScore += (cap ? sortedMarks.slice(0, cap) : sortedMarks).reduce((acc, v) => acc + v, 0);
+
+    for (const q of section.questions || []) {
+      const raw = userResponses[q.id];
+      const isAttempt = isQuestionAttempted(q, raw);
+
+      if (isAttempt && cap !== null && attempted >= cap) {
+        questionResults[q.id] = { status: "UNATTEMPTED", marksAwarded: 0, ignoredByCap: true };
+        unattempted++;
+        continue;
+      }
+
+      const res = evaluateQuestion(q, raw);
+      questionResults[q.id] = res;
+      sectionScore += res.marksAwarded;
+
+      if (res.status === "UNATTEMPTED") unattempted++;
+      else {
+        attempted++;
+        if (res.status === "CORRECT") correct++;
+        else if (res.status === "PARTIAL") partial++;
+        else wrong++;
+      }
+    }
+
+    sectionResults[section.id] = {
+      score: Number(sectionScore.toFixed(2)),
+      attempted,
+      correct,
+      partial,
+      wrong,
+      unattempted,
+    };
+    totalScore += sectionScore;
+  }
+
+  return {
+    totalScore: Number(totalScore.toFixed(2)),
+    maxScore: Number((exam.totalMarks || computedMaxScore).toFixed(2)),
+    sectionResults,
+    questionResults,
+  };
+}
+
+// ============================================================================
+// 7. UNIFIED SPLIT-PANE MULTI-CONTEXT QUESTION WORKSPACE (Exam + Review Mode)
+// ============================================================================
+export function ExamQuestionWorkspace({
+  section,
+  question,
+  questionNumber,
+  sectionResponses,
+  onChange,
+  mode = "exam",
+  showVirtualKeypad = true,
+  renderLatex = defaultRenderLatex,
+}: {
+  section: ExamSection;
+  question: ExamQuestion;
+  questionNumber?: number;
+  sectionResponses: Record<string, unknown>;
+  onChange: (questionId: string, nextAnswer: unknown) => void;
+  mode?: "exam" | "review";
+  showVirtualKeypad?: boolean;
+  renderLatex?: (txt: unknown) => React.ReactNode;
+}) {
+  const resolvedContexts = (question.contextIds || [])
+    .map((cid) => (section.contexts || []).find((c) => c.id === cid))
+    .filter((c): c is ExamContext => Boolean(c));
+
+  const userAnswer = sectionResponses[question.id];
+  const capLocked = isQuestionLockedBySectionCap(section, question.id, sectionResponses);
+  const evaluation = mode === "review" ? evaluateQuestion(question, userAnswer) : null;
+
+  return (
+    <div className={`grid gap-5 ${resolvedContexts.length > 0 ? "lg:grid-cols-12" : "mx-auto max-w-4xl grid-cols-1"}`}>
+      {resolvedContexts.length > 0 && (
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 lg:col-span-6 lg:max-h-[78vh] lg:overflow-y-auto">
+          {resolvedContexts.map((ctx, idx) => (
+            <div key={ctx.id} className={idx > 0 ? "border-t border-slate-200 pt-4" : ""}>
+              {ctx.title && (
+                <div className="mb-2 inline-block rounded-md bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-900">
+                  {renderLatex(ctx.title)}
+                </div>
+              )}
+              <MultiVisualContentBlock text={ctx.text} visuals={ctx.visuals} renderLatex={renderLatex} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${resolvedContexts.length > 0 ? "lg:col-span-6 lg:max-h-[78vh] lg:overflow-y-auto" : ""}`}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+          <div className="flex items-center gap-2">
+            {questionNumber !== undefined && (
+              <span className="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-bold text-white">Q{questionNumber}</span>
+            )}
+            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{question.type}</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-700">+{question.marks.correct}</span>
+            <span className="rounded bg-rose-50 px-2 py-0.5 text-rose-700">
+              {question.marks.wrong === 0 ? "0" : -Math.abs(question.marks.wrong)}
+            </span>
+            {question.marks.partial > 0 && (
+              <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-700">Partial +{question.marks.partial}</span>
+            )}
+          </div>
+        </div>
+
+        <MultiVisualContentBlock text={question.prompt} visuals={question.visuals} renderLatex={renderLatex} />
+
+        <QuestionResponseBlock
+          question={question}
+          userAnswer={userAnswer}
+          onChange={(val) => onChange(question.id, val)}
+          mode={mode}
+          isAttemptCapReached={capLocked}
+          showVirtualKeypad={showVirtualKeypad}
+          renderLatex={renderLatex}
+        />
+
+        {mode === "review" && evaluation && (
+          <div className="mt-5 space-y-3 border-t border-slate-200 pt-4">
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs font-bold">
+              <span>Status: {evaluation.status}</span>
+              <span>Marks Awarded: {Number(evaluation.marksAwarded.toFixed(2))}</span>
+            </div>
+            {(question.explanation || (question.explanationVisuals && question.explanationVisuals.length > 0)) && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 text-sm">
+                <div className="mb-2 text-xs font-bold uppercase tracking-wider text-blue-900">Explanation</div>
+                <MultiVisualContentBlock
+                  text={question.explanation}
+                  visuals={question.explanationVisuals}
+                  renderLatex={renderLatex}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+
+
+
+
+
+
+
+1. Bundle Isolation & CSS/Chart Splitting (Master Pillars 1 & 3 — CWV Discipline)
+Zero Impact on SSR Catalog/Detail Routes: Public /exams/[urlSlug] pages must render MocktestTitles (id, title, duration, totalQuestions, totalMarks) as pure SSR HTML and never import ExamEngine.tsx. Mount ExamEngine strictly via dynamic client import (ssr: false) inside /attempt/[urlSlug]/[setId].
+Sub-Chunk recharts & Load KaTeX Styles: mermaid and smiles-drawer are already dynamically imported in ExamEngine.tsx, but recharts and katex are top-level static imports.
+Lazy-load the recharts branch inside SingleVisualCard only when visual.type === "chart" so non-DI exams skip ~150 KB of charting JS, keeping every chunk well below Googlebot/WRS’s < 500 KB budget.
+Import katex/dist/katex.min.css strictly inside the lazy /attempt/* route layout so katex.renderToString() never renders duplicate raw MathML/HTML text, without polluting public route CSS.
+2. Server-Boundary Security & Anti-Leak Delivery (Master Pillars 3 & 4)
+Signed Delivery & Auth Gate: Keep sampleJsonStoragePath public/CDN-cached for instant "Try Free Mock" previews, while gating fullJsonStoragePath strictly behind /api/v1/exams/[packId] (Cache-Control: private, no-store), verifying user ownership before issuing a short-lived signed URL.
+Eviction-Proof Offline Pack Storage: Never cache full ExamSet[] packs in iOS IndexedDB alone. Store downloaded exam JSON in Web OPFS (navigator.storage.persist()) on Web and @capacitor/filesystem (Library/NoCloud, isExcludedFromBackup: true) on Capacitor Native so evaluateFullExam() works 100% offline.
+Optional Live-Exam Answer Redaction (Zero Schema Change): For high-stakes online mocks, a lightweight edge/server transform can strip answer, explanation, and explanationVisuals on test start (mode="exam") and hydrate them upon submission (mode="review"), using the exact same ExamSet interface.
+3. ExamRunnerShell: Monotonic Timers, calculator Widget & Offline Sync (Master Pillars 4 & 6)
+Wrap ExamQuestionWorkspace in a lightweight ExamRunnerShell handling the root ExamSet fields (duration, sectionalTiming, calculator):
+Sleep-Proof Monotonic Countdown: Never use setInterval decrements (t - 1), which freeze when iOS/Android backgrounds the WebView. Compute remainingMs = targetEndEpochMs - Date.now(), reconciling immediately on visibilitychange and Capacitor App.addListener("appStateChange"). When sectionalTiming === true, auto-lock the expired section and advance to the next section.id.
+Activate the calculator Schema Field: Render a toggleable, draggable CalculatorPopover in the runner header strictly when examSet.calculator is "basic" or "scientific" (hidden when "none").
+CBT Question Palette & Back-Button Shield: Add a slide-over palette showing Answered, Unanswered, Not Visited, Marked for Review, and Cap-Locked (maxAttempts) pills. Intercept browser beforeunload and Capacitor Android backButton (OnBackInvokedCallback) during active attempts to prevent accidental swipe-exit.
+SQLite/Local Autosave + Idempotent Result Queue: Autosave { setId, activeSectionId, activeQuestionId, responses, remainingMs } locally on every tap. On submit, push the compact attempt summary into Pillar 4’s SQLite offline mutation queue with a UUIDv7 Idempotency-Key so offline attempts sync seamlessly to power the Home Dashboard’s "Mock Tests Attempted" KPI.
+4. Mobile Split-Pane Physics, NAT Touch Ergonomics & Lightbox (Master Pillars 6 & 7)
+Mobile Caselet Switcher (< lg Viewports): Stacking a 3-visual DI context above question on phones forces heavy vertical back-and-forth scrolling. On < 1024px screens, wrap resolvedContexts in a Sticky Tab Toggle ([ 📊 Caselet / Passage ] | [ ❓ Question ]) or collapsible 42svh top drawer, and replace lg:max-h-[78vh] with 100dvh inside the scroll-locked runner shell.
+NAT Keypad vs. OS Keyboard Collision Fix:
+On coarse pointers (@media (pointer: coarse)), when showVirtualKeypad === true, pass readOnly (or inputMode="none") to the NAT <input> so tapping it doesn’t pop up the native OS keyboard on top of your virtual keypad!
+Increase virtual keypad and option-row touch heights to min-h-12 (>= 48×48px) with touch-action: manipulation to pass Apple HIG and Google Play accessibility gates.
+Tap-to-Zoom Visual Lightbox (pan-x pan-y): Add an "Expand 🔍" action on SingleVisualCard (charts, wide merged tables, SVGs, Mermaid FSMs, SMILES molecules) opening the shared 2-finger pinch-zoom + 2D pan lightbox so intricate diagrams are effortless to inspect on 6-inch phones.
+5. WebView XSS & Dual-CSP Hardening (Master Pillar 9)
+Upgrade sanitizeSvg from Regex to DOMPurify: Regex SVG filters can be bypassed via HTML-encoded attributes inside Capacitor WebViews. Since DOMPurify is already in your core bundle (for the Markdown viewer), replace the regex body of sanitizeSvg with a 4-line DOMPurify call:
+Ts
+import DOMPurify from "dompurify";
+function sanitizeSvg(raw: string, allowForeignObject = false): string {
+  return DOMPurify.sanitize(String(raw || ""), {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    ADD_TAGS: allowForeignObject ? ["foreignObject"] : [],
+    FORBID_TAGS: ["script", "iframe", "object", "embed", "animate", "set"],
+  });
+}
+Offline Image Resolver: In SingleVisualCard (visual.type === "image"), resolve src through your platform adapter (Capacitor.convertFileSrc() when offline) and add decoding="async".
+6. ExamDash Token & Flash-Free Dark Mode Sync (Master Pillars 5 & 8)
+Tokenized Surfaces & Logical CSS: Swap hardcoded bg-white / border-slate-200 / text-left utilities in ExamEngine.tsx for ExamDash semantic tokens (bg-[var(--bg-surface)], border-[var(--border-subtle)], text-start, tabular-nums on timers, marks, and NAT inputs).
+Theme-Aware Diagrams: Pass the active theme token ("dark" vs "light"/"neutral") into mermaid.initialize({ theme }) and smiDrawer.draw(..., theme) inside DeclarativeDiagramMount, and apply subtle dark-mode contrast adaptation to inline #0f172a strokes so night-mode mock sessions remain legible.
+7. Authoring-Time CI Validator for Pillar 4 (Master Pillar 10 — Zero-AI Runtime)
+Keep Pillar 4 strictly as an offline/authoring-time pipeline (zero runtime LLM calls in production). Pair it with a tiny deterministic pre-upload script (validateExamPack.ts) that parses [set_1, ..., set_N] and verifies:
+Valid RFC 8259 JSON + non-throwing katex.renderToString() across every text, prompt, option.text, table cell, and explanation.
+Exact Pillar 1 ↔ Pillar 2 invariants (sectionalTiming duration sums, maxAttempts top-
+K
+K
+ totalMarks, valid contextIds and {{visualId}} references) and auto-generates MocktestTitles and totalMocktest for Firestore so Pillar 1 and Pillar 2 can never drift.

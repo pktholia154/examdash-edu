@@ -1,8 +1,12 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/auth-provider';
 import { formatPrice } from '../../lib/registry/content-type-registry';
+import {
+  EXAM_ATTEMPTS_UPDATED_EVENT,
+  getCompletedAttemptsSync,
+} from '../../lib/exam/storage';
 
 export interface KpiStripProps {
   totalCatalogBooks: number;
@@ -20,6 +24,18 @@ export function KpiStrip({
   primaryCurrency,
 }: KpiStripProps) {
   const { user, purchases, isSigningIn, signInWithGoogle } = useAuth();
+  const [completedCount, setCompletedCount] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => setCompletedCount(getCompletedAttemptsSync().length);
+    refresh();
+    window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   const metrics = useMemo(() => {
     const ownedBooks = purchases.filter((p) => p.collectionName === 'books').length;
@@ -81,8 +97,12 @@ export function KpiStrip({
           </p>
           <p className="mt-1 text-xs text-[var(--text-muted)] tabular-nums">
             {user
-              ? `${metrics.ownedMocks} unlocked in library`
-              : `${totalCatalogMocks} full-length sets in catalog`}
+              ? `${metrics.ownedMocks} unlocked${
+                  completedCount > 0 ? ` · ${completedCount} attempted` : ''
+                }`
+              : `${totalCatalogMocks} sets${
+                  completedCount > 0 ? ` · ${completedCount} attempted` : ''
+                }`}
           </p>
         </div>
 

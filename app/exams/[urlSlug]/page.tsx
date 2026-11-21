@@ -188,6 +188,9 @@ export default async function ExamDetailPage({
           items={exam.MocktestTitles}
           totalMocktest={exam.totalMocktest}
           examSlug={exam.urlSlug}
+          examId={exam.id}
+          buyPrice={exam.buyPrice}
+          hasSample={Boolean(exam.sampleJsonStoragePath)}
         />
 
         {/* Full Description */}

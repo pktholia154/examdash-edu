@@ -54,6 +54,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isDetailRoute =
     (pathname.startsWith('/books/') && pathname !== '/books') ||
     (pathname.startsWith('/exams/') && pathname !== '/exams');
+  const isAttemptRoute = pathname.startsWith('/attempt/');
 
   return (
     <div className="min-h-[100svh] flex flex-col bg-[var(--bg-canvas)] text-[var(--text-main)]">
@@ -228,33 +229,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Main Content Area */}
-      <main id="main-content" className="flex-1 pb-20 md:pb-12">
+      <main
+        id="main-content"
+        className={cn('flex-1', isAttemptRoute ? 'pb-6' : 'pb-20 md:pb-12')}
+      >
         <ClientErrorBoundary>{children}</ClientErrorBoundary>
       </main>
 
-      {/* Quiet Editorial Footer */}
-      <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] py-8 pb-24 md:pb-8">
-        <div className="ed-container flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-[var(--text-muted)]">
-          <p>© {new Date().getFullYear()} ExamDash (ed). Digital Study Catalog & Mock Test Platform.</p>
-          <nav aria-label="Footer navigation" className="flex flex-wrap items-center gap-5">
-            <Link href="/books" className="hover:text-[var(--text-main)] transition-colors">
-              Books Catalog
-            </Link>
-            <Link href="/exams" className="hover:text-[var(--text-main)] transition-colors">
-              Exam Packs
-            </Link>
-            <Link href="/purchased" className="hover:text-[var(--text-main)] transition-colors">
-              Study Library
-            </Link>
-            <a href="/sitemap.xml" className="hover:text-[var(--text-main)] transition-colors">
-              Sitemap
-            </a>
-          </nav>
-        </div>
-      </footer>
+      {/* Quiet Editorial Footer (suppressed on /attempt/* CBT workstation routes) */}
+      {!isAttemptRoute && (
+        <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] py-8 pb-24 md:pb-8">
+          <div className="ed-container flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-[var(--text-muted)]">
+            <p>© {new Date().getFullYear()} ExamDash (ed). Digital Study Catalog & Mock Test Platform.</p>
+            <nav aria-label="Footer navigation" className="flex flex-wrap items-center gap-5">
+              <Link href="/books" className="hover:text-[var(--text-main)] transition-colors">
+                Books Catalog
+              </Link>
+              <Link href="/exams" className="hover:text-[var(--text-main)] transition-colors">
+                Exam Packs
+              </Link>
+              <Link href="/purchased" className="hover:text-[var(--text-main)] transition-colors">
+                Study Library
+              </Link>
+              <a href="/sitemap.xml" className="hover:text-[var(--text-main)] transition-colors">
+                Sitemap
+              </a>
+            </nav>
+          </div>
+        </footer>
+      )}
 
-      {/* Mobile Safe-Area Bottom Tab Bar (56px, suppressed on detail routes where Buy Bar mounts) */}
-      {!isDetailRoute && (
+      {/* Mobile Safe-Area Bottom Tab Bar (56px, suppressed on detail and CBT routes) */}
+      {!isDetailRoute && !isAttemptRoute && (
         <nav
           data-nosnippet=""
           aria-label="Mobile navigation"
