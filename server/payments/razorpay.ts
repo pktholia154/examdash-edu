@@ -34,8 +34,14 @@ const KEY_ID_REGEX = /^rzp_(live|test)_[a-zA-Z0-9]+$/;
  * Never falls back to mock or test credentials.
  */
 export function getRazorpayCredentials(): RazorpayCredentials {
-  const keyId = (process.env.RAZORPAY_KEY_ID || '').trim();
-  const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+  // Bracket lookup prevents Next.js build-time inlining of NEXT_PUBLIC_* on server routes
+  const runtimeEnv = process.env as Record<string, string | undefined>;
+  const keyId = (
+    runtimeEnv['RAZORPAY_KEY_ID'] ||
+    runtimeEnv['NEXT_PUBLIC_RAZORPAY_KEY_ID'] ||
+    ''
+  ).trim();
+  const keySecret = (runtimeEnv['RAZORPAY_KEY_SECRET'] || '').trim();
 
   if (
     !keyId ||
@@ -44,7 +50,7 @@ export function getRazorpayCredentials(): RazorpayCredentials {
     keySecret.includes('MY_RAZORPAY')
   ) {
     throw new RazorpayConfigError(
-      'Razorpay live credentials are not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in server environment secrets.'
+      'Razorpay live credentials are not configured. Set RAZORPAY_KEY_ID (or NEXT_PUBLIC_RAZORPAY_KEY_ID) and RAZORPAY_KEY_SECRET in server environment secrets.'
     );
   }
 

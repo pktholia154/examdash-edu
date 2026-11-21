@@ -12,15 +12,44 @@ import {
 
 test('getRazorpayCredentials throws RazorpayConfigError when credentials are absent', () => {
   const prevId = process.env.RAZORPAY_KEY_ID;
+  const prevPublicId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
   const prevSecret = process.env.RAZORPAY_KEY_SECRET;
   delete process.env.RAZORPAY_KEY_ID;
+  delete process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
   delete process.env.RAZORPAY_KEY_SECRET;
 
   try {
     assert.throws(() => getRazorpayCredentials(), RazorpayConfigError);
   } finally {
     if (prevId !== undefined) process.env.RAZORPAY_KEY_ID = prevId;
+    if (prevPublicId !== undefined) process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID = prevPublicId;
     if (prevSecret !== undefined) process.env.RAZORPAY_KEY_SECRET = prevSecret;
+  }
+});
+
+test('getRazorpayCredentials supports NEXT_PUBLIC_RAZORPAY_KEY_ID runtime fallback and prefers RAZORPAY_KEY_ID', () => {
+  const prevId = process.env.RAZORPAY_KEY_ID;
+  const prevPublicId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+  const prevSecret = process.env.RAZORPAY_KEY_SECRET;
+  delete process.env.RAZORPAY_KEY_ID;
+  process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID = 'rzp_live_CloudRunFallback123';
+  process.env.RAZORPAY_KEY_SECRET = 'live_secret_value_for_unit_test_only';
+
+  try {
+    const fallbackCreds = getRazorpayCredentials();
+    assert.equal(fallbackCreds.keyId, 'rzp_live_CloudRunFallback123');
+    assert.equal(fallbackCreds.keySecret, 'live_secret_value_for_unit_test_only');
+
+    process.env.RAZORPAY_KEY_ID = 'rzp_live_PrimaryServerKey456';
+    const primaryCreds = getRazorpayCredentials();
+    assert.equal(primaryCreds.keyId, 'rzp_live_PrimaryServerKey456');
+  } finally {
+    if (prevId !== undefined) process.env.RAZORPAY_KEY_ID = prevId;
+    else delete process.env.RAZORPAY_KEY_ID;
+    if (prevPublicId !== undefined) process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID = prevPublicId;
+    else delete process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+    if (prevSecret !== undefined) process.env.RAZORPAY_KEY_SECRET = prevSecret;
+    else delete process.env.RAZORPAY_KEY_SECRET;
   }
 });
 

@@ -447,8 +447,12 @@ function buildStorageMediaUrl(storagePath: string): string {
 }
 
 function getSigningSecret(): string {
+  const runtimeEnv = process.env as Record<string, string | undefined>;
   return (
-    process.env.GEMINI_API_KEY || firebaseConfig.appId || 'examdash-ephemeral'
+    runtimeEnv['ASSET_GRANT_SECRET'] ||
+    runtimeEnv['RAZORPAY_KEY_SECRET'] ||
+    firebaseConfig.appId ||
+    'examdash-ephemeral'
   );
 }
 
