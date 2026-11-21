@@ -70,6 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Zone 1: Single-line Brand Wordmark */}
           <Link
             href="/"
+            prefetch={false}
             className="inline-flex items-center min-h-[48px] text-lg font-extrabold tracking-tight text-[var(--text-main)] whitespace-nowrap shrink-0"
           >
             ExamDash
@@ -90,6 +91,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={link.href}
                   href={link.href}
+                  prefetch={false}
                   aria-current={isExactPage ? 'page' : undefined}
                   className={cn(
                     'inline-flex items-center min-h-[48px] transition-colors whitespace-nowrap shrink-0 hover:text-[var(--text-main)] hover:underline underline-offset-8 decoration-2',
@@ -184,6 +186,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
                       <Link
                         href="/purchased"
+                        prefetch={false}
                         role="menuitem"
                         onClick={() => setMenuOpen(false)}
                         className="mt-1 flex items-center gap-2.5 min-h-[48px] px-3 rounded-lg text-sm text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
@@ -264,13 +267,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </p>
               </div>
               <nav aria-label="Catalog navigation" className="flex flex-wrap items-center gap-5">
-                <Link href="/books" className="hover:text-[var(--text-main)] transition-colors">
+                <Link href="/books" prefetch={false} className="hover:text-[var(--text-main)] transition-colors">
                   Books Catalog
                 </Link>
-                <Link href="/exams" className="hover:text-[var(--text-main)] transition-colors">
+                <Link href="/exams" prefetch={false} className="hover:text-[var(--text-main)] transition-colors">
                   Exam Packs
                 </Link>
-                <Link href="/purchased" className="hover:text-[var(--text-main)] transition-colors">
+                <Link href="/purchased" prefetch={false} className="hover:text-[var(--text-main)] transition-colors">
                   Study Library
                 </Link>
                 <a href="/sitemap.xml" className="hover:text-[var(--text-main)] transition-colors">
@@ -287,6 +290,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={page.href}
                   href={page.href}
+                  prefetch={false}
                   className="hover:text-[var(--text-main)] hover:underline underline-offset-4 transition-colors whitespace-nowrap"
                 >
                   {page.title}
@@ -316,6 +320,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={tab.href}
                   href={tab.href}
+                  prefetch={false}
                   aria-current={isExactPage ? 'page' : undefined}
                   className={cn(
                     'flex flex-col items-center justify-center gap-0.5 min-h-[48px] text-[11px] font-medium transition-colors chrome-no-select',

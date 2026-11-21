@@ -72,7 +72,7 @@ test('buildThumbUrls generates immutable versioned sq and og PNG URLs', () => {
   assert.ok(ogPngUrl.endsWith(`/thumbs/og/books/upsc-modern-history-101.png?v=${expectedV}`));
 });
 
-test('buildBookDetailJsonLd emits ["Product", "Book"] with complete Offer, images, brand @id, and zero gated hasPart or duplicate Organization', () => {
+test('buildBookDetailJsonLd emits ["Product", "Book"] with Brand @type, complete Offer, images, and omits aggregateRating/review when reviewCount is 0', () => {
   const graphDoc = buildBookDetailJsonLd(SAMPLE_BOOK);
   const serialized = serializeSafeJsonLd(graphDoc as unknown as Record<string, unknown>);
 
@@ -86,7 +86,8 @@ test('buildBookDetailJsonLd emits ["Product", "Book"] with complete Offer, image
   assert.equal(product.image.length, 2);
   assert.ok(product.image[0].includes('/thumbs/sq/books/'));
   assert.ok(product.image[1].includes('/thumbs/og/books/'));
-  assert.ok(product.brand['@id'].endsWith('/#organization'));
+  assert.deepEqual(product.brand, { '@type': 'Brand', name: 'ExamDash' });
+  assert.equal(product.publisher['@type'], 'Organization');
 
   assert.equal(product.offers['@type'], 'Offer');
   assert.equal(product.offers.price, '199.00');
@@ -96,7 +97,9 @@ test('buildBookDetailJsonLd emits ["Product", "Book"] with complete Offer, image
   assert.equal(product.offers.shippingDetails.shippingRate.value, '0.00');
   assert.equal(product.offers.hasMerchantReturnPolicy['@type'], 'MerchantReturnPolicy');
 
-  // Ensure no duplicate Organization block or paywall hasPart/isAccessibleForFree
+  // Ensure zero fake/empty review fields and zero paywall hasPart/isAccessibleForFree
+  assert.equal('aggregateRating' in product, false);
+  assert.equal('review' in product, false);
   assert.equal(serialized.includes('"hasPart"'), false);
   assert.equal(serialized.includes('"isAccessibleForFree"'), false);
   assert.equal(
@@ -105,16 +108,82 @@ test('buildBookDetailJsonLd emits ["Product", "Book"] with complete Offer, image
   );
 });
 
-test('buildExamDetailJsonLd emits "Product" with complete Offer, images, brand @id, and slash-consistent URLs', () => {
-  const graphDoc = buildExamDetailJsonLd(SAMPLE_EXAM);
-  const [breadcrumb, product] = graphDoc['@graph'];
+test('buildBookDetailJsonLd and buildExamDetailJsonLd include 1:1 AggregateRating and Review nodes strictly when real reviews exist', () => {
+  const examNoReviews = buildExamDetailJsonLd(SAMPLE_EXAM, {
+    targetKey: 'ExamPackDocument_exam_202',
+    collectionName: 'ExamPackDocument',
+    itemId: 'exam_202',
+    reviewCount: 0,
+    averageRating: 0,
+    distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    reviews: [],
+  });
+  const [, emptyExamProduct] = examNoReviews['@graph'];
+  assert.deepEqual(emptyExamProduct.brand, { '@type': 'Brand', name: 'ExamDash' });
+  assert.equal('aggregateRating' in emptyExamProduct, false);
+  assert.equal('review' in emptyExamProduct, false);
 
+  const examWithRealReview = buildExamDetailJsonLd(SAMPLE_EXAM, {
+    targetKey: 'ExamPackDocument_exam_202',
+    collectionName: 'ExamPackDocument',
+    itemId: 'exam_202',
+    reviewCount: 2,
+    averageRating: 4.5,
+    distribution: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 1 },
+    reviews: [
+      {
+        reviewId: 'ExamPackDocument_exam_202_u1',
+        targetKey: 'ExamPackDocument_exam_202',
+        collectionName: 'ExamPackDocument',
+        itemId: 'exam_202',
+        urlSlug: 'ssc-cgl-tier-1-202',
+        userId: 'u1',
+        authorName: 'R. Sharma',
+        rating: 5,
+        title: 'Accurate Tier-1 difficulty',
+        comment: 'Timed sections and detailed explanations closely mirror the real exam.',
+        verifiedPurchase: true,
+        createdAtIso: '2026-11-20T10:00:00.000Z',
+        updatedAtIso: '2026-11-20T10:00:00.000Z',
+      },
+      {
+        reviewId: 'ExamPackDocument_exam_202_u2',
+        targetKey: 'ExamPackDocument_exam_202',
+        collectionName: 'ExamPackDocument',
+        itemId: 'exam_202',
+        urlSlug: 'ssc-cgl-tier-1-202',
+        userId: 'u2',
+        authorName: 'K. Nair',
+        rating: 4,
+        comment: 'Strong quantitative aptitude sets with clear step-by-step solutions.',
+        verifiedPurchase: false,
+        createdAtIso: '2026-11-19T08:00:00.000Z',
+        updatedAtIso: '2026-11-19T08:00:00.000Z',
+      },
+    ],
+  });
+
+  const [breadcrumb, ratedProduct] = examWithRealReview['@graph'];
   assert.equal(breadcrumb['@type'], 'BreadcrumbList');
-  assert.equal(product['@type'], 'Product');
-  assert.equal(product.sku, 'exam_202');
-  assert.equal(product.offers.price, '249.00');
-  assert.equal(product.url, breadcrumb.itemListElement[2].item);
-  assert.equal(product.url.endsWith('/'), false);
+  assert.equal(ratedProduct['@type'], 'Product');
+  assert.equal(ratedProduct.sku, 'exam_202');
+  assert.equal(ratedProduct.offers.price, '249.00');
+  assert.equal(ratedProduct.url, breadcrumb.itemListElement[2].item);
+  assert.equal(ratedProduct.url.endsWith('/'), false);
+
+  const productAny = ratedProduct as Record<string, unknown>;
+  assert.deepEqual(productAny.aggregateRating, {
+    '@type': 'AggregateRating',
+    ratingValue: 4.5,
+    reviewCount: 2,
+    bestRating: 5,
+    worstRating: 1,
+  });
+  const schemaReviews = productAny.review as Array<Record<string, unknown>>;
+  assert.equal(schemaReviews.length, 2);
+  assert.equal(schemaReviews[0]['@type'], 'Review');
+  assert.equal(schemaReviews[0].name, 'Accurate Tier-1 difficulty');
+  assert.equal(schemaReviews[0].datePublished, '2026-11-20');
 });
 
 test('prepareEditorialMarkdown strips leading duplicate hero heading while preserving body headings', () => {

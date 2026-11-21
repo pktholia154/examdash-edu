@@ -323,6 +323,7 @@ export default function PrivacyPolicyPage() {
           For related policies, please also review our{' '}
           <Link
             href="/terms-of-service"
+            prefetch={false}
             className="text-[var(--text-main)] underline underline-offset-4"
           >
             Terms of Service
@@ -330,6 +331,7 @@ export default function PrivacyPolicyPage() {
           ,{' '}
           <Link
             href="/refund-cancellation-policy"
+            prefetch={false}
             className="text-[var(--text-main)] underline underline-offset-4"
           >
             Refund &amp; Cancellation Policy
@@ -337,6 +339,7 @@ export default function PrivacyPolicyPage() {
           , and{' '}
           <Link
             href="/contact-us"
+            prefetch={false}
             className="text-[var(--text-main)] underline underline-offset-4"
           >
             Contact Us

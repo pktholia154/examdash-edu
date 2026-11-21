@@ -42,6 +42,7 @@ export function HomeComplianceSection() {
             <Link
               key={page.href}
               href={page.href}
+              prefetch={false}
               className="group flex flex-col justify-between rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 hover:border-[var(--border-strong)] transition-colors"
             >
               <div>

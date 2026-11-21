@@ -38,6 +38,12 @@ const nextConfig: NextConfig = {
         headers: [{ key: 'Content-Type', value: 'application/json' }],
       },
       {
+        source: '/_next/static/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
         source: '/wasm/:path*',
         headers: [
           { key: 'Content-Type', value: 'application/wasm' },

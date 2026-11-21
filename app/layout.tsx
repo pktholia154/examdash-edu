@@ -97,9 +97,9 @@ export const metadata: Metadata = {
 // < 600B synchronous pre-paint theme script syncing .dark, color-scheme, and <meta name="theme-color"> (#0B1120 / #F8FAFC)
 const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme'),d=s?s==='dark':matchMedia('(prefers-color-scheme:dark)').matches,r=document.documentElement;r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';var m=document.querySelector('meta[name="theme-color"]');if(m)m.content=d?'#0B1120':'#F8FAFC';}catch(e){}})();`;
 
-// Speculation Rules for instant MPA transitions (excluding /api/* and authenticated routes)
+// Speculation Rules: pointerdown/click prefetch only (zero background WRS chunk fetches; instant on user tap/click)
 const SPECULATION_RULES_JSON = JSON.stringify({
-  prerender: [
+  prefetch: [
     {
       where: {
         and: [
@@ -110,7 +110,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
           { not: { href_matches: '/attempt/*' } },
         ],
       },
-      eagerness: 'moderate',
+      eagerness: 'conservative',
     },
   ],
 });

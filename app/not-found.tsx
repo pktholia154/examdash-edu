@@ -26,18 +26,21 @@ export default function NotFound() {
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <Link
             href="/"
+            prefetch={false}
             className="inline-flex items-center justify-center min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 transition-opacity"
           >
             Explore Home
           </Link>
           <Link
             href="/books"
+            prefetch={false}
             className="inline-flex items-center justify-center min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
           >
             Browse Books
           </Link>
           <Link
             href="/exams"
+            prefetch={false}
             className="inline-flex items-center justify-center min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
           >
             Browse Exams

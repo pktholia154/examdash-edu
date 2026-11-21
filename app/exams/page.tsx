@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import React from 'react';
 import { getLiveExams } from '../../server/repositories/catalog-repository';
+import { getPublishedReviewAggregates } from '../../server/repositories/review-repository';
 import { Breadcrumbs } from '../../components/ui/breadcrumbs';
 import { CatalogSection } from '../../features/catalog/catalog-section';
 import { ErrorState } from '../../components/ui/state-blocks';
+import { buildReviewTargetKey } from '../../lib/reviews/validation';
 import { getCanonicalOrigin } from '../../lib/seo/schema';
-import { toCatalogCardDTO } from '../../lib/types/catalog';
+import { toCatalogCardDTO, type ReviewAggregateBadge } from '../../lib/types/catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,10 +50,14 @@ export default async function ExamsCatalogPage({
   const pageNum = Math.max(1, Number(sp.page) || 1);
 
   let exams: Awaited<ReturnType<typeof getLiveExams>> = [];
+  let reviewAggregates = new Map<string, ReviewAggregateBadge>();
   let fetchError: string | null = null;
 
   try {
-    exams = await getLiveExams();
+    [exams, reviewAggregates] = await Promise.all([
+      getLiveExams(),
+      getPublishedReviewAggregates(),
+    ]);
   } catch (err) {
     fetchError =
       err instanceof Error ? err.message : 'Unable to fetch exam packs catalog.';
@@ -62,7 +68,12 @@ export default async function ExamsCatalogPage({
   const startIdx = (clampedPage - 1) * PAGE_SIZE;
   const pagedExams = exams
     .slice(startIdx, startIdx + PAGE_SIZE)
-    .map(toCatalogCardDTO);
+    .map((e) =>
+      toCatalogCardDTO(
+        e,
+        reviewAggregates.get(buildReviewTargetKey('ExamPackDocument', e.id))
+      )
+    );
 
   return (
     <div className="pt-8">

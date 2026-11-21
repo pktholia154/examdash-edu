@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import React from 'react';
+import { Star } from 'lucide-react';
 import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
 import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
 import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
 import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
 import { SyllabusTable } from '../../../features/catalog/syllabus-table';
+import { ItemReviewsSection } from '../../../features/reviews/item-reviews-section';
 import { formatPrice } from '../../../lib/registry/content-type-registry';
 import {
   buildExamDetailJsonLd,
@@ -18,6 +20,7 @@ import {
   getLiveBooks,
   getLiveExams,
 } from '../../../server/repositories/catalog-repository';
+import { getItemReviewsSummary } from '../../../server/repositories/review-repository';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,7 +116,8 @@ export default async function ExamDetailPage({
   }
 
   const exam = lookup.data;
-  const jsonLd = serializeSafeJsonLd(buildExamDetailJsonLd(exam));
+  const reviewSummary = await getItemReviewsSummary('ExamPackDocument', exam.id);
+  const jsonLd = serializeSafeJsonLd(buildExamDetailJsonLd(exam, reviewSummary));
 
   const siblingExams = allExams
     .filter((e) => e.urlSlug !== exam.urlSlug)
@@ -202,6 +206,25 @@ export default async function ExamDetailPage({
               )}
               <span aria-hidden="true">·</span>
               <span>Updated {formatReadableDate(exam.updatedAtIso)}</span>
+              {reviewSummary.reviewCount > 0 && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <a
+                    href="#learner-reviews"
+                    className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline underline-offset-4"
+                  >
+                    <Star
+                      className="w-3.5 h-3.5 fill-amber-400 text-amber-500 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>{reviewSummary.averageRating.toFixed(1)}</span>
+                    <span className="font-normal text-[var(--text-muted)]">
+                      ({reviewSummary.reviewCount}{' '}
+                      {reviewSummary.reviewCount === 1 ? 'review' : 'reviews'})
+                    </span>
+                  </a>
+                </>
+              )}
             </div>
 
             {exam.tags.length > 0 && (
@@ -250,6 +273,15 @@ export default async function ExamDetailPage({
             />
           </div>
         </section>
+
+        {/* Real Learner Ratings & Reviews (SSR-Hydrated + Capacitor-Ready API) */}
+        <ItemReviewsSection
+          key={`ExamPackDocument_${exam.id}`}
+          collectionName="ExamPackDocument"
+          itemId={exam.id}
+          itemTitle={exam.title}
+          initialSummary={reviewSummary}
+        />
 
         {/* Shallow Cross-Taxonomy Related Links (<= 6 canonical links) */}
         {(siblingExams.length > 0 || companionBooks.length > 0) && (

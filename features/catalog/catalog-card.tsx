@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Check, ExternalLink, Plus, Sparkles } from 'lucide-react';
+import { Check, ExternalLink, Plus, Sparkles, Star } from 'lucide-react';
 import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
 import type {
   CatalogCardDTO,
@@ -31,6 +31,15 @@ export function CatalogCard({ item, viewMode }: CatalogCardProps) {
   const inCart = isInCart(compositeKey);
   const isFree = item.buyPrice === 0;
   const discountPct = computeDiscountPercent(item.listPrice, item.buyPrice);
+  const cardReviewCount =
+    'reviewCount' in item && typeof item.reviewCount === 'number'
+      ? item.reviewCount
+      : 0;
+  const cardAvgRating =
+    'averageRating' in item && typeof item.averageRating === 'number'
+      ? item.averageRating
+      : 0;
+  const hasRealRating = cardReviewCount > 0 && cardAvgRating >= 1;
 
   const detailHref =
     item.collectionName === 'books'
@@ -146,6 +155,21 @@ export function CatalogCard({ item, viewMode }: CatalogCardProps) {
                   </span>
                 </>
               )}
+              {hasRealRating && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] tabular-nums">
+                    <Star
+                      className="w-3.5 h-3.5 fill-amber-400 text-amber-500 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>{cardAvgRating.toFixed(1)}</span>
+                    <span className="font-normal text-[var(--text-muted)]">
+                      ({cardReviewCount})
+                    </span>
+                  </span>
+                </>
+              )}
             </div>
 
             {item.tags.length > 0 && (
@@ -206,6 +230,19 @@ export function CatalogCard({ item, viewMode }: CatalogCardProps) {
             ? ` · ${item.totalMocktest} Tests`
             : ''}
         </p>
+
+        {hasRealRating && (
+          <p className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--text-muted)] tabular-nums">
+            <Star
+              className="w-3.5 h-3.5 fill-amber-400 text-amber-500 shrink-0"
+              aria-hidden="true"
+            />
+            <span className="font-semibold text-[var(--text-main)]">
+              {cardAvgRating.toFixed(1)}
+            </span>
+            <span>({cardReviewCount})</span>
+          </p>
+        )}
 
         {/* Sticky Bottom Pricing & Stateful CTA Footer */}
         <div className="mt-auto pt-4">

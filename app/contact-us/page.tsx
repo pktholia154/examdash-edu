@@ -169,6 +169,7 @@ export default function ContactUsPage() {
             <strong>Duplicate Payment or Refund Claim:</strong> Review our{' '}
             <Link
               href="/refund-cancellation-policy"
+              prefetch={false}
               className="underline underline-offset-4 font-medium"
             >
               Refund &amp; Cancellation Policy

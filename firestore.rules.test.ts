@@ -49,3 +49,14 @@ test('Dirty Dozen: Completed purchases enforce terminal state immutability and R
   assert.match(rules, /allow\s+update,\s*delete:\s*if\s+false;/);
 });
 
+test('Dirty Dozen: ItemReview rules enforce deterministic 1-review-per-user ID, 1..5 integer rating, zero PII, and verified purchase proof', () => {
+  const rules = readRules();
+  assert.match(rules, /match\s+\/reviews\/\{reviewId\}/);
+  assert.match(rules, /isValidItemReview\(incoming\(\),\s*reviewId\)/);
+  assert.match(rules, /data\.reviewId\s*==\s*data\.collectionName\s*\+\s*'_'\s*\+\s*data\.itemId\s*\+\s*'_'\s*\+\s*data\.userId/);
+  assert.match(rules, /data\.rating\s+is\s+int[\s\S]*data\.rating\s*>=\s*1[\s\S]*data\.rating\s*<=\s*5/);
+  assert.match(rules, /resource\.data\.status\s*==\s*'published'/);
+  assert.match(rules, /hasValidReviewPurchaseProof\(incoming\(\)\)/);
+});
+
+

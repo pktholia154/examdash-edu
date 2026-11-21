@@ -33,6 +33,11 @@ service cloud.firestore {
         || existsAfter(/databases/$(database)/documents/users/$(userId));
     }
 
+    function hasValidReviewPurchaseProof(data) {
+      return data.verifiedPurchase == false
+        || exists(/databases/$(database)/documents/users/$(request.auth.uid)/purchases/$(data.collectionName + '_' + data.itemId));
+    }
+
     // Entity Validation Blueprints (Anti-Update-Gap)
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'displayName', 'preferredView', 'createdAt', 'updatedAt'])
@@ -248,6 +253,83 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidItemReview(data, reviewId) {
+      return data.keys().hasAll([
+          'reviewId',
+          'targetKey',
+          'collectionName',
+          'itemId',
+          'urlSlug',
+          'userId',
+          'authorName',
+          'rating',
+          'comment',
+          'verifiedPurchase',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'reviewId',
+          'targetKey',
+          'collectionName',
+          'itemId',
+          'urlSlug',
+          'userId',
+          'authorName',
+          'rating',
+          'title',
+          'comment',
+          'verifiedPurchase',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.reviewId is string
+        && data.reviewId.size() >= 5
+        && data.reviewId.size() <= 128
+        && data.reviewId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.reviewId == reviewId
+        && data.collectionName is string
+        && data.collectionName.size() <= 32
+        && (data.collectionName == 'books' || data.collectionName == 'ExamPackDocument')
+        && data.itemId is string
+        && data.itemId.size() >= 1
+        && data.itemId.size() <= 64
+        && data.itemId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userId is string
+        && data.userId.size() >= 1
+        && data.userId.size() <= 128
+        && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userId == request.auth.uid
+        && data.targetKey is string
+        && data.targetKey.size() >= 3
+        && data.targetKey.size() <= 100
+        && data.targetKey.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.targetKey == data.collectionName + '_' + data.itemId
+        && data.reviewId == data.collectionName + '_' + data.itemId + '_' + data.userId
+        && data.urlSlug is string
+        && data.urlSlug.size() >= 1
+        && data.urlSlug.size() <= 200
+        && data.urlSlug.matches('^[a-z0-9\\-]+$')
+        && data.authorName is string
+        && data.authorName.size() >= 1
+        && data.authorName.size() <= 80
+        && (!('title' in data) || (data.title is string && data.title.size() >= 1 && data.title.size() <= 120))
+        && data.comment is string
+        && data.comment.size() >= 10
+        && data.comment.size() <= 2000
+        && data.rating is int
+        && data.rating >= 1
+        && data.rating <= 5
+        && data.verifiedPurchase is bool
+        && data.status is string
+        && data.status.size() <= 16
+        && data.status == 'published'
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Connection Probe Read-Only Document
     match /test/connection {
       allow get: if true;
@@ -272,6 +354,53 @@ service cloud.firestore {
       allow list: if resource.data.isPublished == true
         && resource.data.isDeleted == false;
       allow create, update, delete: if false;
+    }
+
+    // Public Non-PII Ratings & Reviews (1 Review per User per Item)
+    match /reviews/{reviewId} {
+      allow get: if isValidId(reviewId)
+        && resource.data.status == 'published';
+
+      allow list: if resource.data.status == 'published';
+
+      allow create: if isVerifiedOwner(incoming().userId)
+        && isValidId(reviewId)
+        && isValidItemReview(incoming(), reviewId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && hasParentUser(request.auth.uid)
+        && hasValidReviewPurchaseProof(incoming());
+
+      allow update: if (
+        isVerifiedOwner(existing().userId)
+        && isValidId(reviewId)
+        && isValidItemReview(incoming(), reviewId)
+        && incoming().reviewId == existing().reviewId
+        && incoming().targetKey == existing().targetKey
+        && incoming().collectionName == existing().collectionName
+        && incoming().itemId == existing().itemId
+        && incoming().urlSlug == existing().urlSlug
+        && incoming().userId == existing().userId
+        && incoming().status == existing().status
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: EditReviewContent
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'authorName',
+            'rating',
+            'title',
+            'comment',
+            'verifiedPurchase',
+            'updatedAt'
+          ])
+        )
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && hasValidReviewPurchaseProof(incoming())
+      );
+
+      allow delete: if isVerifiedOwner(existing().userId)
+        && isValidId(reviewId);
     }
 
     // Owner-Scoped User Workspace & Subcollections

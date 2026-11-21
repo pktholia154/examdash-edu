@@ -1,5 +1,9 @@
 import { BUSINESS_INFO } from '../legal/business-info';
-import type { PublicBookDTO, PublicExamDTO } from '../types/catalog';
+import type {
+  ItemReviewSummaryDTO,
+  PublicBookDTO,
+  PublicExamDTO,
+} from '../types/catalog';
 
 export function getCanonicalOrigin(): string {
   const explicitOrigin = process.env.CANONICAL_ORIGIN?.trim();
@@ -175,7 +179,48 @@ export function buildLegalPageJsonLd(input: {
   };
 }
 
-export function buildBookDetailJsonLd(book: PublicBookDTO) {
+function buildVerifiedReviewSchemaProps(reviewSummary?: ItemReviewSummaryDTO) {
+  if (
+    !reviewSummary ||
+    reviewSummary.reviewCount <= 0 ||
+    reviewSummary.averageRating < 1 ||
+    !Array.isArray(reviewSummary.reviews) ||
+    reviewSummary.reviews.length === 0
+  ) {
+    return {};
+  }
+
+  return {
+    aggregateRating: {
+      '@type': 'AggregateRating',
+      ratingValue: Number(reviewSummary.averageRating.toFixed(2)),
+      reviewCount: reviewSummary.reviewCount,
+      bestRating: 5,
+      worstRating: 1,
+    },
+    review: reviewSummary.reviews.slice(0, 10).map((r) => ({
+      '@type': 'Review',
+      author: {
+        '@type': 'Person',
+        name: r.authorName,
+      },
+      datePublished: r.createdAtIso.slice(0, 10),
+      ...(r.title ? { name: r.title } : {}),
+      reviewBody: r.comment,
+      reviewRating: {
+        '@type': 'Rating',
+        ratingValue: r.rating,
+        bestRating: 5,
+        worstRating: 1,
+      },
+    })),
+  };
+}
+
+export function buildBookDetailJsonLd(
+  book: PublicBookDTO,
+  reviewSummary?: ItemReviewSummaryDTO
+) {
   const origin = getCanonicalOrigin();
   const pageUrl = `${origin}/books/${book.urlSlug}`;
   const { sqPngUrl, ogPngUrl } = buildThumbUrls(
@@ -207,7 +252,8 @@ export function buildBookDetailJsonLd(book: PublicBookDTO) {
         url: pageUrl,
         image: [sqPngUrl, ogPngUrl],
         brand: {
-          '@id': `${origin}/#organization`,
+          '@type': 'Brand',
+          name: 'ExamDash',
         },
         inLanguage: book.language || 'en',
         bookFormat: 'https://schema.org/EBook',
@@ -216,7 +262,9 @@ export function buildBookDetailJsonLd(book: PublicBookDTO) {
           name: book.authorName || 'ExamDash Editorial',
         },
         publisher: {
+          '@type': 'Organization',
           '@id': `${origin}/#organization`,
+          name: BUSINESS_INFO.brandName,
         },
         datePublished: book.publishAtIso,
         dateModified: book.updatedAtIso,
@@ -226,12 +274,16 @@ export function buildBookDetailJsonLd(book: PublicBookDTO) {
           buyPrice: book.buyPrice,
           currency: book.currency,
         }),
+        ...buildVerifiedReviewSchemaProps(reviewSummary),
       },
     ],
   };
 }
 
-export function buildExamDetailJsonLd(exam: PublicExamDTO) {
+export function buildExamDetailJsonLd(
+  exam: PublicExamDTO,
+  reviewSummary?: ItemReviewSummaryDTO
+) {
   const origin = getCanonicalOrigin();
   const pageUrl = `${origin}/exams/${exam.urlSlug}`;
   const { sqPngUrl, ogPngUrl } = buildThumbUrls(
@@ -263,7 +315,8 @@ export function buildExamDetailJsonLd(exam: PublicExamDTO) {
         url: pageUrl,
         image: [sqPngUrl, ogPngUrl],
         brand: {
-          '@id': `${origin}/#organization`,
+          '@type': 'Brand',
+          name: 'ExamDash',
         },
         category: exam.type || 'Mock Exam Series',
         offers: buildDigitalProductOffer({
@@ -272,6 +325,7 @@ export function buildExamDetailJsonLd(exam: PublicExamDTO) {
           buyPrice: exam.buyPrice,
           currency: exam.currency,
         }),
+        ...buildVerifiedReviewSchemaProps(reviewSummary),
       },
     ],
   };

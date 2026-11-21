@@ -181,6 +181,42 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "ItemReview": {
+      "title": "ItemReview",
+      "description": "Public non-PII learner rating and review for a published Book or ExamPack.",
+      "type": "object",
+      "properties": {
+        "reviewId": { "type": "string", "minLength": 5, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetKey": { "type": "string", "minLength": 3, "maxLength": 100, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "collectionName": { "type": "string", "enum": ["books", "ExamPackDocument"], "maxLength": 32 },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "urlSlug": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "rating": { "type": "number", "description": "Integer star rating from 1 to 5" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "comment": { "type": "string", "minLength": 10, "maxLength": 2000 },
+        "verifiedPurchase": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["published"], "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "reviewId",
+        "targetKey",
+        "collectionName",
+        "itemId",
+        "urlSlug",
+        "userId",
+        "authorName",
+        "rating",
+        "comment",
+        "verifiedPurchase",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -191,6 +227,10 @@
     "/ExamPackDocument/{examId}": {
       "schema": { "$ref": "#/entities/ExamPack" },
       "description": "Read-only public catalog of published exam packs and mock test series."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/ItemReview" },
+      "description": "Public published learner ratings and reviews (1 review per user per catalog item, zero PII)."
     },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },

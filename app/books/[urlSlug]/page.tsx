@@ -1,10 +1,12 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import React from 'react';
+import { Star } from 'lucide-react';
 import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
 import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
 import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
 import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
+import { ItemReviewsSection } from '../../../features/reviews/item-reviews-section';
 import { formatPrice } from '../../../lib/registry/content-type-registry';
 import {
   buildBookDetailJsonLd,
@@ -17,6 +19,7 @@ import {
   getLiveBooks,
   getLiveExams,
 } from '../../../server/repositories/catalog-repository';
+import { getItemReviewsSummary } from '../../../server/repositories/review-repository';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,7 +115,8 @@ export default async function BookDetailPage({
   }
 
   const book = lookup.data;
-  const jsonLd = serializeSafeJsonLd(buildBookDetailJsonLd(book));
+  const reviewSummary = await getItemReviewsSummary('books', book.id);
+  const jsonLd = serializeSafeJsonLd(buildBookDetailJsonLd(book, reviewSummary));
 
   // Up to 6 cross-taxonomy related <a href> links for shallow <= 3 click graph
   const siblingBooks = allBooks
@@ -171,6 +175,25 @@ export default async function BookDetailPage({
               <span>Published {formatReadableDate(book.publishAtIso)}</span>
               <span aria-hidden="true">·</span>
               <span>Updated {formatReadableDate(book.updatedAtIso)}</span>
+              {reviewSummary.reviewCount > 0 && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <a
+                    href="#learner-reviews"
+                    className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline underline-offset-4"
+                  >
+                    <Star
+                      className="w-3.5 h-3.5 fill-amber-400 text-amber-500 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>{reviewSummary.averageRating.toFixed(1)}</span>
+                    <span className="font-normal text-[var(--text-muted)]">
+                      ({reviewSummary.reviewCount}{' '}
+                      {reviewSummary.reviewCount === 1 ? 'review' : 'reviews'})
+                    </span>
+                  </a>
+                </>
+              )}
             </div>
 
             {book.tags.length > 0 && (
@@ -213,6 +236,15 @@ export default async function BookDetailPage({
             />
           </div>
         </section>
+
+        {/* Real Learner Ratings & Reviews (SSR-Hydrated + Capacitor-Ready API) */}
+        <ItemReviewsSection
+          key={`books_${book.id}`}
+          collectionName="books"
+          itemId={book.id}
+          itemTitle={book.title}
+          initialSummary={reviewSummary}
+        />
 
         {/* Shallow Cross-Taxonomy Related Links (<= 6 canonical links) */}
         {(siblingBooks.length > 0 || relatedExams.length > 0) && (

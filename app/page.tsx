@@ -3,7 +3,9 @@ import {
   getLiveBooks,
   getLiveExams,
 } from '../server/repositories/catalog-repository';
-import { toCatalogCardDTO } from '../lib/types/catalog';
+import { getPublishedReviewAggregates } from '../server/repositories/review-repository';
+import { buildReviewTargetKey } from '../lib/reviews/validation';
+import { toCatalogCardDTO, type ReviewAggregateBadge } from '../lib/types/catalog';
 import { SearchHero } from '../features/catalog/search-hero';
 import { KpiStrip } from '../features/catalog/kpi-strip';
 import { CatalogSection } from '../features/catalog/catalog-section';
@@ -16,9 +18,14 @@ export default async function HomePage() {
   let fetchError: string | null = null;
   let books: Awaited<ReturnType<typeof getLiveBooks>> = [];
   let exams: Awaited<ReturnType<typeof getLiveExams>> = [];
+  let reviewAggregates = new Map<string, ReviewAggregateBadge>();
 
   try {
-    [books, exams] = await Promise.all([getLiveBooks(), getLiveExams()]);
+    [books, exams, reviewAggregates] = await Promise.all([
+      getLiveBooks(),
+      getLiveExams(),
+      getPublishedReviewAggregates(),
+    ]);
   } catch (error) {
     fetchError =
       error instanceof Error
@@ -33,8 +40,15 @@ export default async function HomePage() {
   const primaryCurrency =
     books[0]?.currency || exams[0]?.currency || 'INR';
 
-  const slimBooks = books.map(toCatalogCardDTO);
-  const slimExams = exams.map(toCatalogCardDTO);
+  const slimBooks = books.map((b) =>
+    toCatalogCardDTO(b, reviewAggregates.get(buildReviewTargetKey('books', b.id)))
+  );
+  const slimExams = exams.map((e) =>
+    toCatalogCardDTO(
+      e,
+      reviewAggregates.get(buildReviewTargetKey('ExamPackDocument', e.id))
+    )
+  );
 
   return (
     <>

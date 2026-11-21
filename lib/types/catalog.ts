@@ -74,6 +74,45 @@ export interface PublicExamDTO {
 
 export type CatalogItemDTO = PublicBookDTO | PublicExamDTO;
 
+export interface RatingDistribution {
+  1: number;
+  2: number;
+  3: number;
+  4: number;
+  5: number;
+}
+
+export interface ItemReviewDTO {
+  reviewId: string;
+  targetKey: string;
+  collectionName: CollectionName;
+  itemId: string;
+  urlSlug: string;
+  userId: string;
+  authorName: string;
+  rating: 1 | 2 | 3 | 4 | 5;
+  title?: string;
+  comment: string;
+  verifiedPurchase: boolean;
+  createdAtIso: string;
+  updatedAtIso: string;
+}
+
+export interface ItemReviewSummaryDTO {
+  targetKey: string;
+  collectionName: CollectionName;
+  itemId: string;
+  reviewCount: number;
+  averageRating: number;
+  distribution: RatingDistribution;
+  reviews: ItemReviewDTO[];
+}
+
+export interface ReviewAggregateBadge {
+  averageRating: number;
+  reviewCount: number;
+}
+
 /**
  * Slim card projection for catalog grids/lists so client islands never serialize
  * `fullDescription`, `seoDescription`, or `MocktestTitles` into `self.__next_f`.
@@ -92,9 +131,21 @@ export interface CatalogCardDTO {
   buyPrice: number;
   publishAtIso: string;
   totalMocktest?: number;
+  averageRating?: number;
+  reviewCount?: number;
 }
 
-export function toCatalogCardDTO(item: CatalogItemDTO): CatalogCardDTO {
+export function toCatalogCardDTO(
+  item: CatalogItemDTO,
+  reviewBadge?: ReviewAggregateBadge
+): CatalogCardDTO {
+  const hasRealReviews =
+    Boolean(reviewBadge) &&
+    typeof reviewBadge?.reviewCount === 'number' &&
+    reviewBadge.reviewCount > 0 &&
+    typeof reviewBadge?.averageRating === 'number' &&
+    reviewBadge.averageRating >= 1;
+
   return {
     id: item.id,
     collectionName: item.collectionName,
@@ -110,6 +161,12 @@ export function toCatalogCardDTO(item: CatalogItemDTO): CatalogCardDTO {
     publishAtIso: item.publishAtIso,
     ...(item.collectionName === 'ExamPackDocument'
       ? { totalMocktest: item.totalMocktest }
+      : {}),
+    ...(hasRealReviews && reviewBadge
+      ? {
+          averageRating: Number(reviewBadge.averageRating.toFixed(2)),
+          reviewCount: reviewBadge.reviewCount,
+        }
       : {}),
   };
 }

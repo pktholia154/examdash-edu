@@ -498,12 +498,59 @@ export async function deleteUserProfileFromFirestore(
   bearerIdToken: string
 ): Promise<void> {
   const { docPrefix, restBase } = getFirestoreDbResourceRoot();
+
+  // Discover any published reviews authored by this user so self-serve account deletion cleans them up
+  const reviewQueryRes = await firestoreRestRequest<
+    Array<{ document?: { name?: string } }>
+  >({
+    method: 'POST',
+    path: `${restBase}:runQuery`,
+    bearerIdToken,
+    body: {
+      structuredQuery: {
+        from: [{ collectionId: 'reviews' }],
+        where: {
+          compositeFilter: {
+            op: 'AND',
+            filters: [
+              {
+                fieldFilter: {
+                  field: { fieldPath: 'status' },
+                  op: 'EQUAL',
+                  value: { stringValue: 'published' },
+                },
+              },
+              {
+                fieldFilter: {
+                  field: { fieldPath: 'userId' },
+                  op: 'EQUAL',
+                  value: { stringValue: userId },
+                },
+              },
+            ],
+          },
+        },
+        limit: 200,
+      },
+    },
+  }).catch(() => null);
+
+  const reviewDeletes: Array<{ delete: string }> = [];
+  if (reviewQueryRes && Array.isArray(reviewQueryRes.data)) {
+    for (const row of reviewQueryRes.data) {
+      if (row?.document?.name) {
+        reviewDeletes.push({ delete: row.document.name });
+      }
+    }
+  }
+
   await firestoreRestRequest({
     method: 'POST',
     path: `${restBase}:commit`,
     bearerIdToken,
     body: {
       writes: [
+        ...reviewDeletes,
         { delete: `${docPrefix}/users/${userId}/private/contact` },
         { delete: `${docPrefix}/users/${userId}` },
       ],

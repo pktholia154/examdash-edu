@@ -177,6 +177,7 @@ export function LegalDocumentShell({
                     <li key={page.href}>
                       <Link
                         href={page.href}
+                        prefetch={false}
                         aria-current={isCurrent ? 'page' : undefined}
                         className={
                           isCurrent

@@ -17,7 +17,10 @@ export function middleware(req: NextRequest) {
       const preflight = new NextResponse(null, { status: 204 });
       if (CAPACITOR_ALLOWED_ORIGINS.has(origin)) {
         preflight.headers.set('Access-Control-Allow-Origin', origin);
-        preflight.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        preflight.headers.set(
+          'Access-Control-Allow-Methods',
+          'GET, POST, DELETE, OPTIONS'
+        );
         preflight.headers.set(
           'Access-Control-Allow-Headers',
           'Authorization, Content-Type, Idempotency-Key, Range, X-Platform, X-App-Version'
@@ -73,9 +76,11 @@ export function middleware(req: NextRequest) {
   });
 
   if (req.method === 'GET') {
+    // Keep edge s-maxage bounded (60s) so newly deployed Cloud Run revisions never serve
+    // hours-stale HTML referencing previous-build `/_next/static/chunks/*` hashes.
     res.headers.set(
       'Cache-Control',
-      'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400'
+      'public, max-age=0, s-maxage=60, stale-if-error=60'
     );
     res.headers.set('Vary', 'Accept-Encoding');
   }

@@ -213,6 +213,7 @@ export default function RefundCancellationPolicyPage() {
             Account termination resulting from violation of our{' '}
             <Link
               href="/terms-of-service"
+              prefetch={false}
               className="underline underline-offset-4 font-medium"
             >
               Terms of Service
@@ -220,6 +221,7 @@ export default function RefundCancellationPolicyPage() {
             or{' '}
             <Link
               href="/license-agreement"
+              prefetch={false}
               className="underline underline-offset-4 font-medium"
             >
               License Agreement
@@ -308,6 +310,7 @@ export default function RefundCancellationPolicyPage() {
           registered office at {BUSINESS_INFO.officeAddress} or use our{' '}
           <Link
             href="/contact-us"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             Contact Us

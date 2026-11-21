@@ -222,6 +222,7 @@ export default function LicenseAgreementPage() {
           relief and statutory damages. For licensing queries, please visit our{' '}
           <Link
             href="/contact-us"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             Contact Us

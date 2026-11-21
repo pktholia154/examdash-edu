@@ -73,6 +73,7 @@ export default function TermsOfServicePage() {
           agreed to be bound by these Terms along with our{' '}
           <Link
             href="/privacy-policy"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             Privacy Policy
@@ -80,6 +81,7 @@ export default function TermsOfServicePage() {
           ,{' '}
           <Link
             href="/refund-cancellation-policy"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             Refund &amp; Cancellation Policy
@@ -87,6 +89,7 @@ export default function TermsOfServicePage() {
           , and{' '}
           <Link
             href="/license-agreement"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             License Agreement
@@ -189,6 +192,7 @@ export default function TermsOfServicePage() {
           defects) are processed strictly in accordance with our{' '}
           <Link
             href="/refund-cancellation-policy"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             Refund &amp; Cancellation Policy
@@ -238,6 +242,7 @@ export default function TermsOfServicePage() {
           personal, non-transferable usage license as detailed in our{' '}
           <Link
             href="/license-agreement"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             License Agreement
@@ -292,6 +297,7 @@ export default function TermsOfServicePage() {
           or visit our{' '}
           <Link
             href="/contact-us"
+            prefetch={false}
             className="underline underline-offset-4 font-medium"
           >
             Contact Us

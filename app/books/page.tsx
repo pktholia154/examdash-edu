@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import React from 'react';
 import { getLiveBooks } from '../../server/repositories/catalog-repository';
+import { getPublishedReviewAggregates } from '../../server/repositories/review-repository';
 import { Breadcrumbs } from '../../components/ui/breadcrumbs';
 import { CatalogSection } from '../../features/catalog/catalog-section';
 import { ErrorState } from '../../components/ui/state-blocks';
+import { buildReviewTargetKey } from '../../lib/reviews/validation';
 import { getCanonicalOrigin } from '../../lib/seo/schema';
-import { toCatalogCardDTO } from '../../lib/types/catalog';
+import { toCatalogCardDTO, type ReviewAggregateBadge } from '../../lib/types/catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,10 +50,14 @@ export default async function BooksCatalogPage({
   const pageNum = Math.max(1, Number(sp.page) || 1);
 
   let books: Awaited<ReturnType<typeof getLiveBooks>> = [];
+  let reviewAggregates = new Map<string, ReviewAggregateBadge>();
   let fetchError: string | null = null;
 
   try {
-    books = await getLiveBooks();
+    [books, reviewAggregates] = await Promise.all([
+      getLiveBooks(),
+      getPublishedReviewAggregates(),
+    ]);
   } catch (err) {
     fetchError =
       err instanceof Error ? err.message : 'Unable to fetch books catalog.';
@@ -62,7 +68,9 @@ export default async function BooksCatalogPage({
   const startIdx = (clampedPage - 1) * PAGE_SIZE;
   const pagedBooks = books
     .slice(startIdx, startIdx + PAGE_SIZE)
-    .map(toCatalogCardDTO);
+    .map((b) =>
+      toCatalogCardDTO(b, reviewAggregates.get(buildReviewTargetKey('books', b.id)))
+    );
 
   return (
     <div className="pt-8">

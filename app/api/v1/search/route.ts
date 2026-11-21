@@ -13,8 +13,8 @@ export async function GET(req: NextRequest) {
     const results = await searchCatalog(q);
     return NextResponse.json(
       {
-        books: results.books.map(toCatalogCardDTO),
-        exams: results.exams.map(toCatalogCardDTO),
+        books: results.books.map((b) => toCatalogCardDTO(b)),
+        exams: results.exams.map((e) => toCatalogCardDTO(e)),
       },
       {
         status: 200,
