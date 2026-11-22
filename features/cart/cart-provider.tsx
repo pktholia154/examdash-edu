@@ -7,7 +7,6 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  useSyncExternalStore,
 } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -96,16 +95,6 @@ const CART_STORAGE_KEY = 'ed-cart-v1';
 const CART_EVENT = 'ed-cart-change';
 const EMPTY_RAW = '[]';
 
-function subscribeCartStorage(callback: () => void) {
-  if (typeof window === 'undefined') return () => {};
-  window.addEventListener(CART_EVENT, callback);
-  window.addEventListener('storage', callback);
-  return () => {
-    window.removeEventListener(CART_EVENT, callback);
-    window.removeEventListener('storage', callback);
-  };
-}
-
 function getCartRawSnapshot(): string {
   if (typeof window === 'undefined') return EMPTY_RAW;
   try {
@@ -113,10 +102,6 @@ function getCartRawSnapshot(): string {
   } catch {
     return EMPTY_RAW;
   }
-}
-
-function getServerCartRawSnapshot(): string {
-  return EMPTY_RAW;
 }
 
 function writeCartStorage(nextItems: CartItem[]) {
@@ -142,20 +127,35 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   } = useAuth();
   const { showToast } = useToast();
 
-  const rawCartJson = useSyncExternalStore(
-    subscribeCartStorage,
-    getCartRawSnapshot,
-    getServerCartRawSnapshot
-  );
+  const [cartStore, setCartStore] = useState<{
+    raw: string;
+    hydrated: boolean;
+  }>({
+    raw: EMPTY_RAW,
+    hydrated: false,
+  });
+
+  useEffect(() => {
+    const syncCart = () => {
+      setCartStore({ raw: getCartRawSnapshot(), hydrated: true });
+    };
+    syncCart();
+    window.addEventListener(CART_EVENT, syncCart);
+    window.addEventListener('storage', syncCart);
+    return () => {
+      window.removeEventListener(CART_EVENT, syncCart);
+      window.removeEventListener('storage', syncCart);
+    };
+  }, []);
 
   const storedItems = useMemo<CartItem[]>(() => {
     try {
-      const parsed = JSON.parse(rawCartJson);
+      const parsed = JSON.parse(cartStore.raw);
       return Array.isArray(parsed) ? (parsed as CartItem[]) : [];
     } catch {
       return [];
     }
-  }, [rawCartJson]);
+  }, [cartStore.raw]);
 
   const items = useMemo(
     () => reconcileCartAgainstOwned(storedItems, ownedCompositeKeys).remaining,
@@ -163,10 +163,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    if (!cartStore.hydrated) return;
     if (items.length !== storedItems.length) {
       writeCartStorage(items);
     }
-  }, [items, storedItems.length]);
+  }, [cartStore.hydrated, items, storedItems.length]);
 
   useEffect(() => {
     if (!isOpen) return;

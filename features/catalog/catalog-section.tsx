@@ -1,14 +1,12 @@
 'use client';
 
-import React, { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ArrowUpDown, RotateCcw } from 'lucide-react';
 import type {
   CatalogCardDTO,
   CatalogItemDTO,
   SortOption,
-  ViewMode,
 } from '../../lib/types/catalog';
-import { ViewToggle } from '../../components/ui/view-toggle';
 import { EmptyState } from '../../components/ui/state-blocks';
 import { CatalogCard } from './catalog-card';
 import { cn } from '../../lib/utils';
@@ -17,10 +15,11 @@ export interface CatalogSectionProps {
   id?: string;
   heading: string;
   subheading: string;
-  storageKey: string;
+  storageKey?: string;
   items: Array<CatalogCardDTO | CatalogItemDTO>;
   viewAllHref?: string;
   viewAllLabel?: string;
+  showFilters?: boolean;
 }
 
 const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
@@ -33,56 +32,15 @@ export function CatalogSection({
   id,
   heading,
   subheading,
-  storageKey,
   items,
   viewAllHref,
   viewAllLabel,
+  showFilters = true,
 }: CatalogSectionProps) {
   const [selectedType, setSelectedType] = useState<string>('ALL');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('ALL');
   const [selectedTag, setSelectedTag] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<SortOption>('publishAt_desc');
-
-  const lsKey = `ed-view-${storageKey}`;
-  const lsEvent = `ed-view-event-${storageKey}`;
-
-  const subscribeView = useCallback(
-    (cb: () => void) => {
-      if (typeof window === 'undefined') return () => {};
-      window.addEventListener(lsEvent, cb);
-      window.addEventListener('storage', cb);
-      return () => {
-        window.removeEventListener(lsEvent, cb);
-        window.removeEventListener('storage', cb);
-      };
-    },
-    [lsEvent]
-  );
-
-  const getViewSnapshot = useCallback((): ViewMode => {
-    if (typeof window === 'undefined') return 'grid';
-    try {
-      const saved = localStorage.getItem(lsKey);
-      return saved === 'list' ? 'list' : 'grid';
-    } catch {
-      return 'grid';
-    }
-  }, [lsKey]);
-
-  const viewMode = useSyncExternalStore(
-    subscribeView,
-    getViewSnapshot,
-    (): ViewMode => 'grid'
-  );
-
-  const handleViewChange = (next: ViewMode) => {
-    try {
-      localStorage.setItem(lsKey, next);
-    } catch {
-      // Ignore storage error
-    }
-    window.dispatchEvent(new Event(lsEvent));
-  };
 
   const facets = useMemo(() => {
     const types = Array.from(
@@ -101,16 +59,18 @@ export function CatalogSection({
   }, [items]);
 
   const filteredAndSorted = useMemo(() => {
-    const filtered = items.filter((item) => {
-      if (selectedType !== 'ALL' && item.type !== selectedType) return false;
-      if (selectedLanguage !== 'ALL' && item.language !== selectedLanguage) {
-        return false;
-      }
-      if (selectedTag !== 'ALL' && !item.tags.includes(selectedTag)) {
-        return false;
-      }
-      return true;
-    });
+    const filtered = showFilters
+      ? items.filter((item) => {
+          if (selectedType !== 'ALL' && item.type !== selectedType) return false;
+          if (selectedLanguage !== 'ALL' && item.language !== selectedLanguage) {
+            return false;
+          }
+          if (selectedTag !== 'ALL' && !item.tags.includes(selectedTag)) {
+            return false;
+          }
+          return true;
+        })
+      : [...items];
 
     filtered.sort((a, b) => {
       if (sortBy === 'price_asc') return a.buyPrice - b.buyPrice;
@@ -126,12 +86,13 @@ export function CatalogSection({
     });
 
     return filtered;
-  }, [items, selectedLanguage, selectedTag, selectedType, sortBy]);
+  }, [items, selectedLanguage, selectedTag, selectedType, showFilters, sortBy]);
 
   const hasActiveFilters =
-    selectedType !== 'ALL' ||
-    selectedLanguage !== 'ALL' ||
-    selectedTag !== 'ALL';
+    showFilters &&
+    (selectedType !== 'ALL' ||
+      selectedLanguage !== 'ALL' ||
+      selectedTag !== 'ALL');
 
   const resetFilters = () => {
     setSelectedType('ALL');
@@ -153,25 +114,20 @@ export function CatalogSection({
           <p className="mt-1 text-sm text-[var(--text-muted)]">{subheading}</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
-          {viewAllHref && viewAllLabel && (
+        {viewAllHref && viewAllLabel && (
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
             <a
               href={viewAllHref}
               className="text-sm font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0"
             >
               {viewAllLabel} →
             </a>
-          )}
-          <ViewToggle
-            value={viewMode}
-            onChange={handleViewChange}
-            labelPrefix={heading}
-          />
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Button-Driven Filter & Sort Controls (Zero Crawlable Filter Query Links) */}
-      {items.length > 0 && (
+      {showFilters && items.length > 0 && (
         <div className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-6">
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -287,7 +243,7 @@ export function CatalogSection({
         </div>
       )}
 
-      {/* Catalog Items or Empty State */}
+      {/* Catalog Items or Empty State (Grid View Default) */}
       {items.length === 0 ? (
         <div className="mt-6">
           <EmptyState
@@ -302,23 +258,13 @@ export function CatalogSection({
           actionLabel="Reset Filters"
           onAction={resetFilters}
         />
-      ) : viewMode === 'grid' ? (
-        <div className="ed-catalog-grid">
+      ) : (
+        <div className={cn('ed-catalog-grid', !showFilters && 'mt-6')}>
           {filteredAndSorted.map((item) => (
             <CatalogCard
               key={`${item.collectionName}:${item.id}`}
               item={item}
               viewMode="grid"
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {filteredAndSorted.map((item) => (
-            <CatalogCard
-              key={`${item.collectionName}:${item.id}`}
-              item={item}
-              viewMode="list"
             />
           ))}
         </div>

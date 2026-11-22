@@ -43,7 +43,9 @@ export function LegalDocumentShell({
   return (
     <div className="pt-8 pb-12">
       <script
+        key={`legal-jsonld-${currentPath}`}
         type="application/ld+json"
+        suppressHydrationWarning
         dangerouslySetInnerHTML={{ __html: jsonLd }}
       />
 

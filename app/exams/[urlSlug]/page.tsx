@@ -93,6 +93,7 @@ function formatReadableDate(iso: string): string {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      timeZone: 'UTC',
     }).format(new Date(iso));
   } catch {
     return iso.slice(0, 10);
@@ -141,7 +142,9 @@ export default async function ExamDetailPage({
   return (
     <div className="ed-container pt-8 sm:pt-10 pb-24 lg:pb-10">
       <script
+        key={`exam-jsonld-${exam.id}`}
         type="application/ld+json"
+        suppressHydrationWarning
         dangerouslySetInnerHTML={{ __html: jsonLd }}
       />
 

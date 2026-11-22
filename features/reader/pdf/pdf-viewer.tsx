@@ -9,47 +9,33 @@ import React, {
 } from 'react';
 import {
   AlertCircle,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Download,
   Loader2,
   Lock,
-  Maximize2,
-  Minimize2,
   Minus,
   Moon,
   Plus,
   RefreshCw,
-  RotateCw,
   Sun,
   Sunset,
-  Trash2,
 } from 'lucide-react';
 import type { PublicBookDTO } from '../../../lib/types/catalog';
-import {
-  deleteBookFormatOffline,
-  hasBookFormatOffline,
-  OFFLINE_VAULT_UPDATED_EVENT,
-  readBookFormatOffline,
-  saveBookFormatOffline,
-} from '../../../lib/offline/offline-vault';
+import { fetchClientStorageBytes } from '../../../lib/firebase/storage-client';
+import { readBookFormatOffline } from '../../../lib/offline/offline-vault';
 import { cn } from '../../../lib/utils';
-import { useToast } from '../../toast/toast-context';
 import {
   getPdfCanvasWindowRadius,
   getPdfNeighborMaxDpr,
-  hasOfflineAsset,
   readOfflineAsset,
   readStoredJsonSync,
   registerLifecycleFlush,
-  removeOfflineAsset,
-  saveOfflineAsset,
-  setPlatformImmersiveMode,
   writeStoredJsonSync,
   type PdfReadingProgress,
   type ReaderComfortTheme,
 } from '../shared/platform-adapter';
+import {
+  ReaderTopBar,
+  type ReaderTopBarProps,
+} from '../shared/reader-top-bar';
 import { SampleUnlockCard } from '../shared/sample-unlock-card';
 import type {
   PdfPageDimension,
@@ -60,13 +46,15 @@ import type {
 export interface PdfViewerProps {
   book: PublicBookDTO;
   streamUrl: string;
+  fullStoragePath?: string;
+  directStreamUrl?: string;
   isSample: boolean;
   userId?: string;
   preferOffline?: boolean;
   bearerTokenProvider?: () => Promise<string | null>;
   onRefreshSignedUrl?: () => Promise<string | null>;
   onSwitchToFullMode?: () => void;
-  embeddedHeightClass?: string;
+  topBar?: ReaderTopBarProps;
 }
 
 interface RenderedCanvasMeta {
@@ -88,18 +76,18 @@ const FETCH_MAX_BYTES = 64 * 1024 * 1024;
 export function PdfViewer({
   book,
   streamUrl,
+  fullStoragePath,
+  directStreamUrl,
   isSample,
   userId,
   preferOffline = false,
   bearerTokenProvider,
   onRefreshSignedUrl,
   onSwitchToFullMode,
-  embeddedHeightClass = 'h-[78svh] min-h-[520px]',
+  topBar,
 }: PdfViewerProps) {
-  const { showToast } = useToast();
-
   const progressKey = `ed-pdf-prog-v1:${book.id}:${isSample ? 'sample' : 'full'}`;
-  const vaultKey = `pdf_${book.id}_${isSample ? 'sample' : 'full'}.pdf`;
+  const vaultKey = `pdf_${book.id}_sample.pdf`;
 
   const savedInitial = useMemo(
     () => readStoredJsonSync<PdfReadingProgress>(progressKey),
@@ -115,12 +103,9 @@ export function PdfViewer({
     return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
   });
   const [livePreviewZoom, setLivePreviewZoom] = useState<number | null>(null);
-  const [extraRotate, setExtraRotate] = useState<0 | 90 | 180 | 270>(0);
   const [comfortTheme, setComfortTheme] = useState<ReaderComfortTheme>(
     savedInitial?.comfortTheme ?? 'light'
   );
-  const [hudVisible, setHudVisible] = useState(true);
-  const [isImmersive, setIsImmersive] = useState(false);
 
   const [loadingState, setLoadingState] = useState<
     'loading' | 'ready' | 'password' | 'error'
@@ -131,9 +116,9 @@ export function PdfViewer({
     undefined
   );
 
-  const [isSavedOffline, setIsSavedOffline] = useState(false);
-  const [isSavingOffline, setIsSavingOffline] = useState(false);
-  const [viewportWidth, setViewportWidth] = useState<number>(780);
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 780
+  );
   const [isDraggingMouse, setIsDraggingMouse] = useState(false);
 
   const rootContainerRef = useRef<HTMLDivElement | null>(null);
@@ -151,10 +136,12 @@ export function PdfViewer({
   const [reloadNonce, setReloadNonce] = useState(0);
   const zoomScaleRef = useRef<number>(zoomScale);
   const currentPageRef = useRef<number>(currentPage);
-  const extraRotateRef = useRef<0 | 90 | 180 | 270>(extraRotate);
   const submittedPasswordRef = useRef<string | undefined>(submittedPassword);
   const bearerTokenProviderRef = useRef(bearerTokenProvider);
   const onRefreshSignedUrlRef = useRef(onRefreshSignedUrl);
+  const streamUrlRef = useRef(streamUrl);
+  const fullStoragePathRef = useRef(fullStoragePath);
+  const directStreamUrlRef = useRef(directStreamUrl);
   const flushProgressRef = useRef<() => void>(() => {});
   const pageLayoutItemsRef = useRef<
     Array<{ pageNumber: number; cssWidth: number; cssHeight: number; top: number }>
@@ -169,10 +156,6 @@ export function PdfViewer({
   }, [currentPage]);
 
   useEffect(() => {
-    extraRotateRef.current = extraRotate;
-  }, [extraRotate]);
-
-  useEffect(() => {
     submittedPasswordRef.current = submittedPassword;
   }, [submittedPassword]);
 
@@ -183,6 +166,16 @@ export function PdfViewer({
   useEffect(() => {
     onRefreshSignedUrlRef.current = onRefreshSignedUrl;
   }, [onRefreshSignedUrl]);
+
+  useEffect(() => {
+    streamUrlRef.current = streamUrl;
+    fullStoragePathRef.current = fullStoragePath;
+    directStreamUrlRef.current = directStreamUrl;
+  }, [directStreamUrl, fullStoragePath, streamUrl]);
+
+  const hasStreamTarget = Boolean(
+    streamUrl || fullStoragePath || directStreamUrl
+  );
 
   const initialRestoredRef = useRef<boolean>(false);
   const pendingFocalCommitRef = useRef<{
@@ -237,15 +230,20 @@ export function PdfViewer({
     null
   );
 
-  // Base fit-to-width CSS width (at 1.0x zoom)
+  // Full-width on mobile (0 side margin); generous unboxed width on tablet/desktop
+  const isCompactViewport = viewportWidth < 640;
   const baseFitCssWidth = useMemo(() => {
-    return Math.max(260, Math.min(920, Math.floor(viewportWidth - 24)));
+    if (viewportWidth < 640) {
+      return Math.max(240, Math.floor(viewportWidth));
+    }
+    return Math.max(320, Math.min(1100, Math.floor(viewportWidth - 16)));
   }, [viewportWidth]);
 
   // Compute CSS dimensions per 1-indexed page
   const pageLayoutMetrics = useMemo(() => {
-    let currentTop = 12;
+    let currentTop = isCompactViewport ? 4 : 8;
     let maxCssW = 0;
+    const gapPx = isCompactViewport ? 8 : 12;
     const list: Array<{
       pageNumber: number;
       cssWidth: number;
@@ -254,7 +252,7 @@ export function PdfViewer({
     }> = [];
 
     for (const pg of pages) {
-      const totalRot = (pg.rotation + extraRotate) % 360;
+      const totalRot = pg.rotation % 360;
       const swapped = totalRot === 90 || totalRot === 270;
       const intrinsicW = Math.max(1, swapped ? pg.height : pg.width);
       const intrinsicH = Math.max(1, swapped ? pg.width : pg.height);
@@ -265,7 +263,7 @@ export function PdfViewer({
       if (cssWidth > maxCssW) maxCssW = cssWidth;
 
       const top = currentTop;
-      currentTop += cssHeight + 16;
+      currentTop += cssHeight + gapPx;
 
       list.push({
         pageNumber: pg.pageNumber,
@@ -280,29 +278,11 @@ export function PdfViewer({
       maxPageCssWidth: maxCssW,
       totalHeight: currentTop,
     };
-  }, [baseFitCssWidth, extraRotate, pages, zoomScale]);
+  }, [baseFitCssWidth, isCompactViewport, pages, zoomScale]);
 
   useEffect(() => {
     pageLayoutItemsRef.current = pageLayoutMetrics.items;
   }, [pageLayoutMetrics.items]);
-
-  // Check offline vault status on mount & vault updates
-  useEffect(() => {
-    let active = true;
-    const syncVaultState = async () => {
-      const exists =
-        !isSample && userId
-          ? await hasBookFormatOffline(userId, book.id, 'pdf')
-          : await hasOfflineAsset(vaultKey);
-      if (active) setIsSavedOffline(exists);
-    };
-    void syncVaultState();
-    window.addEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
-    return () => {
-      active = false;
-      window.removeEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
-    };
-  }, [book.id, isSample, userId, vaultKey]);
 
   // Measure .pdf-viewport width & maintain reading anchor on orientation/resize
   useEffect(() => {
@@ -322,17 +302,6 @@ export function PdfViewer({
     ro.observe(vp);
     return () => ro.disconnect();
   }, []);
-
-  // Sync fullscreen exits initiated by browser Escape key
-  useEffect(() => {
-    const onFsChange = () => {
-      if (!document.fullscreenElement && isImmersive) {
-        setIsImmersive(false);
-      }
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, [isImmersive]);
 
   // Flush exact 2D reading progress
   const flushProgressNow = useCallback(() => {
@@ -428,7 +397,7 @@ export function PdfViewer({
         keepPages,
       } satisfies PdfWorkerRequest);
 
-      // 2. Center-Out Dispatch (enqueue outer neighbors first, then active center last for LIFO priority!)
+      // 2. Center-Out Dispatch (outer neighbors first, active center last for LIFO priority)
       const orderedOffsets: number[] = [];
       for (let dist = radius; dist >= 1; dist--) {
         if (center - dist >= minKeep) orderedOffsets.push(center - dist);
@@ -447,7 +416,7 @@ export function PdfViewer({
         const existing = renderedMetaRef.current.get(pageNum);
         if (
           existing &&
-          existing.extraRotate === extraRotateRef.current &&
+          existing.extraRotate === 0 &&
           Math.abs(existing.renderedWidth - desiredWidth) <= 4
         ) {
           continue;
@@ -459,7 +428,7 @@ export function PdfViewer({
           jobId,
           pageNumber: pageNum,
           desiredWidth,
-          extraRotate: extraRotateRef.current,
+          extraRotate: 0,
           priority: isPrimary ? 2 : 1,
         } satisfies PdfWorkerRequest);
       }
@@ -547,7 +516,6 @@ export function PdfViewer({
       };
 
       worker.onerror = () => {
-        // Auto-respawn Worker on unexpected WASM OOM crash (up to 2 times)
         if (
           workerRespawnCountRef.current < 2 &&
           pdfBytesCacheRef.current &&
@@ -592,20 +560,20 @@ export function PdfViewer({
     );
 
     const readFromLocalVault = async (): Promise<ArrayBuffer | null> => {
-      if (!isSample && userId) {
-        const uidBuf = await readBookFormatOffline(userId, book.id, 'pdf');
-        if (uidBuf) return uidBuf;
+      if (!isSample) {
+        if (!userId) return null;
+        return readBookFormatOffline(userId, book.id, 'pdf');
       }
       return readOfflineAsset(vaultKey);
     };
 
     const fetchOnlinePdfStream = async (): Promise<ArrayBuffer> => {
-      let resolvedUrl = streamUrl;
+      let resolvedUrl = streamUrlRef.current;
+      const activeStoragePath = fullStoragePathRef.current;
+      const activeDirectUrl = directStreamUrlRef.current;
+
       if (!resolvedUrl && !isSample && onRefreshSignedUrlRef.current) {
         resolvedUrl = (await onRefreshSignedUrlRef.current()) || '';
-      }
-      if (!resolvedUrl) {
-        throw new Error('No PDF stream URL configured for this book.');
       }
 
       const fetchWithUrl = async (targetUrl: string): Promise<Response> => {
@@ -624,35 +592,80 @@ export function PdfViewer({
         });
       };
 
-      let res = await fetchWithUrl(resolvedUrl);
+      if (resolvedUrl) {
+        try {
+          let res = await fetchWithUrl(resolvedUrl);
 
-      // Silent 401/403 expired signed-URL refresh retry before surfacing errors
-      if (
-        (res.status === 401 || res.status === 403) &&
-        !isSample &&
-        onRefreshSignedUrlRef.current
-      ) {
-        const refreshedUrl = await onRefreshSignedUrlRef.current();
-        if (refreshedUrl) {
-          res = await fetchWithUrl(refreshedUrl);
+          if (
+            (res.status === 401 || res.status === 403) &&
+            !isSample &&
+            onRefreshSignedUrlRef.current
+          ) {
+            const refreshedUrl = await onRefreshSignedUrlRef.current();
+            if (refreshedUrl) {
+              streamUrlRef.current = refreshedUrl;
+              res = await fetchWithUrl(refreshedUrl);
+            }
+          }
+
+          if (res.ok) {
+            const contentLen = Number(res.headers.get('content-length') || '0');
+            if (contentLen > FETCH_MAX_BYTES) {
+              throw new Error(
+                'PDF file exceeds the 64 MB safe download budget.'
+              );
+            }
+            return await res.arrayBuffer();
+          }
+
+          if (isSample || (!activeStoragePath && !activeDirectUrl)) {
+            const errPayload = (await res.json().catch(() => null)) as
+              | { error?: string | { message?: string } }
+              | null;
+            const parsedErr =
+              typeof errPayload?.error === 'string'
+                ? errPayload.error
+                : typeof errPayload?.error?.message === 'string'
+                ? errPayload.error.message
+                : '';
+            throw new Error(
+              parsedErr || `Failed to load PDF stream (HTTP ${res.status}).`
+            );
+          }
+        } catch (streamErr) {
+          if (abortController.signal.aborted || isSample) {
+            throw streamErr;
+          }
+          if (!activeStoragePath && !activeDirectUrl) {
+            throw streamErr;
+          }
         }
       }
 
-      if (!res.ok) {
-        const errPayload = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(
-          errPayload.error || `Failed to load PDF stream (HTTP ${res.status}).`
-        );
+      if (!isSample && activeStoragePath) {
+        try {
+          return await fetchClientStorageBytes(
+            activeStoragePath,
+            abortController.signal
+          );
+        } catch (storageErr) {
+          if (abortController.signal.aborted || !activeDirectUrl) {
+            throw storageErr;
+          }
+        }
       }
 
-      const contentLen = Number(res.headers.get('content-length') || '0');
-      if (contentLen > FETCH_MAX_BYTES) {
-        throw new Error('PDF file exceeds the 64 MB safe download budget.');
+      if (!isSample && activeDirectUrl) {
+        const directRes = await fetch(activeDirectUrl, {
+          method: 'GET',
+          signal: abortController.signal,
+        });
+        if (directRes.ok) {
+          return directRes.arrayBuffer();
+        }
       }
 
-      return res.arrayBuffer();
+      throw new Error('No PDF stream URL configured for this book.');
     };
 
     const runLoad = async () => {
@@ -680,7 +693,7 @@ export function PdfViewer({
           }
           if (!pdfBuffer) {
             throw new Error(
-              'This PDF is not saved offline on this device yet. Reconnect to read online or save offline.'
+              'This PDF is not saved offline on this device yet. Reconnect to read online.'
             );
           }
         } else {
@@ -740,16 +753,16 @@ export function PdfViewer({
   }, [
     book.id,
     createAndBindWorker,
+    hasStreamTarget,
     isSample,
     preferOffline,
     reloadNonce,
-    streamUrl,
     submittedPassword,
     userId,
     vaultKey,
   ]);
 
-  // Strict Unmount Cleanup (pdf.destroy() & engine.destroy()) — ONLY on true component unmount
+  // Strict Unmount Cleanup (pdf.destroy() & engine.destroy())
   useEffect(() => {
     return () => {
       flushProgressRef.current();
@@ -797,7 +810,7 @@ export function PdfViewer({
     }
   }, [loadingState, pageLayoutMetrics.items, savedInitial, scheduleWindowRenders]);
 
-  // Commit Pending Focal Scroll Coordinates Synchronously After Zoom Commit (Zero Visual Snap!)
+  // Commit Pending Focal Scroll Coordinates Synchronously After Zoom Commit
   useEffect(() => {
     const pending = pendingFocalCommitRef.current;
     const vp = viewportRef.current;
@@ -821,7 +834,7 @@ export function PdfViewer({
     );
   }, [zoomScale]);
 
-  // Re-trigger renders when currentPage, zoomScale, extraRotate, or baseFitCssWidth changes
+  // Re-trigger renders when currentPage, zoomScale, or baseFitCssWidth changes
   useEffect(() => {
     if (loadingState !== 'ready') return;
     scheduleWindowRenders(false);
@@ -834,7 +847,6 @@ export function PdfViewer({
   }, [
     baseFitCssWidth,
     currentPage,
-    extraRotate,
     loadingState,
     scheduleWindowRenders,
     zoomScale,
@@ -950,7 +962,6 @@ export function PdfViewer({
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      // 140ms Finger-Lift Cooldown prevents single-finger jump right after 2 -> 1 lift
       if (
         e.touches.length === 1 &&
         performance.now() < fingerLiftCooldownUntilRef.current
@@ -961,7 +972,6 @@ export function PdfViewer({
 
       if (e.touches.length < 2 || !pinchStateRef.current?.active) return;
 
-      // Intercept ONLY 2+ fingers so 1-finger panning stays 100% OS-native
       e.preventDefault();
 
       const state = pinchStateRef.current;
@@ -982,7 +992,6 @@ export function PdfViewer({
       const rawRatio = dist / Math.max(1, state.startDist);
       const dampedRatio = 1 + (rawRatio - 1) * PINCH_DAMPED_GAIN;
       const unclampedTarget = state.startZoom * dampedRatio;
-      // Soft rubber-band down to 0.92x during live gesture, snapping cleanly to 1.0x on commit
       const previewZoom = Math.min(
         MAX_ZOOM,
         Math.max(0.92, unclampedTarget)
@@ -1093,7 +1102,7 @@ export function PdfViewer({
     }
   };
 
-  // Smart Double-Tap (1.0x <-> 1.8x anchored to tapped column) & Single-Tap HUD Toggle
+  // Smart Double-Tap (1.0x <-> 1.8x anchored to tapped point)
   const handleStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (mouseDragRef.current.moved) {
       mouseDragRef.current.moved = false;
@@ -1116,289 +1125,130 @@ export function PdfViewer({
     lastTapRef.current = { time: now, x: e.clientX, y: e.clientY };
   };
 
-  // Fast Scrubber & Jump (instant scrollTo for jumps > 5 pages to prevent observer storms)
-  const jumpToPage = useCallback(
-    (targetPage: number) => {
-      const vp = viewportRef.current;
-      if (!vp || pageLayoutMetrics.items.length === 0) return;
-      const clampedPage = Math.min(
-        pageLayoutMetrics.items.length,
-        Math.max(1, targetPage)
-      );
-      const slot = pageLayoutMetrics.items[clampedPage - 1];
-      if (!slot) return;
-
-      const distance = Math.abs(clampedPage - currentPageRef.current);
-      currentPageRef.current = clampedPage;
-      setCurrentPage(clampedPage);
-
-      vp.scrollTo({
-        top: Math.max(0, slot.top - 8),
-        behavior: distance > 5 ? 'instant' : 'smooth',
-      });
-      scheduleProgressSave();
-    },
-    [pageLayoutMetrics.items, scheduleProgressSave]
-  );
-
-  const handleToggleImmersive = async () => {
-    const next = !isImmersive;
-    setIsImmersive(next);
-    await setPlatformImmersiveMode(next, rootContainerRef.current);
-  };
-
-  const handleToggleOfflineVault = async () => {
-    if (isSavedOffline) {
-      if (!isSample && userId) {
-        await deleteBookFormatOffline(userId, book.id, 'pdf');
-      } else {
-        await removeOfflineAsset(vaultKey);
-      }
-      setIsSavedOffline(false);
-      showToast('Removed offline PDF copy from device vault.');
-      return;
-    }
-    const buffer = pdfBytesCacheRef.current;
-    if (!buffer) {
-      showToast('Wait for the PDF stream to finish loading first.', 'danger');
-      return;
-    }
-    setIsSavingOffline(true);
-    try {
-      if (!isSample && userId) {
-        const ctrl = new AbortController();
-        await saveBookFormatOffline({
-          uid: userId,
-          itemId: book.id,
-          urlSlug: book.urlSlug,
-          format: 'pdf',
-          remoteUpdatedAtMs:
-            new Date(book.updatedAtIso).getTime() || Date.now(),
-          getIdToken: bearerTokenProviderRef.current || (async () => null),
-          signal: ctrl.signal,
-          prebuiltBuffer: buffer.slice(0),
-        });
-        setIsSavedOffline(true);
-        showToast('Saved PDF to private offline study vault!', 'success');
-      } else {
-        const ok = await saveOfflineAsset(vaultKey, buffer);
-        if (ok) {
-          setIsSavedOffline(true);
-          showToast('Saved PDF to private offline study vault!', 'success');
-        } else {
-          showToast('Unable to save offline copy on this browser.', 'danger');
-        }
-      }
-    } catch (err) {
-      showToast(
-        err instanceof Error
-          ? err.message
-          : 'Unable to save offline copy on this device.',
-        'danger'
-      );
-    } finally {
-      setIsSavingOffline(false);
-    }
-  };
-
   const displayedZoomPct = Math.round((livePreviewZoom ?? zoomScale) * 100);
-  const stageMinWidthPx = Math.ceil(pageLayoutMetrics.maxPageCssWidth + 24);
+  const stageMinWidthPx = Math.ceil(
+    pageLayoutMetrics.maxPageCssWidth + (isCompactViewport ? 0 : 16)
+  );
 
   return (
     <div
       ref={rootContainerRef}
       className={cn(
-        'relative flex flex-col rounded-xl border border-[var(--reader-border,var(--border-subtle))] overflow-hidden select-none',
+        'relative flex flex-col w-full h-full overflow-hidden select-none',
         comfortTheme === 'light' && 'ed-reader-skin-light pdf-comfort-light',
         comfortTheme === 'sepia' && 'ed-reader-skin-sepia pdf-comfort-sepia',
-        comfortTheme === 'dark' && 'ed-reader-skin-dark pdf-comfort-dark',
-        isImmersive
-          ? 'fixed inset-0 z-50 h-[100dvh] w-screen rounded-none border-0'
-          : embeddedHeightClass
+        comfortTheme === 'dark' && 'ed-reader-skin-dark pdf-comfort-dark'
       )}
-      style={{ backgroundColor: 'var(--reader-bg)' }}
+      style={{ backgroundColor: 'var(--reader-bg)', color: 'var(--reader-ink)' }}
     >
-      {/* Top Minimal HUD */}
-      {hudVisible && (
+      {/* Bar 1: Title, PDF/Markdown Toggle, Cross Button */}
+      {topBar && <ReaderTopBar {...topBar} />}
+
+      {/* Bar 2: Minimal Single-Row Controls — Page Count, +/- Zoom, Light/Sepia/Dark */}
+      <div
+        data-nosnippet=""
+        className="flex items-center justify-between gap-1.5 w-full px-2.5 sm:px-4 py-1.5 border-b border-[var(--reader-border)] bg-[var(--reader-bg)] text-[var(--reader-ink)] shrink-0"
+      >
+        {/* Minimal Page Count */}
+        <span className="text-xs font-semibold tabular-nums whitespace-nowrap text-[var(--reader-muted)]">
+          {pages.length > 0 ? currentPage : 0} / {pages.length}
+        </span>
+
+        {/* Minimal +/- Zoom */}
         <div
-          data-nosnippet=""
-          className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-[var(--reader-border)] bg-[var(--reader-bg)] text-[var(--reader-ink)] shrink-0"
-          style={{
-            paddingTop: isImmersive
-              ? 'calc(0.5rem + var(--safe-area-inset-top))'
-              : undefined,
-          }}
+          role="group"
+          aria-label="PDF zoom controls"
+          className="inline-flex items-center rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5 tabular-nums"
         >
-          {/* Page Counter & Step Controls */}
-          <div className="flex items-center gap-1.5 tabular-nums">
-            <button
-              type="button"
-              disabled={currentPage <= 1 || pages.length === 0}
-              onClick={() => jumpToPage(currentPage - 1)}
-              aria-label="Previous page"
-              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" aria-hidden="true" />
-            </button>
-            <span className="px-2 text-xs sm:text-sm font-semibold whitespace-nowrap">
-              Page {pages.length > 0 ? currentPage : 0} / {pages.length}
-            </span>
-            <button
-              type="button"
-              disabled={currentPage >= pages.length || pages.length === 0}
-              onClick={() => jumpToPage(currentPage + 1)}
-              aria-label="Next page"
-              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
-            >
-              <ChevronRight className="w-4 h-4" aria-hidden="true" />
-            </button>
-          </div>
-
-          {/* Deterministic - | 100% | + Zoom Bar & Comfort Controls */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div
-              role="group"
-              aria-label="PDF zoom controls"
-              className="inline-flex items-center rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5 tabular-nums"
-            >
-              <button
-                type="button"
-                disabled={zoomScale <= MIN_ZOOM}
-                onClick={() => commitZoomAnchored(zoomScale - 0.25)}
-                aria-label="Zoom out"
-                className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
-              >
-                <Minus className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => commitZoomAnchored(1.0)}
-                aria-label="Reset zoom to fit width"
-                className="min-h-[40px] px-2.5 text-xs font-semibold hover:bg-[var(--reader-elevated)] rounded-md transition-colors whitespace-nowrap"
-              >
-                {displayedZoomPct}%
-              </button>
-              <button
-                type="button"
-                disabled={zoomScale >= MAX_ZOOM}
-                onClick={() => commitZoomAnchored(zoomScale + 0.25)}
-                aria-label="Zoom in"
-                className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </div>
-
-            {/* Rotate 90° */}
-            <button
-              type="button"
-              onClick={() =>
-                setExtraRotate(
-                  (r) => (((r + 90) % 360) as 0 | 90 | 180 | 270)
-                )
-              }
-              aria-label="Rotate pages 90 degrees"
-              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] transition-colors"
-            >
-              <RotateCw className="w-4 h-4" aria-hidden="true" />
-            </button>
-
-            {/* Zero-Cost Comfort Filter Switcher (Light / Sepia / Dark) */}
-            <div
-              role="group"
-              aria-label="Reading comfort theme"
-              className="inline-flex items-center rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5"
-            >
-              <button
-                type="button"
-                aria-pressed={comfortTheme === 'light'}
-                onClick={() => setComfortTheme('light')}
-                aria-label="Light paper mode"
-                className={cn(
-                  'inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md transition-colors',
-                  comfortTheme === 'light'
-                    ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
-                    : 'hover:bg-[var(--reader-elevated)]'
-                )}
-              >
-                <Sun className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-pressed={comfortTheme === 'sepia'}
-                onClick={() => setComfortTheme('sepia')}
-                aria-label="Warm sepia mode"
-                className={cn(
-                  'inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md transition-colors',
-                  comfortTheme === 'sepia'
-                    ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
-                    : 'hover:bg-[var(--reader-elevated)]'
-                )}
-              >
-                <Sunset className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-pressed={comfortTheme === 'dark'}
-                onClick={() => setComfortTheme('dark')}
-                aria-label="Dark night mode"
-                className={cn(
-                  'inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md transition-colors',
-                  comfortTheme === 'dark'
-                    ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
-                    : 'hover:bg-[var(--reader-elevated)]'
-                )}
-              >
-                <Moon className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </div>
-
-            {/* Offline Vault Toggle */}
-            <button
-              type="button"
-              disabled={isSavingOffline || loadingState !== 'ready'}
-              onClick={() => void handleToggleOfflineVault()}
-              aria-label={
-                isSavedOffline
-                  ? 'Remove offline PDF copy'
-                  : 'Save PDF for offline reading'
-              }
-              className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] disabled:opacity-40 text-xs font-semibold transition-colors whitespace-nowrap"
-            >
-              {isSavedOffline ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-[var(--status-success)]" aria-hidden="true" />
-                  <span className="hidden sm:inline">Offline Ready</span>
-                  <Trash2 className="w-3 h-3 opacity-60 ms-0.5" aria-hidden="true" />
-                </>
-              ) : (
-                <>
-                  <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span className="hidden sm:inline">
-                    {isSavingOffline ? 'Saving...' : 'Offline'}
-                  </span>
-                </>
-              )}
-            </button>
-
-            {/* Fullscreen / Immersive Toggle */}
-            <button
-              type="button"
-              onClick={() => void handleToggleImmersive()}
-              aria-label={isImmersive ? 'Exit full screen' : 'Full screen reader'}
-              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] transition-colors"
-            >
-              {isImmersive ? (
-                <Minimize2 className="w-4 h-4" aria-hidden="true" />
-              ) : (
-                <Maximize2 className="w-4 h-4" aria-hidden="true" />
-              )}
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={zoomScale <= MIN_ZOOM}
+            onClick={() => commitZoomAnchored(zoomScale - 0.25)}
+            aria-label="Zoom out"
+            className="inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 rounded hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
+          >
+            <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => commitZoomAnchored(1.0)}
+            aria-label="Reset zoom to fit width"
+            className="h-8 sm:h-9 px-1.5 sm:px-2.5 text-[11px] sm:text-xs font-semibold hover:bg-[var(--reader-elevated)] rounded transition-colors whitespace-nowrap"
+          >
+            {displayedZoomPct}%
+          </button>
+          <button
+            type="button"
+            disabled={zoomScale >= MAX_ZOOM}
+            onClick={() => commitZoomAnchored(zoomScale + 0.25)}
+            aria-label="Zoom in"
+            className="inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 rounded hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
         </div>
-      )}
 
-      {/* 2D Native Overflow Viewport */}
+        {/* Minimal Light / Sepia / Dark Theme Modes */}
+        <div
+          role="group"
+          aria-label="Reading theme mode"
+          className="inline-flex items-center rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5"
+        >
+          <button
+            type="button"
+            aria-pressed={comfortTheme === 'light'}
+            onClick={() => {
+              setComfortTheme('light');
+              scheduleProgressSave();
+            }}
+            aria-label="Light mode"
+            className={cn(
+              'inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 rounded transition-colors',
+              comfortTheme === 'light'
+                ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
+                : 'hover:bg-[var(--reader-elevated)]'
+            )}
+          >
+            <Sun className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-pressed={comfortTheme === 'sepia'}
+            onClick={() => {
+              setComfortTheme('sepia');
+              scheduleProgressSave();
+            }}
+            aria-label="Sepia mode"
+            className={cn(
+              'inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 rounded transition-colors',
+              comfortTheme === 'sepia'
+                ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
+                : 'hover:bg-[var(--reader-elevated)]'
+            )}
+          >
+            <Sunset className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-pressed={comfortTheme === 'dark'}
+            onClick={() => {
+              setComfortTheme('dark');
+              scheduleProgressSave();
+            }}
+            aria-label="Dark mode"
+            className={cn(
+              'inline-flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 rounded transition-colors',
+              comfortTheme === 'dark'
+                ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
+                : 'hover:bg-[var(--reader-elevated)]'
+            )}
+          >
+            <Moon className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      {/* Full-Width 2D Native Overflow Viewport */}
       <div
         ref={viewportRef}
         onScroll={handleViewportScroll}
@@ -1414,31 +1264,27 @@ export function PdfViewer({
         )}
         style={{
           touchAction: zoomScale > 1.01 ? 'pan-x pan-y' : 'pan-y',
+          paddingBottom: 'var(--safe-area-inset-bottom)',
         }}
       >
         {loadingState === 'loading' && (
-          <div className="flex flex-col items-center justify-center h-full min-h-[360px] p-8 text-center text-[var(--reader-ink)]">
+          <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-6 text-center text-[var(--reader-ink)]">
             <Loader2
-              className="w-7 h-7 animate-spin text-[var(--reader-muted)] mb-3"
+              className="w-6 h-6 animate-spin text-[var(--reader-muted)] mb-2.5"
               aria-hidden="true"
             />
-            <p className="text-sm font-semibold">
-              Initializing PDFium WASM Engine & Streaming Pages...
-            </p>
-            <p className="mt-1 text-xs text-[var(--reader-muted)]">
-              {isSample ? 'Loading sample extract' : 'Loading verified full edition'}
-            </p>
+            <p className="text-sm font-semibold">Loading PDF...</p>
           </div>
         )}
 
         {loadingState === 'password' && (
-          <div className="flex flex-col items-center justify-center h-full min-h-[360px] p-6">
+          <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-4">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 setSubmittedPassword(passwordInput);
               }}
-              className="w-full max-w-sm rounded-xl border border-[var(--reader-border-strong)] bg-[var(--reader-bg)] p-6 text-[var(--reader-ink)] space-y-4"
+              className="w-full max-w-sm rounded-xl border border-[var(--reader-border-strong)] bg-[var(--reader-bg)] p-5 text-[var(--reader-ink)] space-y-4"
             >
               <div className="flex items-center gap-2.5">
                 <Lock className="w-5 h-5 text-[var(--reader-muted)]" aria-hidden="true" />
@@ -1464,9 +1310,9 @@ export function PdfViewer({
         )}
 
         {loadingState === 'error' && (
-          <div className="flex flex-col items-center justify-center h-full min-h-[360px] p-8 text-center text-[var(--reader-ink)]">
+          <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-6 text-center text-[var(--reader-ink)]">
             <AlertCircle
-              className="w-7 h-7 text-[var(--status-danger)] mb-3"
+              className="w-6 h-6 text-[var(--status-danger)] mb-2.5"
               aria-hidden="true"
             />
             <h3 className="text-base font-bold">Unable to Render PDF</h3>
@@ -1480,7 +1326,7 @@ export function PdfViewer({
                 setErrorMessage('');
                 setReloadNonce((n) => n + 1);
               }}
-              className="mt-5 inline-flex items-center justify-center gap-2 min-h-[48px] px-5 rounded-lg bg-[var(--reader-accent)] text-[var(--reader-accent-ink)] text-sm font-semibold"
+              className="mt-5 inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--reader-accent)] text-[var(--reader-accent-ink)] text-sm font-semibold"
             >
               <RefreshCw className="w-4 h-4" aria-hidden="true" />
               <span>Retry Loading</span>
@@ -1491,7 +1337,7 @@ export function PdfViewer({
         {loadingState === 'ready' && pageLayoutMetrics.items.length > 0 && (
           <div
             ref={stageRef}
-            className="pdf-stage py-3 px-3"
+            className="pdf-stage py-1 px-0 sm:py-2 sm:px-2"
             style={{
               width: `max(100%, ${stageMinWidthPx}px)`,
             }}
@@ -1507,7 +1353,7 @@ export function PdfViewer({
                   }
                 }}
                 data-pdf-page={slot.pageNumber}
-                className="relative mx-auto mb-4 rounded-sm bg-white shadow-xs overflow-hidden"
+                className="relative mx-auto mb-2 sm:mb-3 bg-white overflow-hidden"
                 style={{
                   width: `${slot.cssWidth}px`,
                   height: `${slot.cssHeight}px`,
@@ -1528,18 +1374,11 @@ export function PdfViewer({
                     height: `${slot.cssHeight}px`,
                   }}
                 />
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute bottom-2 end-2.5 text-[11px] font-mono tabular-nums text-slate-500/80"
-                >
-                  {slot.pageNumber}
-                </span>
               </div>
             ))}
 
-            {/* Store-Safe End-of-Sample Unlock Card */}
             {isSample && (
-              <div className="px-2 pb-6">
+              <div className="px-2.5 sm:px-4 pb-6">
                 <SampleUnlockCard
                   book={book}
                   formatLabel="PDF"
@@ -1551,62 +1390,14 @@ export function PdfViewer({
         )}
       </div>
 
-      {/* Live Pinch Zoom HUD Indicator */}
+      {/* Live Pinch Zoom Indicator */}
       {livePreviewZoom !== null && (
         <div
           aria-live="polite"
-          className="pointer-events-none absolute top-16 left-1/2 -translate-x-1/2 z-20 rounded-lg border border-[var(--reader-border-strong)] bg-[var(--reader-bg)]/95 px-3 py-1.5 text-xs font-bold tabular-nums text-[var(--reader-ink)] shadow-sm"
+          className="pointer-events-none absolute top-24 left-1/2 -translate-x-1/2 z-20 rounded-md border border-[var(--reader-border-strong)] bg-[var(--reader-bg)]/95 px-3 py-1 text-xs font-bold tabular-nums text-[var(--reader-ink)] shadow-sm"
         >
           {Math.round(livePreviewZoom * 100)}%
         </div>
-      )}
-
-      {/* Fast Bottom Scrubber */}
-      {hudVisible && loadingState === 'ready' && pages.length > 1 && (
-        <div
-          data-nosnippet=""
-          className="flex items-center gap-3 px-4 py-2.5 border-t border-[var(--reader-border)] bg-[var(--reader-bg)] text-[var(--reader-ink)] shrink-0 tabular-nums"
-          style={{
-            paddingBottom: isImmersive
-              ? 'calc(0.625rem + var(--safe-area-inset-bottom))'
-              : undefined,
-          }}
-        >
-          <label
-            htmlFor={`pdf-scrubber-${book.id}`}
-            className="text-xs font-semibold text-[var(--reader-muted)] whitespace-nowrap"
-          >
-            Jump
-          </label>
-          <input
-            id={`pdf-scrubber-${book.id}`}
-            type="range"
-            min={1}
-            max={pages.length}
-            value={currentPage}
-            onChange={(e) => jumpToPage(Number(e.target.value))}
-            aria-label="Scrub through PDF pages"
-            className="flex-1 h-2 accent-[var(--reader-accent)] cursor-pointer"
-          />
-          <button
-            type="button"
-            onClick={() => setHudVisible((v) => !v)}
-            className="text-xs font-semibold text-[var(--reader-muted)] hover:text-[var(--reader-ink)] px-2 min-h-[36px] whitespace-nowrap"
-          >
-            Hide Bar
-          </button>
-        </div>
-      )}
-
-      {!hudVisible && (
-        <button
-          type="button"
-          onClick={() => setHudVisible(true)}
-          aria-label="Show reader controls"
-          className="absolute top-3 end-3 z-20 min-h-[44px] px-3 rounded-lg border border-[var(--reader-border-strong)] bg-[var(--reader-bg)]/90 backdrop-blur-xs text-xs font-semibold text-[var(--reader-ink)]"
-        >
-          Controls
-        </button>
       )}
     </div>
   );

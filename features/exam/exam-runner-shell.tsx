@@ -48,6 +48,7 @@ import {
   recordCompletedAttemptSync,
   saveExamSessionSync,
 } from '../../lib/exam/storage';
+import { fetchClientStorageBytes } from '../../lib/firebase/storage-client';
 import {
   readExamSetShardOffline,
   requestSignedAssetUnlock,
@@ -126,14 +127,22 @@ export function ExamRunnerShell({
   initialSource?: 'online' | 'offline';
   autostart?: boolean;
 }) {
-  const { user, isAuthReady, ownedCompositeKeys, getIdToken, signInWithGoogle } =
-    useAuth();
+  const {
+    user,
+    isAuthReady,
+    isEntitlementsReady,
+    ownedCompositeKeys,
+    ownedSlugs,
+    getIdToken,
+    signInWithGoogle,
+  } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { showToast } = useToast();
 
   const isOwned =
     initialMode !== 'trial' &&
     (ownedCompositeKeys.has(makeCompositeKey('ExamPackDocument', exam.id)) ||
+      ownedSlugs.has(`ExamPackDocument:${exam.urlSlug}`) ||
       (exam.buyPrice === 0 && Boolean(user)));
 
   const firstSampleSetId = exam.MocktestTitles[0]?.id || 'exam_set_1';
@@ -167,6 +176,11 @@ export function ExamRunnerShell({
   const questionEnteredAtRef = useRef<number>(0);
   const autostartConsumedRef = useRef<boolean>(false);
   const selectedSetIdRef = useRef<string>(selectedSetId);
+  const mocktestTitlesRef = useRef(exam.MocktestTitles);
+
+  useEffect(() => {
+    mocktestTitlesRef.current = exam.MocktestTitles;
+  }, [exam.MocktestTitles]);
 
   useEffect(() => {
     selectedSetIdRef.current = selectedSetId;
@@ -321,7 +335,10 @@ export function ExamRunnerShell({
 
   // Resolve target ExamSet from Per-Set Offline Shard (< 200 KB in < 10ms) or Verified Signed Endpoint
   useEffect(() => {
-    if (!isAuthReady && initialMode === 'full') {
+    if (
+      (!isAuthReady || (Boolean(user) && !isEntitlementsReady)) &&
+      initialMode === 'full'
+    ) {
       return;
     }
 
@@ -331,6 +348,40 @@ export function ExamRunnerShell({
     const vaultMode: 'trial' | 'full' = isOwned ? 'full' : 'trial';
     const targetSetId = selectedSetId;
 
+    const extractSetsFromRawJson = (parsed: unknown): ExamSet[] => {
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (s): s is ExamSet => Boolean(s && typeof s === 'object')
+        );
+      }
+      if (parsed && typeof parsed === 'object') {
+        const obj = parsed as Record<string, unknown>;
+        const arr = obj.sets ?? obj.examSets ?? obj.mocktests ?? obj.data;
+        if (Array.isArray(arr)) {
+          return arr.filter(
+            (s): s is ExamSet => Boolean(s && typeof s === 'object')
+          );
+        }
+        if (Array.isArray(obj.sections)) {
+          return [parsed as ExamSet];
+        }
+      }
+      return [];
+    };
+
+    const selectTargetSetFromPack = (allSets: ExamSet[]): ExamSet[] => {
+      if (allSets.length === 0) return [];
+      const exact = allSets.filter((s) => s.id === targetSetId);
+      if (exact.length > 0) return exact;
+      const expectedIdx = mocktestTitlesRef.current.findIndex(
+        (m) => m.id === targetSetId
+      );
+      if (expectedIdx >= 0 && expectedIdx < allSets.length) {
+        return [{ ...allSets[expectedIdx], id: targetSetId }];
+      }
+      return [allSets[0]];
+    };
+
     const applyResolvedSets = (sets: ExamSet[], savedOffline: boolean) => {
       if (cancelled) return;
       setLoadedSets(sets);
@@ -338,23 +389,23 @@ export function ExamRunnerShell({
       setLoadError(null);
       setLoadingPack(false);
 
-      const targetSet =
-        sets.find((s) => s.id === targetSetId) || sets[0];
+      const targetSet = sets.find((s) => s.id === targetSetId) || sets[0];
       if (targetSet) {
         hydrateSessionForSet(targetSet, vaultMode);
       }
     };
 
     const readOwnedSetOffline = async (): Promise<ExamSet[] | null> => {
-      if (isOwned && user?.uid) {
+      if (isOwned) {
+        if (!user?.uid) return null;
         const shard = await readExamSetShardOffline(
           user.uid,
           exam.id,
           targetSetId
         );
-        if (shard) return [shard];
+        return shard ? [shard] : null;
       }
-      const legacy = await readCachedExamPackOffline(exam.urlSlug, vaultMode);
+      const legacy = await readCachedExamPackOffline(exam.urlSlug, 'trial');
       if (legacy && legacy.length > 0) {
         const matched = legacy.filter((s) => s.id === targetSetId);
         return matched.length > 0 ? matched : [legacy[0]];
@@ -395,6 +446,8 @@ export function ExamRunnerShell({
         let endpointUrl = `/api/v1/exams/${encodeURIComponent(
           exam.urlSlug
         )}?mode=${apiMode}&setId=${encodeURIComponent(targetSetId)}`;
+        let unlockedStoragePath = '';
+        let unlockedDirectJsonUrl = '';
 
         if (user) {
           const token = await getIdToken();
@@ -410,11 +463,14 @@ export function ExamRunnerShell({
                 getIdToken,
                 signal: abortController.signal,
               });
+              unlockedStoragePath =
+                grant.storagePaths?.fullJsonStoragePath || '';
+              unlockedDirectJsonUrl = grant.directUrls?.jsonUrl || '';
               if (grant.assets.jsonUrl) {
                 const sep = grant.assets.jsonUrl.includes('?') ? '&' : '?';
-                endpointUrl = `${grant.assets.jsonUrl}${sep}setId=${encodeURIComponent(
-                  targetSetId
-                )}`;
+                endpointUrl = `${
+                  grant.assets.jsonUrl
+                }${sep}setId=${encodeURIComponent(targetSetId)}`;
               }
             } catch {
               // Bearer token header on /api/v1/exams/[packId] remains authoritative fallback
@@ -447,6 +503,43 @@ export function ExamRunnerShell({
             }
             applyResolvedSets(sets, hasLocalCopy);
             return;
+          }
+        }
+
+        // Direct Firebase Storage SDK fallback for fullJsonStoragePath when owned
+        if (isOwned && (unlockedStoragePath || unlockedDirectJsonUrl)) {
+          let rawBuf: ArrayBuffer | null = null;
+          if (unlockedStoragePath) {
+            rawBuf = await fetchClientStorageBytes(
+              unlockedStoragePath,
+              abortController.signal
+            ).catch(() => null);
+          }
+          if (!rawBuf && unlockedDirectJsonUrl) {
+            const dRes = await fetch(unlockedDirectJsonUrl, {
+              method: 'GET',
+              signal: abortController.signal,
+            }).catch(() => null);
+            if (dRes?.ok) {
+              rawBuf = await dRes.arrayBuffer().catch(() => null);
+            }
+          }
+          if (rawBuf && !cancelled) {
+            const text = new TextDecoder('utf-8').decode(rawBuf);
+            const parsedSets = extractSetsFromRawJson(JSON.parse(text));
+            const targetSlice = selectTargetSetFromPack(parsedSets);
+            if (targetSlice.length > 0) {
+              const existingShard =
+                user?.uid
+                  ? await readExamSetShardOffline(
+                      user.uid,
+                      exam.id,
+                      targetSlice[0].id
+                    )
+                  : null;
+              applyResolvedSets(targetSlice, Boolean(existingShard));
+              return;
+            }
           }
         }
 
@@ -495,6 +588,7 @@ export function ExamRunnerShell({
     initialMode,
     initialSource,
     isAuthReady,
+    isEntitlementsReady,
     isOwned,
     selectedSetId,
     user,

@@ -5,16 +5,9 @@ import MarkdownIt from 'markdown-it';
 export interface MarkdownTocItem {
   id: string;
   text: string;
-  level: 1 | 2 | 3;
+  level: 1;
   sectionId: string;
   blockId: string;
-}
-
-export interface MarkdownSearchEntry {
-  blockId: string;
-  sectionId: string;
-  headingTitle: string;
-  text: string;
 }
 
 export interface MarkdownSectionChunk {
@@ -35,12 +28,9 @@ export interface MarkdownWorkerResponse {
   requestId: string;
   sections: MarkdownSectionChunk[];
   toc: MarkdownTocItem[];
-  searchIndex: MarkdownSearchEntry[];
-  codeMap: Record<string, string>;
-  tableMap: Record<string, string>;
+  mathMap: Record<string, string>;
   hasMath: boolean;
   hasFencedCode: boolean;
-  hasSolutionAccordions: boolean;
 }
 
 const workerScope = self as unknown as DedicatedWorkerGlobalScope;
@@ -68,8 +58,9 @@ function slugifyHeading(text: string, seen: Map<string, number>): string {
 
 function detectMathTokens(md: string): boolean {
   if (/\$\$[\s\S]+?\$\$/.test(md)) return true;
-  // Match inline $...$ where content starts/ends without whitespace and isn't plain currency
-  return /(?:^|[\s(])\$(?!\s)([^$\n]{1,160}?)(?<!\s)\$(?=[\s).,;:!?]|$)/m.test(md);
+  if (/\\\[[\s\S]+?\\\]/.test(md)) return true;
+  if (/\\\([\s\S]+?\\\)/.test(md)) return true;
+  return /(?<!\\)\$(?!\s)(?:\\\$|[^$\n])+?(?<!\s)(?<!\\)\$/.test(md);
 }
 
 function detectFencedCode(md: string): boolean {
@@ -77,22 +68,20 @@ function detectFencedCode(md: string): boolean {
 }
 
 /**
- * Pre-processes GFM Alert Callouts (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING])
- * and ExamDash MCQ Solution lines (Ans: / Answer: / Solution:) outside fenced code blocks.
+ * Minimal preprocessing:
+ * - Normalizes line endings
+ * - Converts GFM Alert Callouts (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING])
+ * - Unwraps any raw <details>/<summary> "tap to reveal" wrappers so full text renders directly
+ * - Leaves MCQ answers/solutions completely inline (no tap-to-reveal controls)
  */
-function preprocessStudyMarkdown(raw: string): {
-  processed: string;
-  hasSolutionAccordions: boolean;
-} {
+function preprocessStudyMarkdown(raw: string): string {
   const normalized = raw.replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
   const out: string[] = [];
 
   let inFence = false;
-  let inDetails = false;
-  let hasSolutionAccordions = false;
-
   let i = 0;
+
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
@@ -110,11 +99,17 @@ function preprocessStudyMarkdown(raw: string): {
       continue;
     }
 
-    if (/<details\b/i.test(trimmed)) inDetails = true;
-    if (/<\/details>/i.test(trimmed)) inDetails = false;
-    if (/<summary\b/i.test(trimmed)) hasSolutionAccordions = true;
+    // Strip collapsible <details> / <summary> tags so all text displays directly
+    if (/^<\/?details\b[^>]*>$/i.test(trimmed)) {
+      i++;
+      continue;
+    }
+    if (/^<summary\b[^>]*>[\s\S]*?<\/summary>$/i.test(trimmed)) {
+      i++;
+      continue;
+    }
 
-    // 1. GFM Alert Callout: > [!NOTE] | > [!TIP] | > [!IMPORTANT] | > [!WARNING]
+    // GFM Alert Callout: > [!NOTE] | > [!TIP] | > [!IMPORTANT] | > [!WARNING]
     const alertMatch = trimmed.match(
       /^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING)\]\s*(.*)$/i
     );
@@ -147,42 +142,92 @@ function preprocessStudyMarkdown(raw: string): {
       continue;
     }
 
-    // 2. ExamDash Question Bank Answer/Solution line -> Interactive <details> card
-    if (
-      !inDetails &&
-      /^(?:\*\*)?(?:Ans|Answer|Solution|Correct Answer)(?:\*\*)?\s*[:.-]\s+/i.test(
-        trimmed
-      )
-    ) {
-      const answerLines: string[] = [trimmed];
-      i++;
-      while (
-        i < lines.length &&
-        lines[i].trim() !== '' &&
-        !/^(?:\*\*Q\d+|Q\d+[.)]|#{1,6}\s|```|>\s)/.test(lines[i].trim())
-      ) {
-        answerLines.push(lines[i].trim());
-        i++;
-      }
-      hasSolutionAccordions = true;
-      out.push('');
-      out.push(
-        `<details class="ed-md-solution"><summary>Tap to reveal solution</summary><div class="ed-md-solution-body">\n\n${answerLines.join(
-          '\n'
-        )}\n\n</div></details>`
-      );
-      out.push('');
-      continue;
-    }
+    // Remove inline <details>/<summary> wrappers if present on the same line
+    const cleanedLine = line
+      .replace(/<details\b[^>]*>/gi, '')
+      .replace(/<\/details>/gi, '')
+      .replace(/<summary\b[^>]*>[\s\S]*?<\/summary>/gi, '');
 
-    out.push(line);
+    out.push(cleanedLine);
     i++;
   }
 
-  return {
-    processed: out.join('\n'),
-    hasSolutionAccordions,
+  return out.join('\n');
+}
+
+/**
+ * Extracts LaTeX math ($$...$$, \[...\], \(...\), and currency-safe $...$) outside
+ * fenced and inline code spans, renders with KaTeX (trust: false), and stores safe
+ * HTML in mathMap for post-DOMPurify hydration on the main thread.
+ */
+function extractAndRenderMath(
+  input: string,
+  renderFn: (tex: string, displayMode: boolean) => string
+): { text: string; mathMap: Record<string, string> } {
+  const codeProtections: string[] = [];
+  const mathMap: Record<string, string> = {};
+  let mathCounter = 0;
+
+  // 1. Protect fenced code blocks (```...```) and inline code (`...`)
+  let protectedText = input.replace(
+    /(^```[\s\S]*?^```|`[^`\n]+`)/gm,
+    (match) => {
+      const idx = codeProtections.length;
+      codeProtections.push(match);
+      return `@@ED_CODE_PROT_${idx}@@`;
+    }
+  );
+
+  const registerMath = (tex: string, displayMode: boolean): string => {
+    const id = `math_${mathCounter++}`;
+    mathMap[id] = renderFn(tex.trim(), displayMode);
+    return displayMode
+      ? `\n\n@@ED_MATH_BLOCK_${id}@@\n\n`
+      : `@@ED_MATH_INLINE_${id}@@`;
   };
+
+  // 2. Display math: $$ ... $$
+  protectedText = protectedText.replace(
+    /(?<!\\)\$\$([\s\S]+?)\$\$/g,
+    (_m, expr: string) => registerMath(expr, true)
+  );
+
+  // 3. Display math: \[ ... \]
+  protectedText = protectedText.replace(
+    /\\\[([\s\S]+?)\\\]/g,
+    (_m, expr: string) => registerMath(expr, true)
+  );
+
+  // 4. Inline math: \( ... \)
+  protectedText = protectedText.replace(
+    /\\\(([\s\S]+?)\\\)/g,
+    (_m, expr: string) => registerMath(expr, false)
+  );
+
+  // 5. Inline math: $ ... $ (currency-safe: skips e.g. "$10 and $20")
+  protectedText = protectedText.replace(
+    /(?<!\\)(?<!\$)\$(?!\s|\$)((?:\\\$|[^$\n])+?)(?<!\s)(?<!\\)\$(?!\$)/g,
+    (fullMatch, expr: string, offset: number, fullStr: string) => {
+      const afterIdx = offset + fullMatch.length;
+      const charAfter = fullStr[afterIdx] || '';
+      // Avoid mis-parsing currency pairs like "$10 to $20" or "$50, $60"
+      if (/^\d/.test(expr) && /\d/.test(charAfter)) {
+        return fullMatch;
+      }
+      if (/^\d[\d,.\s]*(?:and|or|to|per|for|of|in|is|was|were)\b/i.test(expr)) {
+        return fullMatch;
+      }
+      return registerMath(expr, false);
+    }
+  );
+
+  // 6. Restore protected code blocks
+  const restored = protectedText.replace(
+    /@@ED_CODE_PROT_(\d+)@@/g,
+    (_m, idxStr: string) => codeProtections[Number(idxStr)] ?? ''
+  );
+
+  return { text: restored, mathMap };
 }
 
 function resolveImageSrc(src: string, assetBaseUrl?: string): string {
@@ -214,7 +259,7 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
   const hasMath = detectMathTokens(rawMarkdown);
   const hasFencedCode = detectFencedCode(rawMarkdown);
 
-  // Lazy-load heavy study modules strictly on demand inside the Worker
+  // Lazy-load KaTeX when math tokens exist
   let katexRender:
     | ((tex: string, displayMode: boolean) => string)
     | null = null;
@@ -227,6 +272,7 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
           displayMode,
           throwOnError: false,
           strict: 'ignore',
+          trust: false,
         });
     } catch {
       katexRender = null;
@@ -283,59 +329,37 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
     }
   }
 
-  const { processed, hasSolutionAccordions } =
-    preprocessStudyMarkdown(rawMarkdown);
+  const processed = preprocessStudyMarkdown(rawMarkdown);
 
-  // Replace display $$...$$ and inline $...$ math before MarkdownIt if KaTeX is loaded
-  const mathPlaceholders: string[] = [];
+  // Extract & render KaTeX BEFORE MarkdownIt so underscores, backslashes, and asterisks are preserved
   let mdInput = processed;
+  let mathMap: Record<string, string> = {};
   if (katexRender) {
-    const renderFn = katexRender;
-    mdInput = mdInput.replace(/\$\$([\s\S]+?)\$\$/g, (_m, expr: string) => {
-      const idx = mathPlaceholders.length;
-      mathPlaceholders.push(
-        `<div class="md-scroll-x p-3 my-3">${renderFn(expr.trim(), true)}</div>`
-      );
-      return `@@ED_MATH_BLOCK_${idx}@@`;
-    });
-    mdInput = mdInput.replace(
-      /(^|[\s(])\$(?!\s)([^$\n]{1,160}?)(?<!\s)\$(?=[\s).,;:!?]|$)/gm,
-      (_m, prefix: string, expr: string) => {
-        const idx = mathPlaceholders.length;
-        mathPlaceholders.push(renderFn(expr.trim(), false));
-        return `${prefix}@@ED_MATH_INLINE_${idx}@@`;
-      }
-    );
+    const extracted = extractAndRenderMath(processed, katexRender);
+    mdInput = extracted.text;
+    mathMap = extracted.mathMap;
   }
 
-  const codeMap: Record<string, string> = {};
-  const tableMap: Record<string, string> = {};
-  let codeCounter = 0;
-
+  // typographer: false prevents (C) -> ©, (R) -> ®, (TM) -> ™ replacements in MCQ options
   const md = new MarkdownIt({
     html: true,
     linkify: true,
-    typographer: true,
+    typographer: false,
     breaks: true,
   });
 
-  // Custom fenced code renderer with .md-scroll-x + 1-tap Copy button
+  // Minimal fenced code renderer
   md.renderer.rules.fence = (tokens, idx) => {
     const token = tokens[idx];
     const info = (token.info || '').trim().split(/\s+/)[0] || '';
     const rawCode = token.content;
-    const codeId = `code_${++codeCounter}`;
-    codeMap[codeId] = rawCode;
-
     const highlighted = highlightCode
       ? highlightCode(rawCode, info)
       : escapeHtml(rawCode);
-
-    const langLabel = info ? escapeHtml(info.toUpperCase()) : 'CODE';
-    return `<div class="md-scroll-x"><div class="ed-md-code-bar"><span>${langLabel}</span><button type="button" class="ed-md-action-btn" data-code-copy="${codeId}">Copy</button></div><pre><code class="hljs">${highlighted}</code></pre></div>`;
+    return `<div class="md-scroll-x"><pre><code class="hljs">${highlighted}</code></pre></div>`;
   };
 
-  // Mode-aware lazy images with tap-to-expand lightbox marker
+  // Lazy images with tap-to-expand lightbox marker
   const defaultImgRule =
     md.renderer.rules.image ||
     ((tokens, idx, options, _env, selfRenderer) =>
@@ -356,13 +380,11 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
   const tokens = md.parse(mdInput, {});
   const seenSlugs = new Map<string, number>();
   const toc: MarkdownTocItem[] = [];
-  const searchIndex: MarkdownSearchEntry[] = [];
   const sections: MarkdownSectionChunk[] = [];
 
   let sectionIdx = 1;
   let currentSectionId = `sec_${sectionIdx}`;
   let currentSectionTitle = 'Introduction';
-  let currentHeadingTitle = 'Overview';
   let currentSectionTokens: typeof tokens = [];
 
   let blockCounter = 0;
@@ -373,18 +395,26 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
     if (currentSectionTokens.length === 0) return;
     let html = md.renderer.render(currentSectionTokens, md.options, {});
 
-    // Restore math placeholders
-    if (mathPlaceholders.length > 0) {
-      html = html.replace(/@@ED_MATH_(?:BLOCK|INLINE)_(\d+)@@/g, (_m, idxStr) => {
-        return mathPlaceholders[Number(idxStr)] || '';
-      });
+    // Replace math placeholders with DOMPurify-safe placeholder elements
+    if (Object.keys(mathMap).length > 0) {
+      html = html.replace(
+        /<p>@@ED_MATH_BLOCK_(math_\d+)@@<\/p>/g,
+        '<div class="ed-md-math-block" data-katex-id="$1"></div>'
+      );
+      html = html.replace(
+        /@@ED_MATH_BLOCK_(math_\d+)@@/g,
+        '<div class="ed-md-math-block" data-katex-id="$1"></div>'
+      );
+      html = html.replace(
+        /@@ED_MATH_INLINE_(math_\d+)@@/g,
+        '<span class="ed-md-math-inline" data-katex-id="$1"></span>'
+      );
     }
 
-    // Wrap every <table> in .md-scroll-x with an "Expand Table" button
+    // Wrap every <table> in minimal .md-scroll-x without extra header controls
     html = html.replace(/<table[\s\S]*?<\/table>/gi, (tableHtml) => {
-      const tableId = `tbl_${++tableCounter}`;
-      tableMap[tableId] = tableHtml;
-      return `<div class="md-scroll-x" data-block-id="blk_tbl_${tableCounter}"><div class="ed-md-table-bar"><span>Data Table · Swipe horizontally</span><button type="button" class="ed-md-action-btn" data-table-expand="${tableId}">Expand Table</button></div>${tableHtml}</div>`;
+      tableCounter += 1;
+      return `<div class="md-scroll-x" data-block-id="blk_tbl_${tableCounter}">${tableHtml}</div>`;
     });
 
     sections.push({
@@ -414,7 +444,9 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
     if (depth === 0) {
       if (tok.type === 'heading_open') {
         const inlineTok = tokens[i + 1];
-        const headingText = (inlineTok?.content || '').trim() || 'Section';
+        const headingText = (inlineTok?.content || '')
+          .replace(/@@ED_MATH_(?:BLOCK|INLINE)_math_\d+@@/g, '')
+          .trim() || 'Section';
         const levelNum = Number(tok.tag.slice(1));
         const blockId = `blk_${++blockCounter}`;
         tok.attrSet('data-block-id', blockId);
@@ -422,25 +454,20 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
         if (levelNum === 1 || levelNum === 2 || levelNum === 3) {
           const slug = slugifyHeading(headingText, seenSlugs);
           tok.attrSet('id', slug);
-          currentHeadingTitle = headingText;
-          if (levelNum === 1 || levelNum === 2) {
+          if (levelNum === 1) {
+            currentSectionTitle = headingText;
+            // Menu TOC strictly allows only h1 headings
+            toc.push({
+              id: slug,
+              text: headingText,
+              level: 1,
+              sectionId: currentSectionId,
+              blockId,
+            });
+          } else if (levelNum === 2) {
             currentSectionTitle = headingText;
           }
-          toc.push({
-            id: slug,
-            text: headingText,
-            level: levelNum as 1 | 2 | 3,
-            sectionId: currentSectionId,
-            blockId,
-          });
         }
-
-        searchIndex.push({
-          blockId,
-          sectionId: currentSectionId,
-          headingTitle: currentHeadingTitle,
-          text: headingText,
-        });
       } else if (
         tok.type === 'paragraph_open' ||
         tok.type === 'bullet_list_open' ||
@@ -449,36 +476,8 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
       ) {
         const blockId = `blk_${++blockCounter}`;
         tok.attrSet('data-block-id', blockId);
-        const nextInline = tokens[i + 1];
-        if (nextInline?.type === 'inline' && nextInline.content.trim()) {
-          searchIndex.push({
-            blockId,
-            sectionId: currentSectionId,
-            headingTitle: currentHeadingTitle,
-            text: nextInline.content.replace(/@@ED_MATH_\w+_\d+@@/g, '[formula]').trim(),
-          });
-        }
-      } else if (tok.type === 'fence') {
-        const blockId = `blk_${++blockCounter}`;
-        if (tok.content.trim()) {
-          searchIndex.push({
-            blockId,
-            sectionId: currentSectionId,
-            headingTitle: currentHeadingTitle,
-            text: tok.content.slice(0, 600).trim(),
-          });
-        }
       } else if (tok.type === 'html_block' && tok.content.trim()) {
         const blockId = `blk_${++blockCounter}`;
-        const plain = tok.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        if (plain) {
-          searchIndex.push({
-            blockId,
-            sectionId: currentSectionId,
-            headingTitle: currentHeadingTitle,
-            text: plain.slice(0, 600),
-          });
-        }
         tok.content = `<div data-block-id="${blockId}">${tok.content}</div>`;
       }
     }
@@ -496,12 +495,9 @@ workerScope.onmessage = async (event: MessageEvent<MarkdownWorkerRequest>) => {
     requestId: msg.requestId,
     sections,
     toc,
-    searchIndex,
-    codeMap,
-    tableMap,
-    hasMath,
+    mathMap,
+    hasMath: Object.keys(mathMap).length > 0,
     hasFencedCode,
-    hasSolutionAccordions,
   };
 
   workerScope.postMessage(response);

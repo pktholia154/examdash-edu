@@ -1,6 +1,7 @@
 'use client';
 
 import type { ExamSet } from '../exam/types';
+import { fetchClientStorageBytes } from '../firebase/storage-client';
 import { apiUrl } from '../platform/api-base';
 import {
   createUuidV7,
@@ -61,6 +62,16 @@ export interface SignedUnlockGrant {
     markdownUrl?: string;
     jsonUrl?: string;
   };
+  directUrls?: {
+    pdfUrl?: string;
+    markdownUrl?: string;
+    jsonUrl?: string;
+  };
+  storagePaths?: {
+    fullPdfStoragePath?: string;
+    fullMarkdownStoragePath?: string;
+    fullJsonStoragePath?: string;
+  };
 }
 
 export interface StorageUsageSummary {
@@ -72,16 +83,35 @@ export interface StorageUsageSummary {
 
 export const OFFLINE_VAULT_UPDATED_EVENT = 'ed-offline-vault-updated';
 
-const VAULT_IDB_NAME = 'examdash_offline_vault_v2';
+const VAULT_IDB_NAME = 'examdash_offline_vault_v3';
 const VAULT_IDB_VERSION = 1;
 const STORE_ASSETS_META = 'offline_assets';
 const STORE_ASSET_BLOBS = 'offline_blobs';
 const STORE_MUTATION_QUEUE = 'offline_mutation_queue';
-const OPFS_ROOT_DIR = 'examdash-vault-v2';
-const SQLITE_DB_NAME = 'examdash_offline_vault';
+const OPFS_ROOT_DIR = 'examdash-vault-v3';
+const SQLITE_DB_NAME = 'examdash_offline_vault_v3';
 const MIN_FREE_HEADROOM_BYTES = 8 * 1024 * 1024; // 8 MB minimum safety headroom
 const MAX_SINGLE_ASSET_BYTES = 64 * 1024 * 1024; // 64 MB cap
-const GRANT_CACHE_PREFIX = 'ed_signed_grant_v2:';
+const GRANT_CACHE_PREFIX = 'ed_signed_grant_v4:';
+
+function parseApiErrorText(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const errField = (payload as { error?: unknown }).error;
+  if (typeof errField === 'string' && errField.trim()) {
+    return errField.trim();
+  }
+  if (errField && typeof errField === 'object') {
+    const nestedMsg = (errField as { message?: unknown }).message;
+    if (typeof nestedMsg === 'string' && nestedMsg.trim()) {
+      return nestedMsg.trim();
+    }
+  }
+  const topMsg = (payload as { message?: unknown }).message;
+  if (typeof topMsg === 'string' && topMsg.trim()) {
+    return topMsg.trim();
+  }
+  return fallback;
+}
 
 interface CapacitorNativePlugins {
   Filesystem?: {
@@ -781,9 +811,12 @@ export async function requestSignedAssetUnlock(params: {
   });
 
   if (!res.ok) {
-    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+    const errBody = await res.json().catch(() => null);
     throw new Error(
-      errBody.error || `Unable to verify purchase entitlement (HTTP ${res.status}).`
+      parseApiErrorText(
+        errBody,
+        `Unable to verify purchase entitlement (HTTP ${res.status}).`
+      )
     );
   }
 
@@ -826,9 +859,9 @@ async function streamDownloadBytesWithProgress(params: {
   });
 
   if (!res.ok) {
-    const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+    const errBody = await res.json().catch(() => null);
     throw new Error(
-      errBody.error || `Download failed with HTTP ${res.status}.`
+      parseApiErrorText(errBody, `Download failed with HTTP ${res.status}.`)
     );
   }
 
@@ -900,8 +933,83 @@ async function streamDownloadBytesWithProgress(params: {
   return merged.buffer;
 }
 
+async function downloadGrantedAssetBytes(params: {
+  streamUrl?: string;
+  directUrl?: string;
+  storagePath?: string;
+  bearerToken?: string | null;
+  signal: AbortSignal;
+  onProgress?: (pct: number) => void;
+}): Promise<ArrayBuffer> {
+  let primaryError: unknown = null;
+
+  if (params.streamUrl) {
+    try {
+      return await streamDownloadBytesWithProgress({
+        url: params.streamUrl,
+        bearerToken: params.bearerToken,
+        signal: params.signal,
+        onProgress: params.onProgress,
+      });
+    } catch (err) {
+      if (
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        params.signal.aborted
+      ) {
+        throw err;
+      }
+      primaryError = err;
+    }
+  }
+
+  if (params.storagePath) {
+    try {
+      params.onProgress?.(25);
+      const buf = await fetchClientStorageBytes(
+        params.storagePath,
+        params.signal
+      );
+      params.onProgress?.(95);
+      return buf;
+    } catch (storageErr) {
+      if (
+        (storageErr instanceof DOMException &&
+          storageErr.name === 'AbortError') ||
+        params.signal.aborted
+      ) {
+        throw storageErr;
+      }
+      primaryError = primaryError ?? storageErr;
+    }
+  }
+
+  if (params.directUrl && params.directUrl.startsWith('https://')) {
+    try {
+      return await streamDownloadBytesWithProgress({
+        url: params.directUrl,
+        bearerToken: null,
+        signal: params.signal,
+        onProgress: params.onProgress,
+      });
+    } catch (directErr) {
+      if (
+        (directErr instanceof DOMException &&
+          directErr.name === 'AbortError') ||
+        params.signal.aborted
+      ) {
+        throw directErr;
+      }
+      primaryError = primaryError ?? directErr;
+    }
+  }
+
+  throw primaryError instanceof Error
+    ? primaryError
+    : new Error('Unable to download full edition file from storage.');
+}
+
 /* ==========================================================================
-   4. Book Offline Operations (PDF & Markdown)
+   4. Book Offline Operations (PDF & Markdown — Single & Combined Full Bundle)
    ========================================================================== */
 
 export async function saveBookFormatOffline(params: {
@@ -914,6 +1022,7 @@ export async function saveBookFormatOffline(params: {
   signal: AbortSignal;
   onProgress?: (pct: number) => void;
   prebuiltBuffer?: ArrayBuffer;
+  prebuiltGrant?: SignedUnlockGrant;
 }): Promise<OfflineAssetRecord> {
   const safeUid = sanitizeSegment(params.uid, 64);
   const pk = makeAssetPk(safeUid, params.itemId, params.format, '');
@@ -923,14 +1032,16 @@ export async function saveBookFormatOffline(params: {
   let authoritativeRemoteMs = params.remoteUpdatedAtMs || Date.now();
 
   if (!buffer) {
-    const grant = await requestSignedAssetUnlock({
-      uid: params.uid,
-      collectionName: 'books',
-      urlSlug: params.urlSlug,
-      getIdToken: params.getIdToken,
-      forceRefresh: true,
-      signal: params.signal,
-    });
+    const grant =
+      params.prebuiltGrant ??
+      (await requestSignedAssetUnlock({
+        uid: params.uid,
+        collectionName: 'books',
+        urlSlug: params.urlSlug,
+        getIdToken: params.getIdToken,
+        forceRefresh: true,
+        signal: params.signal,
+      }));
 
     if (grant.remoteUpdatedAtIso) {
       const parsedMs = new Date(grant.remoteUpdatedAtIso).getTime();
@@ -943,16 +1054,26 @@ export async function saveBookFormatOffline(params: {
       params.format === 'pdf'
         ? grant.assets.pdfUrl
         : grant.assets.markdownUrl;
+    const directUrl =
+      params.format === 'pdf'
+        ? grant.directUrls?.pdfUrl
+        : grant.directUrls?.markdownUrl;
+    const storagePath =
+      params.format === 'pdf'
+        ? grant.storagePaths?.fullPdfStoragePath
+        : grant.storagePaths?.fullMarkdownStoragePath;
 
-    if (!streamUrl) {
+    if (!streamUrl && !storagePath && !directUrl) {
       throw new Error(
-        `No ${params.format.toUpperCase()} edition is configured for this book.`
+        `No full ${params.format.toUpperCase()} file is configured for this book.`
       );
     }
 
     const token = await params.getIdToken();
-    buffer = await streamDownloadBytesWithProgress({
-      url: streamUrl,
+    buffer = await downloadGrantedAssetBytes({
+      streamUrl,
+      directUrl,
+      storagePath,
       bearerToken: token,
       signal: params.signal,
       onProgress: params.onProgress,
@@ -995,6 +1116,95 @@ export async function saveBookFormatOffline(params: {
   return record;
 }
 
+/**
+ * Downloads and saves ALL available full formats (fullPdfStoragePath & fullMarkdownStoragePath)
+ * for a purchased book in a single atomic operation so the reader's PDF/Markdown toggle works
+ * seamlessly offline.
+ */
+export async function saveBookAllFormatsOffline(params: {
+  uid: string;
+  itemId: string;
+  urlSlug: string;
+  remoteUpdatedAtMs?: number;
+  getIdToken: () => Promise<string | null>;
+  signal: AbortSignal;
+  onProgress?: (pct: number) => void;
+}): Promise<OfflineAssetRecord[]> {
+  const grant = await requestSignedAssetUnlock({
+    uid: params.uid,
+    collectionName: 'books',
+    urlSlug: params.urlSlug,
+    getIdToken: params.getIdToken,
+    forceRefresh: true,
+    signal: params.signal,
+  });
+
+  const formatsToSave: Array<'pdf' | 'markdown'> = [];
+  if (
+    grant.hasFullPdf ||
+    Boolean(grant.assets.pdfUrl) ||
+    Boolean(grant.storagePaths?.fullPdfStoragePath)
+  ) {
+    formatsToSave.push('pdf');
+  }
+  if (
+    grant.hasFullMarkdown ||
+    Boolean(grant.assets.markdownUrl) ||
+    Boolean(grant.storagePaths?.fullMarkdownStoragePath)
+  ) {
+    formatsToSave.push('markdown');
+  }
+
+  if (formatsToSave.length === 0) {
+    throw new Error(
+      'Full edition files (fullPdfStoragePath / fullMarkdownStoragePath) are not configured for this book yet.'
+    );
+  }
+
+  const savedRecords: OfflineAssetRecord[] = [];
+  const totalFormats = formatsToSave.length;
+
+  try {
+    for (let idx = 0; idx < totalFormats; idx++) {
+      const fmt = formatsToSave[idx];
+      const basePct = Math.round((idx / totalFormats) * 100);
+      const spanPct = Math.round(100 / totalFormats);
+
+      const rec = await saveBookFormatOffline({
+        uid: params.uid,
+        itemId: params.itemId,
+        urlSlug: params.urlSlug,
+        format: fmt,
+        remoteUpdatedAtMs: params.remoteUpdatedAtMs,
+        getIdToken: params.getIdToken,
+        signal: params.signal,
+        prebuiltGrant: grant,
+        onProgress: (fmtPct) => {
+          const combined = Math.min(
+            99,
+            Math.max(2, basePct + Math.round((fmtPct / 100) * spanPct))
+          );
+          params.onProgress?.(combined);
+        },
+      });
+      savedRecords.push(rec);
+    }
+
+    params.onProgress?.(100);
+    notifyOfflineVaultUpdated();
+    return savedRecords;
+  } catch (err) {
+    if (params.signal.aborted) {
+      for (const rec of savedRecords) {
+        if (rec.format === 'pdf' || rec.format === 'markdown') {
+          await deleteBookFormatOffline(params.uid, params.itemId, rec.format);
+        }
+      }
+    }
+    throw err;
+  }
+}
+
 export async function readBookFormatOffline(
   uid: string,
   itemId: string,
@@ -1032,13 +1242,50 @@ export async function deleteBookFormatOffline(
   notifyOfflineVaultUpdated();
 }
 
+export async function deleteBookAllFormatsOffline(
+  uid: string,
+  itemId: string
+): Promise<void> {
+  if (!uid || !itemId) return;
+  const safeUid = sanitizeSegment(uid, 64);
+  for (const fmt of ['pdf', 'markdown'] as const) {
+    const pk = makeAssetPk(safeUid, itemId, fmt, '');
+    const fileName = buildLocalFileName(itemId, fmt, '');
+    await deleteBinaryFile({ uid: safeUid, fileName, blobStoreKey: pk });
+    await deleteOfflineAssetMetaByPk(pk);
+  }
+  notifyOfflineVaultUpdated();
+}
+
 /* ==========================================================================
    5. Per-Set Exam JSON Sharding in Web Worker (`exam_set:{packId}:{set.id}`)
    ========================================================================== */
 
+function extractExamSetsFallback(parsed: unknown): ExamSet[] {
+  if (Array.isArray(parsed)) {
+    return parsed.filter(
+      (item): item is ExamSet => Boolean(item && typeof item === 'object')
+    );
+  }
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    const arr = obj.sets ?? obj.examSets ?? obj.mocktests ?? obj.data;
+    if (Array.isArray(arr)) {
+      return arr.filter(
+        (item): item is ExamSet => Boolean(item && typeof item === 'object')
+      );
+    }
+    if (Array.isArray(obj.sections)) {
+      return [parsed as ExamSet];
+    }
+  }
+  return [];
+}
+
 function shardExamPackInWorker(
   buffer: ArrayBuffer,
-  signal: AbortSignal
+  signal: AbortSignal,
+  expectedSetIds?: string[]
 ): Promise<ShardedExamSetSlice[]> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -1050,14 +1297,21 @@ function shardExamPackInWorker(
     if (typeof Worker === 'undefined') {
       try {
         const text = new TextDecoder('utf-8').decode(buffer);
-        const parsed = JSON.parse(text) as ExamSet[];
-        if (!Array.isArray(parsed) || parsed.length === 0) {
+        const parsed = extractExamSetsFallback(JSON.parse(text));
+        if (parsed.length === 0) {
           reject(new Error('Invalid ExamSet[] JSON payload.'));
           return;
         }
         const encoder = new TextEncoder();
         const slices: ShardedExamSetSlice[] = parsed.map((set, idx) => {
-          const setId = set.id?.trim() || `exam_set_${idx + 1}`;
+          const rawId = set.id?.trim() || '';
+          const setId =
+            rawId &&
+            (!expectedSetIds ||
+              expectedSetIds.length === 0 ||
+              expectedSetIds.includes(rawId))
+              ? rawId
+              : expectedSetIds?.[idx] || rawId || `exam_set_${idx + 1}`;
           const bytes = encoder.encode(JSON.stringify({ ...set, id: setId }));
           const sliceBuf = bytes.buffer.slice(
             bytes.byteOffset,
@@ -1115,6 +1369,7 @@ function shardExamPackInWorker(
         type: 'SHARD_EXAM_PACK',
         requestId,
         buffer: transferable,
+        expectedSetIds,
       } satisfies ExamShardWorkerRequest,
       [transferable]
     );
@@ -1126,6 +1381,7 @@ export async function saveExamPackShardedOffline(params: {
   packId: string;
   urlSlug: string;
   remoteUpdatedAtMs?: number;
+  expectedSetIds?: string[];
   getIdToken: () => Promise<string | null>;
   signal: AbortSignal;
   onProgress?: (pct: number) => void;
@@ -1160,8 +1416,10 @@ export async function saveExamPackShardedOffline(params: {
       `/api/v1/exams/${encodeURIComponent(params.urlSlug)}?mode=full`;
 
     const token = await params.getIdToken();
-    rawBuffer = await streamDownloadBytesWithProgress({
-      url: jsonUrl,
+    rawBuffer = await downloadGrantedAssetBytes({
+      streamUrl: jsonUrl,
+      directUrl: grant.directUrls?.jsonUrl,
+      storagePath: grant.storagePaths?.fullJsonStoragePath,
       bearerToken: token,
       signal: params.signal,
       onProgress: (dlPct) => {
@@ -1171,7 +1429,11 @@ export async function saveExamPackShardedOffline(params: {
   }
 
   // Parse once in Web Worker & shard into individual set_{id}.json files
-  const slices = await shardExamPackInWorker(rawBuffer, params.signal);
+  const slices = await shardExamPackInWorker(
+    rawBuffer,
+    params.signal,
+    params.expectedSetIds
+  );
   const writtenRecords: OfflineAssetRecord[] = [];
   const writtenCleanupTargets: Array<{
     pk: string;

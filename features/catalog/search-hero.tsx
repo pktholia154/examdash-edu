@@ -46,13 +46,6 @@ export function SearchHero({
                 ⌘K
               </kbd>
             </button>
-
-            <a
-              href="#books-catalog"
-              className="inline-flex items-center justify-center min-h-[52px] px-6 rounded-[var(--radius-card)] bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
-            >
-              Browse Catalog
-            </a>
           </div>
 
           {/* Dismissible PWA Install Banner */}

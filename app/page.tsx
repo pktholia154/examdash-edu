@@ -79,6 +79,7 @@ export default async function HomePage() {
             items={slimBooks}
             viewAllHref="/books"
             viewAllLabel="All Books"
+            showFilters={false}
           />
 
           <div className="ed-container">
@@ -93,6 +94,7 @@ export default async function HomePage() {
             items={slimExams}
             viewAllHref="/exams"
             viewAllLabel="All Exam Packs"
+            showFilters={false}
           />
         </>
       )}

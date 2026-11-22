@@ -36,6 +36,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: 'cover',
   interactiveWidget: 'resizes-content',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F8FAFC' },
+    { media: '(prefers-color-scheme: dark)', color: '#0B1120' },
+  ],
 };
 
 const SITE_TITLE = 'ExamDash — Books, Mock Exams & Study Library';
@@ -94,8 +98,8 @@ export const metadata: Metadata = {
   },
 };
 
-// < 600B synchronous pre-paint theme script syncing .dark, color-scheme, and <meta name="theme-color"> (#0B1120 / #F8FAFC)
-const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme'),d=s?s==='dark':matchMedia('(prefers-color-scheme:dark)').matches,r=document.documentElement;r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';var m=document.querySelector('meta[name="theme-color"]');if(m)m.content=d?'#0B1120':'#F8FAFC';}catch(e){}})();`;
+// < 400B synchronous pre-paint theme script syncing .dark on <html> without mutating inline styles or <meta name="theme-color"> pre-hydration
+const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme'),d=s?s==='dark':matchMedia('(prefers-color-scheme:dark)').matches;document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
 
 // Speculation Rules: pointerdown/click prefetch only (zero background WRS chunk fetches; instant on user tap/click)
 const SPECULATION_RULES_JSON = JSON.stringify({
@@ -128,19 +132,27 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${plusJakarta.variable} ${sourceSerif.variable} ${jetbrainsMono.variable}`}
     >
-      <head>
-        <meta name="theme-color" content="#F8FAFC" />
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      <body suppressHydrationWarning className="font-sans antialiased">
         <script
+          key="ed-theme-init"
+          id="ed-theme-init"
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
+        <script
+          key="ed-speculation-rules"
+          id="ed-speculation-rules"
           type="speculationrules"
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: SPECULATION_RULES_JSON }}
         />
         <script
+          key="ed-site-jsonld"
+          id="ed-site-jsonld"
           type="application/ld+json"
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: siteJsonLd }}
         />
-      </head>
-      <body suppressHydrationWarning className="font-sans antialiased">
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

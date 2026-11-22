@@ -11,11 +11,15 @@ import {
   mapBookToPublicDTO,
   mapExamToPublicDTO,
 } from '../dto/mapper';
+import {
+  buildFirebaseStorageHeaders,
+  syncSinglePurchaseToDefaultDb,
+} from '../firebase/default-db-mirror';
 
 /**
  * Strict server-side Firestore field projections for public queries (Pillar 3).
  * Protected asset paths (`fullPdfStoragePath`, `fullMarkdownStoragePath`, `fullJsonStoragePath`)
- * are omitted at the Firestore wire-projection layer on all public catalog/detail/search routes.
+ * are stripped to boolean existence flags on all public catalog/detail/search routes.
  */
 const PUBLIC_BOOK_FIELDS = [
   'id',
@@ -436,14 +440,122 @@ export async function searchCatalog(rawQuery: string): Promise<{
   };
 }
 
-function buildStorageMediaUrl(storagePath: string): string {
-  if (!storagePath) return '';
-  if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) {
-    return storagePath;
+function extractBucketFromSampleUrl(sampleUrl?: string): string {
+  if (!sampleUrl) return '';
+  try {
+    const m = sampleUrl.match(/\/v0\/b\/([^/]+)\/o\//);
+    return m && m[1] ? decodeURIComponent(m[1]) : '';
+  } catch {
+    return '';
   }
-  const bucket = firebaseConfig.storageBucket || 'examdash-ed.firebasestorage.app';
-  const encodedPath = encodeURIComponent(storagePath.replace(/^\/+/, ''));
-  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media`;
+}
+
+export function buildStorageMediaUrl(
+  storagePath: string,
+  bucketHint?: string
+): string {
+  const trimmed = (storagePath || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('gs://')) {
+    const withoutScheme = trimmed.slice('gs://'.length);
+    const slashIdx = withoutScheme.indexOf('/');
+    if (slashIdx > 0) {
+      const gsBucket = withoutScheme.slice(0, slashIdx);
+      const gsObject = withoutScheme.slice(slashIdx + 1).replace(/^\/+/, '');
+      if (gsBucket && gsObject) {
+        return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(
+          gsBucket
+        )}/o/${encodeURIComponent(gsObject)}?alt=media`;
+      }
+    }
+  }
+  const bucket =
+    bucketHint ||
+    firebaseConfig.storageBucket ||
+    'examdash-ed.firebasestorage.app';
+  const encodedPath = encodeURIComponent(trimmed.replace(/^\/+/, ''));
+  return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(
+    bucket
+  )}/o/${encodedPath}?alt=media`;
+}
+
+/**
+ * Resolves a Firebase Storage object's tokenized download URL (`?alt=media&token=...`)
+ * using the caller's verified Firebase ID token when `downloadTokens` metadata is available,
+ * matching Firebase Storage SDK `getDownloadURL()` behavior.
+ */
+export function resolveFirebaseTokenizedMediaUrl(
+  mediaUrl: string,
+  firebaseIdToken?: string | null
+): Promise<string> {
+  if (!mediaUrl) return Promise.resolve('');
+  let parsed: URL;
+  try {
+    parsed = new URL(mediaUrl);
+  } catch {
+    return Promise.resolve(mediaUrl);
+  }
+  if (
+    parsed.hostname !== 'firebasestorage.googleapis.com' ||
+    parsed.searchParams.has('token')
+  ) {
+    return Promise.resolve(mediaUrl);
+  }
+
+  const headers = buildFirebaseStorageHeaders(firebaseIdToken, {
+    Accept: 'application/json',
+  });
+
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: 443,
+        path: parsed.pathname, // metadata endpoint (no ?alt=media)
+        method: 'GET',
+        headers,
+        timeout: 6000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            resolve(mediaUrl);
+            return;
+          }
+          try {
+            const meta = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+              downloadTokens?: string;
+            };
+            const firstToken =
+              typeof meta.downloadTokens === 'string'
+                ? meta.downloadTokens.split(',')[0]?.trim()
+                : '';
+            if (firstToken) {
+              const withToken = new URL(mediaUrl);
+              withToken.searchParams.set('alt', 'media');
+              withToken.searchParams.set('token', firstToken);
+              resolve(withToken.toString());
+              return;
+            }
+          } catch {
+            // Fall back to ?alt=media
+          }
+          resolve(mediaUrl);
+        });
+      }
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(mediaUrl);
+    });
+    req.on('error', () => resolve(mediaUrl));
+    req.end();
+  });
 }
 
 function getSigningSecret(): string {
@@ -499,29 +611,20 @@ export function verifyAssetGrantSignature(
   }
 }
 
-/**
- * Verifies user purchase record in the provisioned Firestore database using the caller's
- * own Firebase Auth Bearer token (zero Admin SDK IAM required; enforced by firestore.rules).
- */
-export async function verifyCallerPurchaseRecord(
-  userId: string,
-  collectionName: CollectionName,
-  rawItemId: string,
-  bearerIdToken: string
-): Promise<boolean> {
-  if (!userId || !rawItemId || !bearerIdToken) return false;
-  const projectId = firebaseConfig.projectId || 'examdash-ed';
-  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-  const safeItemId = rawItemId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
-  const purchaseId = `${collectionName}_${safeItemId}`.slice(0, 120);
-
+function getPurchaseDocInDb(params: {
+  projectId: string;
+  databaseId: string;
+  userId: string;
+  purchaseDocId: string;
+  bearerIdToken: string;
+}): Promise<Record<string, unknown> | null> {
   const docPath = `/v1/projects/${encodeURIComponent(
-    projectId
+    params.projectId
   )}/databases/${encodeURIComponent(
-    databaseId
+    params.databaseId
   )}/documents/users/${encodeURIComponent(
-    userId
-  )}/purchases/${encodeURIComponent(purchaseId)}`;
+    params.userId
+  )}/purchases/${encodeURIComponent(params.purchaseDocId)}`;
 
   return new Promise((resolve) => {
     const req = https.request(
@@ -531,7 +634,7 @@ export async function verifyCallerPurchaseRecord(
         path: docPath,
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${bearerIdToken}`,
+          Authorization: `Bearer ${params.bearerIdToken}`,
         },
         timeout: 6000,
       },
@@ -540,7 +643,7 @@ export async function verifyCallerPurchaseRecord(
         res.on('data', (c: Buffer) => chunks.push(c));
         res.on('end', () => {
           if (res.statusCode !== 200) {
-            resolve(false);
+            resolve(null);
             return;
           }
           try {
@@ -548,22 +651,132 @@ export async function verifyCallerPurchaseRecord(
               Buffer.concat(chunks).toString('utf8')
             ) as { fields?: FirestoreRestFieldMap };
             const data = parseFirestoreRestFields(parsed.fields);
-            resolve(
-              data.userId === userId && data.status === 'completed'
-            );
+            const ownerUid = String(data.userId || data.uid || '');
+            const status = String(data.status || 'completed');
+            if (ownerUid === params.userId && status === 'completed') {
+              resolve(data);
+              return;
+            }
+            resolve(null);
           } catch {
-            resolve(false);
+            resolve(null);
           }
         });
       }
     );
     req.on('timeout', () => {
       req.destroy();
-      resolve(false);
+      resolve(null);
     });
-    req.on('error', () => resolve(false));
+    req.on('error', () => resolve(null));
     req.end();
   });
+}
+
+/**
+ * Verifies user purchase record in the provisioned Firestore database AND `(default)` database
+ * using the caller's own Firebase Auth Bearer token (zero Admin SDK IAM required; enforced by firestore.rules).
+ * Synchronously backfills missing `(default)` purchase docs using the exact 13-key `(default)` schema
+ * so Firebase Storage rules grant immediate read access to `fullPdfStoragePath`, `fullMarkdownStoragePath`,
+ * and `fullJsonStoragePath`.
+ */
+export async function verifyCallerPurchaseRecord(
+  userId: string,
+  collectionName: CollectionName,
+  rawItemId: string,
+  bearerIdToken: string,
+  catalogFallback?: {
+    title?: string;
+    urlSlug?: string;
+    currency?: string;
+    buyPrice?: number;
+  }
+): Promise<boolean> {
+  if (!userId || !rawItemId || !bearerIdToken) return false;
+  const projectId = firebaseConfig.projectId || 'examdash-ed';
+  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+  const safeItemId = rawItemId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  const purchaseId = `${collectionName}_${safeItemId}`.slice(0, 120);
+
+  const [primaryDoc, defaultDoc, defaultExamAliasDoc] = await Promise.all([
+    getPurchaseDocInDb({
+      projectId,
+      databaseId,
+      userId,
+      purchaseDocId: purchaseId,
+      bearerIdToken,
+    }),
+    databaseId !== '(default)'
+      ? getPurchaseDocInDb({
+          projectId,
+          databaseId: '(default)',
+          userId,
+          purchaseDocId: purchaseId,
+          bearerIdToken,
+        })
+      : Promise.resolve(null),
+    databaseId !== '(default)' && collectionName === 'ExamPackDocument'
+      ? getPurchaseDocInDb({
+          projectId,
+          databaseId: '(default)',
+          userId,
+          purchaseDocId: `exams_${safeItemId}`.slice(0, 120),
+          bearerIdToken,
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (
+    primaryDoc &&
+    databaseId !== '(default)' &&
+    (!defaultDoc ||
+      (collectionName === 'ExamPackDocument' && !defaultExamAliasDoc))
+  ) {
+    const paidPrice =
+      typeof primaryDoc.paidPrice === 'number'
+        ? primaryDoc.paidPrice
+        : typeof primaryDoc.amountPaid === 'number'
+        ? primaryDoc.amountPaid
+        : Number(
+            primaryDoc.paidPrice ??
+              primaryDoc.amountPaid ??
+              catalogFallback?.buyPrice ??
+              0
+          ) || 0;
+
+    await syncSinglePurchaseToDefaultDb({
+      uid: userId,
+      itemId: safeItemId,
+      collectionName,
+      title: String(
+        primaryDoc.title || catalogFallback?.title || 'ExamDash Resource'
+      ),
+      urlSlug: String(
+        primaryDoc.urlSlug || catalogFallback?.urlSlug || safeItemId
+      ),
+      currency: String(
+        primaryDoc.currency || catalogFallback?.currency || 'INR'
+      ),
+      paidPrice,
+      razorpayOrderId:
+        typeof primaryDoc.razorpayOrderId === 'string'
+          ? primaryDoc.razorpayOrderId
+          : undefined,
+      razorpayPaymentId:
+        typeof primaryDoc.razorpayPaymentId === 'string'
+          ? primaryDoc.razorpayPaymentId
+          : undefined,
+      createdAtIso:
+        typeof primaryDoc.createdAt === 'string'
+          ? primaryDoc.createdAt
+          : typeof primaryDoc.purchasedAt === 'string'
+          ? primaryDoc.purchasedAt
+          : undefined,
+      bearerIdToken,
+    });
+  }
+
+  return Boolean(primaryDoc || defaultDoc || defaultExamAliasDoc);
 }
 
 export interface SignedAssetGrant {
@@ -581,6 +794,16 @@ export interface SignedAssetGrant {
     markdownUrl?: string;
     jsonUrl?: string;
   };
+  directUrls?: {
+    pdfUrl?: string;
+    markdownUrl?: string;
+    jsonUrl?: string;
+  };
+  storagePaths?: {
+    fullPdfStoragePath?: string;
+    fullMarkdownStoragePath?: string;
+    fullJsonStoragePath?: string;
+  };
 }
 
 export type UnlockGrantResult =
@@ -590,8 +813,9 @@ export type UnlockGrantResult =
 
 /**
  * Server-only protected asset unlock helper.
- * Queries full storage paths strictly inside the authenticated `/api/v1/library/unlock` boundary
- * ONLY after caller identity and purchase entitlement verification.
+ * Queries full storage paths (`fullPdfStoragePath`, `fullMarkdownStoragePath`, `fullJsonStoragePath`)
+ * strictly inside the authenticated `/api/v1/library/unlock` boundary ONLY after caller identity
+ * and purchase entitlement verification. Never falls back to sample URLs in `full` mode.
  */
 export async function issueShortLivedAssetGrant(
   collectionName: CollectionName,
@@ -624,17 +848,47 @@ export async function issueShortLivedAssetGrant(
   const buyPrice =
     typeof raw.buyPrice === 'number' ? raw.buyPrice : Number(raw.buyPrice) || 0;
 
-  // Verify caller purchase entitlement for paid items when Bearer token is supplied
-  if (buyPrice > 0 && bearerIdToken) {
-    const entitled = await verifyCallerPurchaseRecord(
+  const catalogFallback = {
+    title: typeof raw.title === 'string' ? raw.title : undefined,
+    urlSlug: cleanSlug,
+    currency: typeof raw.currency === 'string' ? raw.currency : 'INR',
+    buyPrice,
+  };
+
+  // Strictly verify caller purchase entitlement for paid items (and backfill `(default)` DB for Storage rules)
+  if (buyPrice > 0) {
+    if (!bearerIdToken) {
+      return { status: 'forbidden' };
+    }
+    const entitledByItemId = await verifyCallerPurchaseRecord(
       userId,
       collectionName,
       itemId,
-      bearerIdToken
+      bearerIdToken,
+      catalogFallback
     );
-    if (!entitled) {
+    const entitledByDocId =
+      !entitledByItemId && docSnap.docId !== itemId
+        ? await verifyCallerPurchaseRecord(
+            userId,
+            collectionName,
+            docSnap.docId,
+            bearerIdToken,
+            catalogFallback
+          )
+        : false;
+
+    if (!entitledByItemId && !entitledByDocId) {
       return { status: 'forbidden' };
     }
+  } else if (bearerIdToken) {
+    await verifyCallerPurchaseRecord(
+      userId,
+      collectionName,
+      itemId,
+      bearerIdToken,
+      catalogFallback
+    );
   }
 
   const expiresMs = Date.now() + 15 * 60 * 1000; // <= 15 minutes
@@ -663,6 +917,25 @@ export async function issueShortLivedAssetGrant(
         ? raw.sampleMarkdownUrl.trim()
         : '';
 
+    const bucketHint =
+      extractBucketFromSampleUrl(samplePdf) ||
+      extractBucketFromSampleUrl(sampleMd);
+
+    const [directPdfUrl, directMdUrl] = await Promise.all([
+      fullPdf
+        ? resolveFirebaseTokenizedMediaUrl(
+            buildStorageMediaUrl(fullPdf, bucketHint),
+            bearerIdToken
+          )
+        : Promise.resolve(''),
+      fullMd
+        ? resolveFirebaseTokenizedMediaUrl(
+            buildStorageMediaUrl(fullMd, bucketHint),
+            bearerIdToken
+          )
+        : Promise.resolve(''),
+    ]);
+
     const baseQuery = `collection=books&slug=${encodeURIComponent(
       cleanSlug
     )}&mode=full&uid=${encodeURIComponent(
@@ -681,16 +954,24 @@ export async function issueShortLivedAssetGrant(
         hasFullPdf: Boolean(fullPdf),
         hasFullMarkdown: Boolean(fullMd),
         assets: {
-          ...(fullPdf || samplePdf
+          ...(fullPdf
             ? {
                 pdfUrl: `/api/v1/library/stream?${baseQuery}&format=pdf`,
               }
             : {}),
-          ...(fullMd || sampleMd
+          ...(fullMd
             ? {
                 markdownUrl: `/api/v1/library/stream?${baseQuery}&format=markdown`,
               }
             : {}),
+        },
+        directUrls: {
+          ...(directPdfUrl ? { pdfUrl: directPdfUrl } : {}),
+          ...(directMdUrl ? { markdownUrl: directMdUrl } : {}),
+        },
+        storagePaths: {
+          ...(fullPdf ? { fullPdfStoragePath: fullPdf } : {}),
+          ...(fullMd ? { fullMarkdownStoragePath: fullMd } : {}),
         },
       },
     };
@@ -705,6 +986,14 @@ export async function issueShortLivedAssetGrant(
     typeof raw.sampleJsonStoragePath === 'string'
       ? raw.sampleJsonStoragePath.trim()
       : '';
+  const examBucketHint = extractBucketFromSampleUrl(sampleJson);
+
+  const directJsonUrl = fullJson
+    ? await resolveFirebaseTokenizedMediaUrl(
+        buildStorageMediaUrl(fullJson, examBucketHint),
+        bearerIdToken
+      )
+    : '';
 
   const examStreamUrl = `/api/v1/exams/${encodeURIComponent(
     cleanSlug
@@ -723,7 +1012,13 @@ export async function issueShortLivedAssetGrant(
       remoteUpdatedAtIso: mappedExam.updatedAtIso,
       hasFullJson: Boolean(fullJson),
       assets: {
-        ...(fullJson || sampleJson ? { jsonUrl: examStreamUrl } : {}),
+        ...(fullJson ? { jsonUrl: examStreamUrl } : {}),
+      },
+      directUrls: {
+        ...(directJsonUrl ? { jsonUrl: directJsonUrl } : {}),
+      },
+      storagePaths: {
+        ...(fullJson ? { fullJsonStoragePath: fullJson } : {}),
       },
     },
   };
@@ -737,13 +1032,12 @@ export interface ExamUpstreamResolution {
   buyPrice: number;
   mocktestTitles: PublicExamDTO['MocktestTitles'];
   upstreamUrl: string;
-  fallbackSampleUrl?: string;
 }
 
 /**
  * Resolves ExamPack JSON upstream URLs on the server for `/api/v1/exams/[packId]`
  * so `fullJsonStoragePath` never leaks into public HTML/RSC payloads and full packs
- * strictly enforce user authentication & purchase ownership.
+ * strictly enforce user authentication & purchase ownership without falling back to sample JSON.
  */
 export async function resolveExamPackUpstream(params: {
   packIdentifier: string;
@@ -808,10 +1102,14 @@ export async function resolveExamPackUpstream(params: {
       ? raw.fullJsonStoragePath.trim()
       : '';
 
-  const sampleUrl = samplePath ? buildStorageMediaUrl(samplePath) : '';
-  const fullUrl = fullPath ? buildStorageMediaUrl(fullPath) : '';
+  const bucketHint = extractBucketFromSampleUrl(samplePath);
+  const sampleUrl = samplePath ? buildStorageMediaUrl(samplePath, bucketHint) : '';
+  const fullMediaUrl = fullPath ? buildStorageMediaUrl(fullPath, bucketHint) : '';
 
   if (params.mode === 'sample') {
+    const resolvedSampleUrl = sampleUrl
+      ? await resolveFirebaseTokenizedMediaUrl(sampleUrl, params.bearerIdToken)
+      : '';
     return {
       status: 'ok',
       target: {
@@ -821,7 +1119,7 @@ export async function resolveExamPackUpstream(params: {
         title: mappedDto.title,
         buyPrice: mappedDto.buyPrice,
         mocktestTitles: mappedDto.MocktestTitles,
-        upstreamUrl: sampleUrl,
+        upstreamUrl: resolvedSampleUrl,
       },
     };
   }
@@ -849,13 +1147,42 @@ export async function resolveExamPackUpstream(params: {
         params.verifiedTokenUid,
         'ExamPackDocument',
         mappedDto.id,
-        params.bearerIdToken
+        params.bearerIdToken,
+        {
+          title: mappedDto.title,
+          urlSlug: mappedDto.urlSlug,
+          currency: mappedDto.currency,
+          buyPrice: mappedDto.buyPrice,
+        }
       );
       if (!entitled) {
         return { status: 'forbidden' };
       }
     }
+  } else if (params.verifiedTokenUid && params.bearerIdToken) {
+    // Ensure `(default)` DB purchase mirror is synced so Firebase Storage rules authorize fullJsonStoragePath
+    await verifyCallerPurchaseRecord(
+      params.verifiedTokenUid,
+      'ExamPackDocument',
+      mappedDto.id,
+      params.bearerIdToken,
+      {
+        title: mappedDto.title,
+        urlSlug: mappedDto.urlSlug,
+        currency: mappedDto.currency,
+        buyPrice: mappedDto.buyPrice,
+      }
+    );
   }
+
+  if (!fullMediaUrl) {
+    return { status: 'not_found' };
+  }
+
+  const resolvedFullUrl = await resolveFirebaseTokenizedMediaUrl(
+    fullMediaUrl,
+    params.bearerIdToken
+  );
 
   return {
     status: 'ok',
@@ -866,8 +1193,7 @@ export async function resolveExamPackUpstream(params: {
       title: mappedDto.title,
       buyPrice: mappedDto.buyPrice,
       mocktestTitles: mappedDto.MocktestTitles,
-      upstreamUrl: fullUrl || sampleUrl,
-      fallbackSampleUrl: sampleUrl || undefined,
+      upstreamUrl: resolvedFullUrl,
     },
   };
 }
@@ -876,13 +1202,13 @@ export interface BookUpstreamResolution {
   docId: string;
   itemId: string;
   upstreamUrl: string;
-  fallbackSampleUrl?: string;
   contentType: string;
 }
 
 /**
  * Resolves the upstream Firebase Storage URL on the server for `/api/v1/library/stream`
  * so raw private storage paths never enter public HTML and browsers/Workers avoid CORS errors.
+ * In `full` mode, strictly resolves `fullPdfStoragePath` / `fullMarkdownStoragePath` without sample fallback.
  */
 export async function resolveBookStreamUpstream(params: {
   urlSlug: string;
@@ -891,6 +1217,8 @@ export async function resolveBookStreamUpstream(params: {
   uid?: string;
   expMs?: number;
   sig?: string;
+  verifiedTokenUid?: string | null;
+  bearerIdToken?: string | null;
 }): Promise<
   | { status: 'ok'; target: BookUpstreamResolution }
   | { status: 'not_found' }
@@ -920,21 +1248,29 @@ export async function resolveBookStreamUpstream(params: {
 
   const itemId =
     typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : docSnap.docId;
+  const buyPrice =
+    typeof raw.buyPrice === 'number' ? raw.buyPrice : Number(raw.buyPrice) || 0;
   const contentType =
     params.format === 'pdf'
       ? 'application/pdf'
       : 'text/markdown; charset=utf-8';
 
-  const sampleUrl =
-    params.format === 'pdf'
-      ? typeof raw.samplePdfUrl === 'string'
-        ? raw.samplePdfUrl.trim()
-        : ''
-      : typeof raw.sampleMarkdownUrl === 'string'
+  const samplePdf =
+    typeof raw.samplePdfUrl === 'string' ? raw.samplePdfUrl.trim() : '';
+  const sampleMd =
+    typeof raw.sampleMarkdownUrl === 'string'
       ? raw.sampleMarkdownUrl.trim()
       : '';
+  const bucketHint =
+    extractBucketFromSampleUrl(samplePdf) ||
+    extractBucketFromSampleUrl(sampleMd);
+
+  const samplePath = params.format === 'pdf' ? samplePdf : sampleMd;
 
   if (params.mode === 'sample') {
+    const sampleUrl = samplePath
+      ? buildStorageMediaUrl(samplePath, bucketHint)
+      : '';
     if (!sampleUrl) return { status: 'not_found' };
     return {
       status: 'ok',
@@ -963,6 +1299,21 @@ export async function resolveBookStreamUpstream(params: {
     return { status: 'unauthorized' };
   }
 
+  if (params.verifiedTokenUid && params.bearerIdToken) {
+    await verifyCallerPurchaseRecord(
+      params.verifiedTokenUid,
+      'books',
+      itemId,
+      params.bearerIdToken,
+      {
+        title: typeof raw.title === 'string' ? raw.title : undefined,
+        urlSlug: cleanSlug,
+        currency: typeof raw.currency === 'string' ? raw.currency : 'INR',
+        buyPrice,
+      }
+    );
+  }
+
   const fullPath =
     params.format === 'pdf'
       ? typeof raw.fullPdfStoragePath === 'string'
@@ -972,16 +1323,22 @@ export async function resolveBookStreamUpstream(params: {
       ? raw.fullMarkdownStoragePath.trim()
       : '';
 
-  const upstreamUrl = fullPath ? buildStorageMediaUrl(fullPath) : sampleUrl;
-  if (!upstreamUrl) return { status: 'not_found' };
+  if (!fullPath) return { status: 'not_found' };
+
+  const baseMediaUrl = buildStorageMediaUrl(fullPath, bucketHint);
+  if (!baseMediaUrl) return { status: 'not_found' };
+
+  const resolvedFullUrl = await resolveFirebaseTokenizedMediaUrl(
+    baseMediaUrl,
+    params.bearerIdToken
+  );
 
   return {
     status: 'ok',
     target: {
       docId: docSnap.docId,
       itemId,
-      upstreamUrl,
-      fallbackSampleUrl: sampleUrl || undefined,
+      upstreamUrl: resolvedFullUrl,
       contentType,
     },
   };

@@ -4,7 +4,6 @@ import React, { useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
   BookOpen,
-  FileText,
   Play,
   Sparkles,
   Zap,
@@ -106,9 +105,12 @@ export function DetailBuyCard({
     );
   };
 
-  const hasBookPdfSample = collectionName === 'books' && Boolean(samplePdfUrl);
-  const hasBookMarkdownSample =
-    collectionName === 'books' && Boolean(sampleMarkdownUrl);
+  const hasBookSample =
+    collectionName === 'books' &&
+    Boolean(samplePdfUrl || sampleMarkdownUrl);
+  const defaultBookSampleFormat: 'pdf' | 'markdown' = samplePdfUrl
+    ? 'pdf'
+    : 'markdown';
   const hasExamSample =
     collectionName === 'ExamPackDocument' && Boolean(sampleJsonUrl);
 
@@ -165,25 +167,14 @@ export function DetailBuyCard({
             </button>
           )}
 
-          {hasBookPdfSample && (
+          {hasBookSample && (
             <button
               type="button"
-              onClick={() => openSampleReader('pdf')}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
-            >
-              <FileText className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>PDF Sample</span>
-            </button>
-          )}
-
-          {hasBookMarkdownSample && (
-            <button
-              type="button"
-              onClick={() => openSampleReader('markdown')}
+              onClick={() => openSampleReader(defaultBookSampleFormat)}
               className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-transparent text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
             >
               <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Markdown Sample</span>
+              <span>Sample</span>
             </button>
           )}
 
@@ -216,25 +207,16 @@ export function DetailBuyCard({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {hasBookPdfSample ? (
+          {hasBookSample && (
             <button
               type="button"
-              onClick={() => openSampleReader('pdf')}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
-            >
-              <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>PDF Sample</span>
-            </button>
-          ) : hasBookMarkdownSample ? (
-            <button
-              type="button"
-              onClick={() => openSampleReader('markdown')}
+              onClick={() => openSampleReader(defaultBookSampleFormat)}
               className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
             >
               <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Markdown Sample</span>
+              <span>Sample</span>
             </button>
-          ) : null}
+          )}
 
           {hasExamSample && sampleJsonUrl && (
             <a

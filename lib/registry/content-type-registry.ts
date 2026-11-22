@@ -124,7 +124,10 @@ export function formatPrice(amount: number, currency: string = 'INR'): string {
       style: 'currency',
       currency: safeCurrency,
       maximumFractionDigits: Number.isInteger(safeAmount) ? 0 : 2,
-    }).format(safeAmount);
+    })
+      .format(safeAmount)
+      .replace(/([₹$€£¥])[\s\u00A0\u202F]+/g, '$1')
+      .replace(/[\u00A0\u202F]/g, ' ');
   } catch {
     return `${safeCurrency} ${safeAmount}`;
   }

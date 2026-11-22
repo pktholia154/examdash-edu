@@ -1,5 +1,6 @@
 import https from 'node:https';
 import { NextRequest, NextResponse } from 'next/server';
+import { buildFirebaseStorageHeaders } from '../../../../../server/firebase/default-db-mirror';
 import { verifyBearerIdToken } from '../../../../../server/firebase/verify-auth';
 import { resolveExamPackUpstream } from '../../../../../server/repositories/catalog-repository';
 import { buildFallbackExamSetsForPack } from '../../../../../lib/exam/benchmark-packs';
@@ -26,13 +27,16 @@ function fetchStorageJson(
   }
 
   const maxBytes = 16 * 1024 * 1024; // 16 MB JSON cap
-  const headers: Record<string, string> = {
-    Accept: 'application/json, text/plain, */*',
-  };
-
-  if (firebaseIdToken && !parsed.searchParams.has('token')) {
-    headers.Authorization = `Firebase ${firebaseIdToken}`;
-  }
+  const headers = buildFirebaseStorageHeaders(
+    firebaseIdToken,
+    {
+      Accept: 'application/json, text/plain, */*',
+    },
+    {
+      omitAuthIfTokenParamPresent: true,
+      targetUrl,
+    }
+  );
 
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -75,6 +79,20 @@ function fetchStorageJson(
   });
 }
 
+function normalizeExamSetsPayload(parsed: unknown): ExamSet[] {
+  if (Array.isArray(parsed)) {
+    return parsed as ExamSet[];
+  }
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    if (Array.isArray(obj.sets)) return obj.sets as ExamSet[];
+    if (Array.isArray(obj.examSets)) return obj.examSets as ExamSet[];
+    if (Array.isArray(obj.mocktests)) return obj.mocktests as ExamSet[];
+    if (Array.isArray(obj.sections)) return [obj as unknown as ExamSet];
+  }
+  return [];
+}
+
 function redactExamSetsForLiveAttempt(sets: ExamSet[]): ExamSet[] {
   return sets.map((s) => ({
     ...s,
@@ -94,7 +112,7 @@ function redactExamSetsForLiveAttempt(sets: ExamSet[]): ExamSet[] {
  * Authenticated & Sample ExamSet[] Delivery Route (`/api/v1/exams/[packId]`)
  * - `mode=sample`: Delivers `sampleJsonStoragePath` (1st sample test) for instant "Try Free Sample" previews.
  * - `mode=full`: Strictly enforces Firebase Auth Bearer token + purchase ownership (or <= 15m HMAC grant)
- *   before delivering `fullJsonStoragePath` (`Cache-Control: private, no-store`).
+ *   before delivering `fullJsonStoragePath` (`Cache-Control: private, no-store`), never substituting sample sets.
  */
 export async function GET(
   req: NextRequest,
@@ -168,59 +186,84 @@ export async function GET(
       );
     }
 
-    let sets: ExamSet[] | null = null;
-    let streamSource = mode;
+    let sets: ExamSet[] = [];
+    let streamSource: string = mode;
 
     if (resolution.target.upstreamUrl) {
-      const upstream = await fetchStorageJson(
+      let upstream = await fetchStorageJson(
         resolution.target.upstreamUrl,
         rawBearerToken
       );
 
-      if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
-        const parsed = JSON.parse(upstream.text) as unknown;
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          sets = parsed as ExamSet[];
-        }
-      } else if (
+      if (
         mode === 'full' &&
-        resolution.target.fallbackSampleUrl &&
-        resolution.target.fallbackSampleUrl !== resolution.target.upstreamUrl
+        rawBearerToken &&
+        (upstream.statusCode === 401 || upstream.statusCode === 403)
       ) {
-        const fallbackUpstream = await fetchStorageJson(
-          resolution.target.fallbackSampleUrl,
+        await new Promise<void>((r) => setTimeout(r, 250));
+        upstream = await fetchStorageJson(
+          resolution.target.upstreamUrl,
           rawBearerToken
         );
-        if (
-          fallbackUpstream.statusCode >= 200 &&
-          fallbackUpstream.statusCode < 300
-        ) {
-          const parsed = JSON.parse(fallbackUpstream.text) as unknown;
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            sets = parsed as ExamSet[];
-            streamSource = 'sample-storage-fallback';
+      }
+
+      if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+        const parsed = JSON.parse(upstream.text) as unknown;
+        sets = normalizeExamSetsPayload(parsed);
+      } else if (mode === 'full') {
+        return NextResponse.json(
+          {
+            error: `Unable to load full exam JSON from Firebase Storage (HTTP ${upstream.statusCode}).`,
+            code: 'UPSTREAM_STORAGE_ERROR',
+            upstreamStatus: upstream.statusCode,
+          },
+          {
+            status:
+              upstream.statusCode === 404
+                ? 404
+                : upstream.statusCode === 401 || upstream.statusCode === 403
+                ? 403
+                : 502,
+            headers: { 'Cache-Control': 'private, no-store' },
           }
-        }
+        );
       }
     }
 
-    // Resilient schema-exact benchmark fallback when Firebase Storage rules block anonymous sample access
-    if (!sets || sets.length === 0) {
-      sets = buildFallbackExamSetsForPack(
-        resolution.target.mocktestTitles,
-        mode
-      );
-      streamSource = `${mode}-benchmark-fallback`;
+    // Only allow benchmark sample fallback in public `sample` mode when anonymous sample Storage rules block preview
+    if (sets.length === 0) {
+      if (mode === 'sample') {
+        sets = buildFallbackExamSetsForPack(
+          resolution.target.mocktestTitles,
+          'sample'
+        );
+        streamSource = 'sample-benchmark-fallback';
+      } else {
+        return NextResponse.json(
+          {
+            error: 'Full exam pack JSON contained no valid exam sets.',
+            code: 'EMPTY_EXAM_PACK',
+          },
+          { status: 404, headers: { 'Cache-Control': 'private, no-store' } }
+        );
+      }
     }
 
-    // In sample mode, expose strictly the 1st test as sample preview unless sample JSON specifically defines 1 set
-    let effectiveSets =
-      mode === 'sample' ? sets.slice(0, 1) : sets;
+    // In sample mode, expose strictly the 1st test as sample preview
+    let effectiveSets = mode === 'sample' ? sets.slice(0, 1) : sets;
 
     if (setFilter) {
       const matched = effectiveSets.filter((s) => s.id === setFilter);
       if (matched.length > 0) {
         effectiveSets = matched;
+      } else if (mode === 'full') {
+        // Match by 1-based set index if MocktestTitles IDs differ slightly from ExamSet.id inside fullJsonStoragePath
+        const titleIndex = resolution.target.mocktestTitles.findIndex(
+          (t) => t.id === setFilter
+        );
+        if (titleIndex >= 0 && titleIndex < effectiveSets.length) {
+          effectiveSets = [effectiveSets[titleIndex]];
+        }
       }
     }
 

@@ -6,6 +6,7 @@ export interface ExamShardWorkerRequest {
   type: 'SHARD_EXAM_PACK';
   requestId: string;
   buffer: ArrayBuffer;
+  expectedSetIds?: string[];
 }
 
 export interface ShardedExamSetSlice {
@@ -30,6 +31,27 @@ export type ExamShardWorkerResponse =
       message: string;
     };
 
+function extractExamSetsArray(parsed: unknown): ExamSet[] {
+  if (Array.isArray(parsed)) {
+    return parsed.filter(
+      (item): item is ExamSet => Boolean(item && typeof item === 'object')
+    );
+  }
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    const candidateArray = obj.sets ?? obj.examSets ?? obj.mocktests ?? obj.data;
+    if (Array.isArray(candidateArray)) {
+      return candidateArray.filter(
+        (item): item is ExamSet => Boolean(item && typeof item === 'object')
+      );
+    }
+    if (Array.isArray(obj.sections)) {
+      return [parsed as ExamSet];
+    }
+  }
+  return [];
+}
+
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 ctx.onmessage = (event: MessageEvent<ExamShardWorkerRequest>) => {
@@ -39,30 +61,39 @@ ctx.onmessage = (event: MessageEvent<ExamShardWorkerRequest>) => {
   try {
     const rawText = new TextDecoder('utf-8').decode(payload.buffer);
     const parsed = JSON.parse(rawText) as unknown;
+    const rawSets = extractExamSetsArray(parsed);
 
-    if (!Array.isArray(parsed) || parsed.length === 0) {
+    if (rawSets.length === 0) {
       ctx.postMessage({
         type: 'SHARD_ERROR',
         requestId: payload.requestId,
-        message: 'Downloaded exam pack payload did not contain any valid mock sets.',
+        message:
+          'Downloaded exam pack payload did not contain any valid mock sets.',
       } satisfies ExamShardWorkerResponse);
       return;
     }
 
+    const expectedIds = Array.isArray(payload.expectedSetIds)
+      ? payload.expectedSetIds
+      : [];
     const encoder = new TextEncoder();
     const slices: ShardedExamSetSlice[] = [];
     const transferables: Transferable[] = [];
 
-    parsed.forEach((rawSet, idx) => {
-      if (!rawSet || typeof rawSet !== 'object') return;
-      const examSet = rawSet as ExamSet;
-      const safeSetId =
+    rawSets.forEach((examSet, idx) => {
+      const rawId =
         typeof examSet.id === 'string' && examSet.id.trim()
           ? examSet.id.trim()
-          : `exam_set_${idx + 1}`;
+          : '';
+      // Align with catalog MocktestTitles ID at the same index if rawId isn't already in expectedIds
+      const alignedSetId =
+        rawId && (expectedIds.length === 0 || expectedIds.includes(rawId))
+          ? rawId
+          : expectedIds[idx] || rawId || `exam_set_${idx + 1}`;
+
       const normalizedSet: ExamSet = {
         ...examSet,
-        id: safeSetId,
+        id: alignedSetId,
       };
       const bytes = encoder.encode(JSON.stringify(normalizedSet));
       const sliceBuffer = bytes.buffer.slice(
@@ -71,7 +102,7 @@ ctx.onmessage = (event: MessageEvent<ExamShardWorkerRequest>) => {
       );
 
       slices.push({
-        setId: safeSetId,
+        setId: alignedSetId,
         title:
           typeof normalizedSet.title === 'string' && normalizedSet.title.trim()
             ? normalizedSet.title.trim()

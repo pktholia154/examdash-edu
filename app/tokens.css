@@ -311,14 +311,33 @@ select,
 
 .ed-md-prose {
   --md-scale: 1;
-  --md-line-height: 1.68;
-  max-width: 68ch;
-  margin-inline: auto;
+  --md-line-height: 1.65;
+  width: 100%;
+  max-width: 100%;
+  margin-inline: 0;
   color: var(--reader-ink);
-  font-size: calc(1.0625rem * var(--md-scale));
+  font-size: calc(1rem * var(--md-scale));
   line-height: var(--md-line-height);
   overflow-wrap: anywhere;
   word-break: normal;
+}
+
+.ed-md-prose .katex {
+  color: var(--reader-ink);
+  font-size: 1.04em;
+}
+
+.ed-md-math-block {
+  overflow-x: auto;
+  max-width: 100%;
+  margin-block: 0.75rem;
+  padding: 0.35rem 0.25rem;
+  text-align: center;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ed-md-math-inline {
+  display: inline;
 }
 
 .ed-md-tall-script {
@@ -345,41 +364,41 @@ select,
 }
 
 .ed-md-prose h1 {
-  font-size: calc(1.625rem * var(--md-scale));
+  font-size: calc(1.5rem * var(--md-scale));
   font-weight: 800;
-  letter-spacing: -0.022em;
+  letter-spacing: -0.02em;
   line-height: 1.25;
-  margin-block: 0.5rem 1.25rem;
-  padding-block-end: 0.75rem;
+  margin-block: 0.4rem 0.9rem;
+  padding-block-end: 0.5rem;
   border-bottom: 1px solid var(--reader-border);
 }
 
 .ed-md-prose h2 {
-  font-size: calc(1.3rem * var(--md-scale));
+  font-size: calc(1.22rem * var(--md-scale));
   font-weight: 700;
-  letter-spacing: -0.016em;
+  letter-spacing: -0.014em;
   line-height: 1.32;
-  margin-block: 2.25rem 0.85rem;
-  padding-block-end: 0.45rem;
+  margin-block: 1.5rem 0.65rem;
+  padding-block-end: 0.35rem;
   border-bottom: 1px solid var(--reader-border);
 }
 
 .ed-md-prose h3 {
-  font-size: calc(1.1rem * var(--md-scale));
+  font-size: calc(1.06rem * var(--md-scale));
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.4;
-  margin-block: 1.5rem 0.6rem;
+  margin-block: 1.15rem 0.45rem;
 }
 
 .ed-md-prose p {
-  margin-block: 0.85rem;
+  margin-block: 0.65rem;
 }
 
 .ed-md-prose ul,
 .ed-md-prose ol {
-  margin-block: 0.85rem;
-  padding-inline-start: 1.5rem;
+  margin-block: 0.65rem;
+  padding-inline-start: 1.25rem;
 }
 
 .ed-md-prose ul {
@@ -392,7 +411,7 @@ select,
 }
 
 .ed-md-prose li {
-  margin-block: 0.4rem;
+  margin-block: 0.3rem;
 }
 
 .ed-md-prose strong {
@@ -410,13 +429,13 @@ select,
 .ed-md-prose hr {
   border: 0;
   border-top: 1px solid var(--reader-border);
-  margin-block: 2rem;
+  margin-block: 1.5rem;
 }
 
 .ed-md-prose blockquote {
-  margin-block: 1.15rem;
-  padding: 0.9rem 1.1rem;
-  border-radius: 0.75rem;
+  margin-block: 0.85rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.5rem;
   border: 1px solid var(--reader-border);
   background-color: var(--reader-surface);
   color: var(--reader-muted);
@@ -431,11 +450,11 @@ select,
   border: 1px solid var(--reader-border);
 }
 
-/* Semantic GFM Callout Cards (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING]) */
+/* Semantic GFM Callout Blocks (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING]) */
 .ed-md-callout {
-  margin-block: 1.25rem;
-  padding: 1rem 1.125rem;
-  border-radius: 0.75rem;
+  margin-block: 0.85rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.5rem;
   border: 1px solid var(--reader-border-strong);
   background-color: var(--reader-surface);
 }
@@ -443,10 +462,10 @@ select,
 .ed-md-callout-title {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   font-size: calc(0.82rem * var(--md-scale));
   font-weight: 700;
-  margin-block-end: 0.4rem;
+  margin-block-end: 0.3rem;
   color: var(--reader-ink);
 }
 
@@ -470,111 +489,22 @@ select,
   border-color: rgba(217, 119, 6, 0.32);
 }
 
-/* Interactive Quiz / Solution Accordions (<details><summary>) >= 48px touch target */
-.ed-md-prose details {
-  margin-block: 0.85rem 1.35rem;
-  border-radius: 0.75rem;
-  border: 1px solid var(--reader-border);
-  background-color: var(--reader-surface);
-  overflow: hidden;
-}
-
-.ed-md-prose details summary {
-  min-height: 48px;
-  padding: 0.65rem 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  font-size: calc(0.875rem * var(--md-scale));
-  font-weight: 600;
-  color: var(--reader-ink);
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-  -webkit-user-select: none;
-  touch-action: manipulation;
-}
-
-.ed-md-prose details summary::-webkit-details-marker {
-  display: none;
-}
-
-.ed-md-prose details summary::after {
-  content: '+';
-  font-family: var(--font-mono), monospace;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--reader-muted);
-  flex-shrink: 0;
-}
-
-.ed-md-prose details[open] summary {
-  border-bottom: 1px solid var(--reader-border);
-  background-color: var(--reader-elevated);
-}
-
-.ed-md-prose details[open] summary::after {
-  content: '−';
-}
-
-.ed-md-solution-body {
-  padding: 0.85rem 1rem;
-  font-size: calc(0.95rem * var(--md-scale));
-  color: var(--reader-ink);
-}
-
-/* Mobile Overflow Guardrail (.md-scroll-x) with subtle scroll-shadow cues */
+/* Mobile Overflow Guardrail (.md-scroll-x) */
 .md-scroll-x {
   overflow-x: auto;
   max-width: 100%;
   touch-action: pan-x pan-y;
   -webkit-overflow-scrolling: touch;
-  margin-block: 1.15rem;
-  border-radius: 0.75rem;
-  border: 1px solid var(--reader-border);
-  background:
-    linear-gradient(to right, var(--reader-bg) 20%, rgba(0, 0, 0, 0)),
-    linear-gradient(to left, var(--reader-bg) 20%, rgba(0, 0, 0, 0)) 100% 0,
-    radial-gradient(farthest-side at 0 50%, rgba(15, 23, 42, 0.14), rgba(0, 0, 0, 0)),
-    radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, 0.14), rgba(0, 0, 0, 0)) 100% 0;
-  background-repeat: no-repeat;
-  background-color: var(--reader-code-bg);
-  background-size: 28px 100%, 28px 100%, 12px 100%, 12px 100%;
-  background-attachment: local, local, scroll, scroll;
-}
-
-.ed-md-table-bar,
-.ed-md-code-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid var(--reader-border);
-  background-color: var(--reader-elevated);
-  font-family: var(--font-sans), sans-serif;
-  font-size: 0.75rem;
-  color: var(--reader-muted);
-}
-
-.ed-md-action-btn {
-  min-height: 36px;
-  padding-inline: 0.65rem;
+  margin-block: 0.85rem;
   border-radius: 0.45rem;
-  border: 1px solid var(--reader-border-strong);
-  background-color: var(--reader-bg);
-  color: var(--reader-ink);
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
+  border: 1px solid var(--reader-border);
+  background-color: var(--reader-code-bg);
 }
 
 .ed-md-prose table {
   width: 100%;
   border-collapse: collapse;
-  font-size: calc(0.9rem * var(--md-scale));
+  font-size: calc(0.88rem * var(--md-scale));
   font-variant-numeric: tabular-nums;
 }
 
@@ -585,12 +515,12 @@ select,
   color: var(--reader-ink);
   font-weight: 700;
   text-align: start;
-  padding: 0.65rem 0.85rem;
+  padding: 0.5rem 0.65rem;
   border-bottom: 1px solid var(--reader-border-strong);
 }
 
 .ed-md-prose tbody td {
-  padding: 0.6rem 0.85rem;
+  padding: 0.45rem 0.65rem;
   border-bottom: 1px solid var(--reader-border);
   vertical-align: top;
 }
@@ -601,7 +531,7 @@ select,
 
 .ed-md-prose pre {
   margin: 0;
-  padding: 0.9rem 1rem;
+  padding: 0.75rem 0.85rem;
   overflow-x: auto;
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
   font-size: calc(0.85rem * var(--md-scale));

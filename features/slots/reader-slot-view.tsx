@@ -3,19 +3,12 @@
 import React, {
   useCallback,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
 import dynamic from 'next/dynamic';
-import {
-  ArrowLeft,
-  BookOpen,
-  FileText,
-  KeyRound,
-  Loader2,
-  Lock,
-  WifiOff,
-} from 'lucide-react';
+import { AlertCircle, Loader2, Lock, RefreshCw } from 'lucide-react';
 import type { PublicBookDTO } from '../../lib/types/catalog';
 import { makeCompositeKey } from '../../lib/registry/content-type-registry';
 import {
@@ -25,19 +18,21 @@ import {
   requestSignedAssetUnlock,
 } from '../../lib/offline/offline-vault';
 import { apiUrl } from '../../lib/platform/api-base';
-import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
 import { useAuth } from '../auth/auth-provider';
 import { useToast } from '../toast/toast-context';
-import { cn } from '../../lib/utils';
+import {
+  ReaderTopBar,
+  type ReaderTopBarProps,
+} from '../reader/shared/reader-top-bar';
 
 const PdfViewer = dynamic(
   () => import('../reader/pdf/pdf-viewer').then((m) => m.PdfViewer),
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-[74svh] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-sm text-[var(--text-muted)]">
+      <div className="flex items-center justify-center flex-1 h-full bg-[var(--bg-canvas)] text-sm text-[var(--text-muted)]">
         <Loader2 className="w-5 h-5 animate-spin me-2" aria-hidden="true" />
-        <span>Initializing PDFium WASM Viewer...</span>
+        <span>Loading PDF...</span>
       </div>
     ),
   }
@@ -49,9 +44,9 @@ const MarkdownViewer = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-[74svh] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-sm text-[var(--text-muted)]">
+      <div className="flex items-center justify-center flex-1 h-full bg-[var(--bg-canvas)] text-sm text-[var(--text-muted)]">
         <Loader2 className="w-5 h-5 animate-spin me-2" aria-hidden="true" />
-        <span>Initializing Study Reader...</span>
+        <span>Loading Markdown...</span>
       </div>
     ),
   }
@@ -72,6 +67,16 @@ function getOnlineSnapshot(): boolean {
   return navigator.onLine !== false;
 }
 
+interface UnlockedBookAssetState {
+  pdfUrl?: string;
+  markdownUrl?: string;
+  directPdfUrl?: string;
+  directMarkdownUrl?: string;
+  pdfStoragePath?: string;
+  markdownStoragePath?: string;
+  expiresAtIso?: string;
+}
+
 export function ReaderSlotView({
   book,
   initialMode,
@@ -88,7 +93,9 @@ export function ReaderSlotView({
   const {
     user,
     isAuthReady,
+    isEntitlementsReady,
     ownedCompositeKeys,
+    ownedSlugs,
     getIdToken,
     signInWithGoogle,
   } = useAuth();
@@ -101,53 +108,111 @@ export function ReaderSlotView({
 
   const isOwned =
     book.buyPrice === 0 ||
-    ownedCompositeKeys.has(makeCompositeKey('books', book.id));
+    ownedCompositeKeys.has(makeCompositeKey('books', book.id)) ||
+    ownedSlugs.has(`books:${book.urlSlug}`);
 
   const [format, setFormat] = useState<'markdown' | 'pdf'>(initialFormat);
   const [mode, setMode] = useState<'sample' | 'full'>(initialMode);
   const [preferOffline, setPreferOffline] = useState<boolean>(
     initialSource === 'offline'
   );
-  const [hasOfflineCopy, setHasOfflineCopy] = useState<boolean>(false);
+  const [offlineFormats, setOfflineFormats] = useState<{
+    pdf: boolean;
+    markdown: boolean;
+  }>({ pdf: false, markdown: false });
   const [vaultChecked, setVaultChecked] = useState<boolean>(false);
 
-  const [signedUrls, setSignedUrls] = useState<{
-    pdfUrl?: string;
-    markdownUrl?: string;
-    expiresAtIso?: string;
-  } | null>(() => {
-    if (!user?.uid) return null;
-    const cached = getCachedSignedGrant(user.uid, 'books', book.urlSlug);
-    if (!cached) return null;
-    return {
-      pdfUrl: cached.assets.pdfUrl,
-      markdownUrl: cached.assets.markdownUrl,
-      expiresAtIso: cached.expiresAtIso,
-    };
-  });
+  const [signedUrls, setSignedUrls] = useState<UnlockedBookAssetState | null>(
+    () => {
+      if (!user?.uid) return null;
+      const cached = getCachedSignedGrant(user.uid, 'books', book.urlSlug);
+      if (!cached) return null;
+      return {
+        pdfUrl: cached.assets.pdfUrl,
+        markdownUrl: cached.assets.markdownUrl,
+        directPdfUrl: cached.directUrls?.pdfUrl,
+        directMarkdownUrl: cached.directUrls?.markdownUrl,
+        pdfStoragePath: cached.storagePaths?.fullPdfStoragePath,
+        markdownStoragePath: cached.storagePaths?.fullMarkdownStoragePath,
+        expiresAtIso: cached.expiresAtIso,
+      };
+    }
+  );
   const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const autoUnlockAttemptedKeyRef = useRef<string>('');
 
   const userId = user?.uid;
+  const authAndEntitlementsReady =
+    isAuthReady && (!user || isEntitlementsReady);
   const isSampleView = mode === 'sample' || !isOwned;
+
+  const hasPdfAvailable = isSampleView
+    ? Boolean(book.samplePdfUrl)
+    : !isOnline
+    ? offlineFormats.pdf
+    : Boolean(
+        book.hasFullPdf ||
+          signedUrls?.pdfUrl ||
+          signedUrls?.pdfStoragePath ||
+          offlineFormats.pdf
+      );
+  const hasMarkdownAvailable = isSampleView
+    ? Boolean(book.sampleMarkdownUrl)
+    : !isOnline
+    ? offlineFormats.markdown
+    : Boolean(
+        book.hasFullMarkdown ||
+          signedUrls?.markdownUrl ||
+          signedUrls?.markdownStoragePath ||
+          offlineFormats.markdown
+      );
+
+  const effectiveFormat: 'markdown' | 'pdf' =
+    format === 'pdf' && !hasPdfAvailable && hasMarkdownAvailable
+      ? 'markdown'
+      : format === 'markdown' && !hasMarkdownAvailable && hasPdfAvailable
+      ? 'pdf'
+      : format;
+
+  const hasOfflineCopy =
+    effectiveFormat === 'pdf' ? offlineFormats.pdf : offlineFormats.markdown;
   const effectiveOfflineMode = !isSampleView && (!isOnline || preferOffline);
 
-  // Sync whether the active format is saved in the UID-scoped offline vault
+  // Sync whether PDF and Markdown full editions are saved in the UID-scoped offline vault
   useEffect(() => {
+    if (!authAndEntitlementsReady && mode === 'full') {
+      return;
+    }
+
     let active = true;
     const syncVault = async () => {
       if (!userId || isSampleView) {
         if (active) {
-          setHasOfflineCopy(false);
+          setOfflineFormats({ pdf: false, markdown: false });
           setVaultChecked(true);
         }
         return;
       }
-      const saved = await hasBookFormatOffline(userId, book.id, format);
+      const [savedPdf, savedMd] = await Promise.all([
+        hasBookFormatOffline(userId, book.id, 'pdf'),
+        hasBookFormatOffline(userId, book.id, 'markdown'),
+      ]);
       if (active) {
-        setHasOfflineCopy(saved);
+        setOfflineFormats({ pdf: savedPdf, markdown: savedMd });
         setVaultChecked(true);
-        if (!isOnline && saved) {
+        if (!isOnline && (savedPdf || savedMd)) {
           setPreferOffline(true);
+        }
+        if ((!isOnline || initialSource === 'offline') && !savedPdf && savedMd) {
+          setFormat('markdown');
+        } else if (
+          (!isOnline || initialSource === 'offline') &&
+          savedPdf &&
+          !savedMd &&
+          format === 'markdown'
+        ) {
+          setFormat('pdf');
         }
       }
     };
@@ -158,15 +223,30 @@ export function ReaderSlotView({
       active = false;
       window.removeEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVault);
     };
-  }, [book.id, format, isOnline, isSampleView, userId]);
+  }, [
+    authAndEntitlementsReady,
+    book.id,
+    format,
+    initialSource,
+    isOnline,
+    isSampleView,
+    mode,
+    userId,
+  ]);
 
   const unlockFullBook = useCallback(
-    async (forceRefresh: boolean = false): Promise<{
-      pdfUrl?: string;
-      markdownUrl?: string;
-    } | null> => {
+    async (
+      forceRefresh: boolean = false,
+      options?: { silentStateUpdate?: boolean }
+    ): Promise<UnlockedBookAssetState | null> => {
       if (!userId || !isOnline) return null;
-      setUnlocking(true);
+      const silent = options?.silentStateUpdate === true;
+
+      if (!silent) {
+        setUnlocking(true);
+        setUnlockError(null);
+      }
+
       try {
         const grant = await requestSignedAssetUnlock({
           uid: userId,
@@ -175,20 +255,36 @@ export function ReaderSlotView({
           getIdToken,
           forceRefresh,
         });
-        const next = {
+        const next: UnlockedBookAssetState = {
           pdfUrl: grant.assets.pdfUrl,
           markdownUrl: grant.assets.markdownUrl,
+          directPdfUrl: grant.directUrls?.pdfUrl,
+          directMarkdownUrl: grant.directUrls?.markdownUrl,
+          pdfStoragePath: grant.storagePaths?.fullPdfStoragePath,
+          markdownStoragePath: grant.storagePaths?.fullMarkdownStoragePath,
           expiresAtIso: grant.expiresAtIso,
         };
-        setSignedUrls(next);
+        if (!silent) {
+          setSignedUrls(next);
+          setUnlockError(null);
+        }
         return next;
-      } catch {
-        if (!hasOfflineCopy) {
-          showToast('Unable to verify signed reader session.', 'danger');
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Unable to verify signed reader session.';
+        if (!silent) {
+          setUnlockError(msg);
+          if (!hasOfflineCopy) {
+            showToast(msg, 'danger');
+          }
         }
         return null;
       } finally {
-        setUnlocking(false);
+        if (!silent) {
+          setUnlocking(false);
+        }
       }
     },
     [book.urlSlug, getIdToken, hasOfflineCopy, isOnline, showToast, userId]
@@ -196,15 +292,22 @@ export function ReaderSlotView({
 
   useEffect(() => {
     if (
+      !authAndEntitlementsReady ||
       !isOwned ||
       !userId ||
       signedUrls ||
       mode !== 'full' ||
       !isOnline ||
-      effectiveOfflineMode
+      (effectiveOfflineMode && hasOfflineCopy)
     ) {
       return;
     }
+
+    const attemptKey = `${userId}:${book.urlSlug}:${mode}`;
+    if (autoUnlockAttemptedKeyRef.current === attemptKey) {
+      return;
+    }
+    autoUnlockAttemptedKeyRef.current = attemptKey;
 
     let cancelled = false;
     const autoUnlock = async () => {
@@ -213,8 +316,13 @@ export function ReaderSlotView({
         setSignedUrls({
           pdfUrl: cached.assets.pdfUrl,
           markdownUrl: cached.assets.markdownUrl,
+          directPdfUrl: cached.directUrls?.pdfUrl,
+          directMarkdownUrl: cached.directUrls?.markdownUrl,
+          pdfStoragePath: cached.storagePaths?.fullPdfStoragePath,
+          markdownStoragePath: cached.storagePaths?.fullMarkdownStoragePath,
           expiresAtIso: cached.expiresAtIso,
         });
+        setUnlockError(null);
         return;
       }
       await unlockFullBook(false);
@@ -225,8 +333,10 @@ export function ReaderSlotView({
       cancelled = true;
     };
   }, [
+    authAndEntitlementsReady,
     book.urlSlug,
     effectiveOfflineMode,
+    hasOfflineCopy,
     isOnline,
     isOwned,
     mode,
@@ -258,247 +368,183 @@ export function ReaderSlotView({
     : '';
 
   const backHref = isOwned ? '/purchased' : `/books/${book.urlSlug}`;
+  const canSwitchFormat = hasPdfAvailable && hasMarkdownAvailable;
+
+  const topBar: ReaderTopBarProps = {
+    title: book.title,
+    activeFormat: effectiveFormat,
+    canSwitchFormat,
+    onFormatChange: setFormat,
+    closeHref: backHref,
+  };
+
   const shouldWaitForSignedStream =
     !isSampleView &&
-    !effectiveOfflineMode &&
     !hasOfflineCopy &&
     isOnline &&
-    (!signedUrls || unlocking) &&
-    !signedUrls;
+    !signedUrls &&
+    !unlockError;
+
+  const shouldShowUnlockError =
+    !isSampleView &&
+    !hasOfflineCopy &&
+    isOnline &&
+    !signedUrls &&
+    !unlocking &&
+    Boolean(unlockError);
 
   return (
-    <div className="ed-container py-5 sm:py-6 space-y-4">
-      {/* Reader Workspace Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[var(--border-subtle)]">
-        <div className="flex items-center gap-3 min-w-0">
-          <a
-            href={backHref}
-            className="inline-flex items-center justify-center w-12 h-12 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors shrink-0"
-            aria-label={isOwned ? 'Back to Purchased Library' : 'Back to book details'}
-          >
-            <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-          </a>
-          <MonogramThumbnail
-            title={book.title}
-            type={book.type}
-            collectionName="books"
-            size="xs"
-            showBadge={false}
-            className="hidden sm:flex"
-          />
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-[var(--text-muted)] flex flex-wrap items-center gap-1.5">
-              <span>
-                {isSampleView
-                  ? 'Sample Preview'
-                  : effectiveOfflineMode && hasOfflineCopy
-                  ? 'Offline Vault Edition'
-                  : 'Full Library Edition'}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>{book.language}</span>
-              {!isOnline && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span className="inline-flex items-center gap-1 font-semibold text-[var(--status-warning)]">
-                    <WifiOff className="w-3 h-3" aria-hidden="true" />
-                    <span>Offline Mode</span>
-                  </span>
-                </>
-              )}
-              {!isSampleView &&
-                !effectiveOfflineMode &&
-                signedUrls?.expiresAtIso && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <button
-                      type="button"
-                      disabled={unlocking}
-                      onClick={() => void unlockFullBook(true)}
-                      className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline"
-                    >
-                      <KeyRound className="w-3 h-3" aria-hidden="true" />
-                      <span>
-                        Signed until{' '}
-                        {new Date(signedUrls.expiresAtIso).toLocaleTimeString()}
-                      </span>
-                    </button>
-                  </>
-                )}
-            </p>
-            <h1 className="text-base sm:text-lg font-extrabold text-[var(--text-main)] truncate">
-              {book.title}
-            </h1>
+    <div className="fixed inset-0 z-50 h-[100dvh] w-screen flex flex-col overflow-hidden bg-[var(--bg-canvas)]">
+      {(!authAndEntitlementsReady || !vaultChecked) && mode === 'full' ? (
+        <>
+          <ReaderTopBar {...topBar} />
+          <div className="flex items-center justify-center flex-1 p-6">
+            <Loader2
+              className="w-6 h-6 animate-spin text-[var(--text-muted)] me-2"
+              aria-hidden="true"
+            />
+            <span className="text-sm font-medium text-[var(--text-muted)]">
+              Checking library entitlement...
+            </span>
           </div>
-        </div>
-
-        {/* Mode & Format Controls */}
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {!isSampleView && hasOfflineCopy && (
-            <div
-              role="group"
-              aria-label="Delivery source"
-              className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5"
-            >
-              <button
-                type="button"
-                disabled={!isOnline}
-                aria-pressed={!effectiveOfflineMode}
-                onClick={() => setPreferOffline(false)}
-                className={cn(
-                  'min-h-[40px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap disabled:opacity-40',
-                  !effectiveOfflineMode
-                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                )}
-              >
-                Read Online
-              </button>
-              <button
-                type="button"
-                aria-pressed={effectiveOfflineMode}
-                onClick={() => setPreferOffline(true)}
-                className={cn(
-                  'min-h-[40px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
-                  effectiveOfflineMode
-                    ? 'bg-[var(--bg-surface)] text-[var(--status-success)] shadow-xs'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                )}
-              >
-                ● Read Offline
-              </button>
-            </div>
-          )}
-
-          <div
-            role="group"
-            aria-label="Reader format"
-            className="inline-flex items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-0.5"
-          >
-            {(book.hasFullPdf || Boolean(book.samplePdfUrl)) && (
-              <button
-                type="button"
-                aria-pressed={format === 'pdf'}
-                onClick={() => setFormat('pdf')}
-                className={cn(
-                  'inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
-                  format === 'pdf'
-                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                )}
-              >
-                <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>PDF</span>
-              </button>
-            )}
-            {(book.hasFullMarkdown || Boolean(book.sampleMarkdownUrl)) && (
-              <button
-                type="button"
-                aria-pressed={format === 'markdown'}
-                onClick={() => setFormat('markdown')}
-                className={cn(
-                  'inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
-                  format === 'markdown'
-                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                )}
-              >
-                <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Markdown</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Entitlement Gate or Active Production Viewer */}
-      {(!isAuthReady || !vaultChecked) && mode === 'full' ? (
-        <div className="flex items-center justify-center h-[60svh] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-          <Loader2
-            className="w-6 h-6 animate-spin text-[var(--text-muted)] me-2"
-            aria-hidden="true"
-          />
-          <span className="text-sm font-medium text-[var(--text-muted)]">
-            Checking library entitlement...
-          </span>
-        </div>
+        </>
       ) : !isOwned && mode === 'full' ? (
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-8 text-center max-w-xl mx-auto">
-          <Lock
-            className="w-6 h-6 text-[var(--text-muted)] mx-auto mb-3"
-            aria-hidden="true"
-          />
-          <h2 className="text-base font-bold text-[var(--text-main)]">
-            Full Ebook Locked
-          </h2>
-          <p className="mt-1.5 text-sm text-[var(--text-muted)]">
-            Purchase this book or sign in with the account that owns it to unlock full PDF and Markdown editions.
-          </p>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-            {!user && (
+        <>
+          <ReaderTopBar {...topBar} />
+          <div className="flex-1 flex items-center justify-center p-4">
+            <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6 sm:p-8 text-center max-w-md w-full">
+              <Lock
+                className="w-6 h-6 text-[var(--text-muted)] mx-auto mb-3"
+                aria-hidden="true"
+              />
+              <h2 className="text-base font-bold text-[var(--text-main)]">
+                Full Ebook Locked
+              </h2>
+              <p className="mt-1.5 text-sm text-[var(--text-muted)]">
+                Purchase this book or sign in with the account that owns it to
+                unlock full PDF and Markdown editions.
+              </p>
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+                {!user && (
+                  <button
+                    type="button"
+                    onClick={() => void signInWithGoogle()}
+                    className="min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] whitespace-nowrap"
+                  >
+                    Sign In
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setMode('sample')}
+                  className="min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-sm font-semibold text-[var(--text-main)] whitespace-nowrap"
+                >
+                  Read Free Sample
+                </button>
+                <a
+                  href={`/books/${book.urlSlug}`}
+                  className="inline-flex items-center justify-center min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold whitespace-nowrap"
+                >
+                  Return to Book Details
+                </a>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : shouldShowUnlockError ? (
+        <>
+          <ReaderTopBar {...topBar} />
+          <div className="flex flex-col items-center justify-center flex-1 text-center p-6">
+            <AlertCircle
+              className="w-6 h-6 text-[var(--status-danger)] mb-2.5"
+              aria-hidden="true"
+            />
+            <h2 className="text-base font-bold text-[var(--text-main)]">
+              Unable to Open Full Edition
+            </h2>
+            <p className="mt-1.5 text-xs sm:text-sm text-[var(--text-muted)] max-w-md">
+              {unlockError}
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
               <button
                 type="button"
-                onClick={() => void signInWithGoogle()}
-                className="min-h-[48px] px-5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)]"
+                onClick={() => {
+                  autoUnlockAttemptedKeyRef.current = '';
+                  void unlockFullBook(true);
+                }}
+                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold whitespace-nowrap"
               >
-                Sign In
+                <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                <span>Retry</span>
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setMode('sample')}
-              className="min-h-[48px] px-5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-sm font-semibold text-[var(--text-main)]"
-            >
-              Read Free Sample
-            </button>
-            <a
-              href={`/books/${book.urlSlug}`}
-              className="inline-flex items-center justify-center min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold"
-            >
-              Return to Book Details
-            </a>
+              <a
+                href="/purchased"
+                className="inline-flex items-center justify-center min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] whitespace-nowrap"
+              >
+                Back to Library
+              </a>
+            </div>
           </div>
-        </div>
+        </>
       ) : shouldWaitForSignedStream ? (
-        <div className="flex flex-col items-center justify-center h-[60svh] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-center p-6">
-          <Loader2
-            className="w-6 h-6 animate-spin text-[var(--text-muted)] mb-2.5"
-            aria-hidden="true"
-          />
-          <p className="text-sm font-semibold text-[var(--text-main)]">
-            Minting 15-minute signed reader stream...
-          </p>
-        </div>
-      ) : format === 'pdf' ? (
+        <>
+          <ReaderTopBar {...topBar} />
+          <div className="flex flex-col items-center justify-center flex-1 text-center p-6">
+            <Loader2
+              className="w-6 h-6 animate-spin text-[var(--text-muted)] mb-2.5"
+              aria-hidden="true"
+            />
+            <p className="text-sm font-semibold text-[var(--text-main)]">
+              Opening full edition stream...
+            </p>
+          </div>
+        </>
+      ) : effectiveFormat === 'pdf' ? (
         <PdfViewer
           book={book}
           streamUrl={activePdfUrl}
+          fullStoragePath={
+            isSampleView ? undefined : signedUrls?.pdfStoragePath
+          }
+          directStreamUrl={isSampleView ? undefined : signedUrls?.directPdfUrl}
           isSample={isSampleView}
           userId={user?.uid}
           preferOffline={effectiveOfflineMode}
           bearerTokenProvider={getIdToken}
           onRefreshSignedUrl={async () => {
-            const refreshed = await unlockFullBook(true);
-            return refreshed?.pdfUrl ?? null;
+            const refreshed = await unlockFullBook(true, {
+              silentStateUpdate: true,
+            });
+            return refreshed?.pdfUrl ? apiUrl(refreshed.pdfUrl) : null;
           }}
           onSwitchToFullMode={() => setMode('full')}
-          embeddedHeightClass="h-[78svh] min-h-[540px]"
+          topBar={topBar}
         />
       ) : (
         <MarkdownViewer
           book={book}
           streamUrl={activeMdUrl}
+          fullStoragePath={
+            isSampleView ? undefined : signedUrls?.markdownStoragePath
+          }
+          directStreamUrl={
+            isSampleView ? undefined : signedUrls?.directMarkdownUrl
+          }
           initialMarkdownText={isSampleView ? sampleMarkdownPreview : undefined}
           isSample={isSampleView}
           userId={user?.uid}
           preferOffline={effectiveOfflineMode}
           bearerTokenProvider={getIdToken}
           onRefreshSignedUrl={async () => {
-            const refreshed = await unlockFullBook(true);
-            return refreshed?.markdownUrl ?? null;
+            const refreshed = await unlockFullBook(true, {
+              silentStateUpdate: true,
+            });
+            return refreshed?.markdownUrl
+              ? apiUrl(refreshed.markdownUrl)
+              : null;
           }}
           onSwitchToFullMode={() => setMode('full')}
-          embeddedHeightClass="h-[78svh] min-h-[540px]"
+          topBar={topBar}
         />
       )}
     </div>

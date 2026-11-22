@@ -31,6 +31,9 @@ export default async function PurchasedPage() {
   const booksMeta: PurchasedBookCatalogMeta[] = books.map((b) => ({
     id: b.id,
     urlSlug: b.urlSlug,
+    type: b.type,
+    category: b.tags[0] || '',
+    language: b.language,
     hasFullPdf: b.hasFullPdf,
     hasFullMarkdown: b.hasFullMarkdown,
     updatedAtMs: new Date(b.updatedAtIso).getTime() || 0,
@@ -39,13 +42,14 @@ export default async function PurchasedPage() {
   const examsMeta: PurchasedExamCatalogMeta[] = exams.map((e) => ({
     id: e.id,
     urlSlug: e.urlSlug,
+    type: e.type,
+    category: e.tags[0] || '',
+    language: e.language,
     totalMocktest: e.totalMocktest,
     hasFullJson: e.hasFullJson,
     updatedAtMs: new Date(e.updatedAtIso).getTime() || 0,
     mocktestTitles: e.MocktestTitles,
   }));
 
-  return (
-    <PurchasedLibraryView booksMeta={booksMeta} examsMeta={examsMeta} />
-  );
+  return <PurchasedLibraryView booksMeta={booksMeta} examsMeta={examsMeta} />;
 }

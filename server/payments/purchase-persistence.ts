@@ -2,9 +2,14 @@ import https from 'node:https';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type {
   CatalogItemDTO,
+  CollectionName,
   UserPurchaseRecord,
 } from '../../lib/types/catalog';
 import { makeFirestoreSafeCartKey } from '../../lib/registry/content-type-registry';
+import {
+  ensureDefaultDbUserDocument,
+  syncSinglePurchaseToDefaultDb,
+} from '../firebase/default-db-mirror';
 import { verifyCallerPurchaseRecord } from '../repositories/catalog-repository';
 
 function sanitizeBoundedString(
@@ -17,14 +22,15 @@ function sanitizeBoundedString(
   return trimmed.slice(0, maxLen);
 }
 
-function getFirestoreDbResourceRoot(): {
+function getFirestoreDbResourceRoot(overrideDatabaseId?: string): {
   projectId: string;
   databaseId: string;
   docPrefix: string;
   restBase: string;
 } {
   const projectId = firebaseConfig.projectId || 'examdash-ed';
-  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+  const databaseId =
+    overrideDatabaseId || firebaseConfig.firestoreDatabaseId || '(default)';
   const docPrefix = `projects/${projectId}/databases/${databaseId}/documents`;
   const restBase = `/v1/projects/${encodeURIComponent(
     projectId
@@ -89,15 +95,73 @@ function firestoreRestRequest<T>(params: {
 
 async function checkParentUserExists(
   userId: string,
-  bearerIdToken: string
+  bearerIdToken: string,
+  databaseId?: string
 ): Promise<boolean> {
-  const { restBase } = getFirestoreDbResourceRoot();
+  const { restBase } = getFirestoreDbResourceRoot(databaseId);
   const res = await firestoreRestRequest({
     method: 'GET',
     path: `${restBase}/users/${encodeURIComponent(userId)}`,
     bearerIdToken,
   });
   return res.statusCode === 200;
+}
+
+/**
+ * Mirrors verified completed purchase entitlements into `databases/(default)/documents/users/{uid}/purchases`
+ * when the applet uses a named Firestore database. Firebase Storage Security Rules (`storage.rules`)
+ * in `examdash-ed` evaluate `firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)/purchases/...)`,
+ * so keeping `(default)` synchronized ensures paid users receive immediate access to `fullPdfStoragePath`,
+ * `fullMarkdownStoragePath`, and `fullJsonStoragePath` in Firebase Storage.
+ */
+export async function mirrorVerifiedPurchasesToDefaultDb(
+  userId: string,
+  records: UserPurchaseRecord[],
+  bearerIdToken: string,
+  userProfile?: {
+    displayName?: string | null;
+    email?: string | null;
+    photoURL?: string | null;
+  }
+): Promise<void> {
+  const configuredDb = firebaseConfig.firestoreDatabaseId || '(default)';
+  if (
+    configuredDb === '(default)' ||
+    !userId ||
+    !bearerIdToken ||
+    records.length === 0
+  ) {
+    return;
+  }
+
+  await ensureDefaultDbUserDocument({
+    uid: userId,
+    bearerIdToken,
+    displayName: userProfile?.displayName,
+    email: userProfile?.email,
+    photoURL: userProfile?.photoURL,
+  });
+
+  await Promise.all(
+    records.map((rec) =>
+      syncSinglePurchaseToDefaultDb({
+        uid: userId,
+        itemId: rec.itemId,
+        collectionName: rec.collectionName,
+        title: rec.title,
+        urlSlug: rec.urlSlug,
+        currency: rec.currency,
+        paidPrice: rec.paidPrice,
+        razorpayOrderId: rec.razorpayOrderId,
+        razorpayPaymentId: rec.razorpayPaymentId,
+        createdAtIso: rec.createdAtIso,
+        bearerIdToken,
+        userDisplayName: userProfile?.displayName,
+        userEmail: userProfile?.email,
+        userPhotoUrl: userProfile?.photoURL,
+      })
+    )
+  );
 }
 
 export interface CommitPurchasesInput {
@@ -294,6 +358,18 @@ export async function commitVerifiedPurchasesToFirestore(
     }
   }
 
+  // Synchronize `(default)` database purchase docs so Firebase Storage rules grant full file access
+  await mirrorVerifiedPurchasesToDefaultDb(
+    uid,
+    committedRecords,
+    input.bearerIdToken,
+    {
+      displayName: input.userDisplayName,
+      email: input.userEmail,
+      photoURL: input.userPhotoUrl,
+    }
+  );
+
   return committedRecords;
 }
 
@@ -321,16 +397,127 @@ function parseRestFields(
   return out;
 }
 
-/**
- * One-shot server query for `/users/{userId}/purchases` satisfying `firestore.rules`
- * (`where('userId', '==', userId)`) using the caller's verified Bearer ID token.
- * Replaces client-side `onSnapshot` (`Listen/channel`) listeners completely.
- */
-export async function listUserPurchasesFromFirestore(
+function normalizeCollectionFromRaw(
+  rawCol: unknown,
+  docId: string
+): CollectionName {
+  if (
+    rawCol === 'ExamPackDocument' ||
+    rawCol === 'exams' ||
+    rawCol === 'exam' ||
+    docId.startsWith('ExamPackDocument_') ||
+    docId.startsWith('exams_')
+  ) {
+    return 'ExamPackDocument';
+  }
+  return 'books';
+}
+
+function parsePurchaseDocRow(
+  docName: string,
+  fields: FirestoreRestFieldMap | undefined,
+  fallbackUserId: string
+): UserPurchaseRecord | null {
+  const segments = docName.split('/');
+  const docId = segments[segments.length - 1] || '';
+  const d = parseRestFields(fields);
+
+  if (d.status && d.status !== 'completed') {
+    return null;
+  }
+
+  const collectionName = normalizeCollectionFromRaw(
+    d.collectionName ?? d.contentType,
+    docId
+  );
+  const rawItemId = String(
+    d.itemId ||
+      docId
+        .replace(/^ExamPackDocument_/, '')
+        .replace(/^exams_/, '')
+        .replace(/^books_/, '')
+  ).trim();
+  if (!rawItemId) return null;
+
+  const canonicalPurchaseId = `${collectionName}_${rawItemId}`;
+  const rawTimestamp =
+    typeof d.createdAt === 'string' && d.createdAt
+      ? d.createdAt
+      : typeof d.purchasedAt === 'string' && d.purchasedAt
+      ? d.purchasedAt
+      : '';
+  const createdIso = rawTimestamp
+    ? new Date(rawTimestamp).toISOString()
+    : new Date().toISOString();
+
+  const paidPrice =
+    typeof d.paidPrice === 'number'
+      ? d.paidPrice
+      : typeof d.amountPaid === 'number'
+      ? d.amountPaid
+      : Number(d.paidPrice ?? d.amountPaid) || 0;
+  const listPrice =
+    typeof d.listPrice === 'number'
+      ? d.listPrice
+      : Math.max(paidPrice, Number(d.listPrice) || paidPrice);
+
+  return {
+    purchaseId: canonicalPurchaseId,
+    userId: String(d.userId || d.uid || fallbackUserId),
+    itemId: rawItemId,
+    collectionName,
+    urlSlug: String(d.urlSlug || ''),
+    title: String(d.title || 'Untitled'),
+    type: String(
+      d.type || (collectionName === 'ExamPackDocument' ? 'Mock Test' : 'Ebook')
+    ),
+    authorName: String(d.authorName || 'ExamDash'),
+    language: String(d.language || 'English'),
+    currency: String(d.currency || 'INR'),
+    listPrice,
+    paidPrice,
+    ...(typeof d.totalMocktest === 'number'
+      ? { totalMocktest: d.totalMocktest }
+      : {}),
+    paymentProvider:
+      d.paymentProvider === 'razorpay' || d.razorpayPaymentId
+        ? 'razorpay'
+        : d.paymentProvider === 'free'
+        ? 'free'
+        : undefined,
+    ...(typeof d.razorpayOrderId === 'string'
+      ? { razorpayOrderId: d.razorpayOrderId }
+      : {}),
+    ...(typeof d.razorpayPaymentId === 'string'
+      ? { razorpayPaymentId: d.razorpayPaymentId }
+      : {}),
+    status: 'completed',
+    createdAtIso: createdIso,
+  };
+}
+
+async function queryPurchasesInDatabase(
+  databaseId: string,
   userId: string,
-  bearerIdToken: string
+  bearerIdToken: string,
+  ownerField: 'userId' | 'uid' | 'none'
 ): Promise<UserPurchaseRecord[]> {
-  const { restBase } = getFirestoreDbResourceRoot();
+  const { restBase } = getFirestoreDbResourceRoot(databaseId);
+  const structuredQuery: Record<string, unknown> = {
+    from: [{ collectionId: 'purchases' }],
+    ...(ownerField !== 'none'
+      ? {
+          where: {
+            fieldFilter: {
+              field: { fieldPath: ownerField },
+              op: 'EQUAL',
+              value: { stringValue: userId },
+            },
+          },
+        }
+      : {}),
+  };
+
   const queryRes = await firestoreRestRequest<
     Array<{
       document?: {
@@ -342,69 +529,73 @@ export async function listUserPurchasesFromFirestore(
     method: 'POST',
     path: `${restBase}/users/${encodeURIComponent(userId)}:runQuery`,
     bearerIdToken,
-    body: {
-      structuredQuery: {
-        from: [{ collectionId: 'purchases' }],
-        where: {
-          fieldFilter: {
-            field: { fieldPath: 'userId' },
-            op: 'EQUAL',
-            value: { stringValue: userId },
-          },
-        },
-      },
-    },
-  });
+    body: { structuredQuery },
+  }).catch(() => null);
 
-  if (queryRes.statusCode < 200 || queryRes.statusCode >= 300 || !Array.isArray(queryRes.data)) {
+  if (
+    !queryRes ||
+    queryRes.statusCode < 200 ||
+    queryRes.statusCode >= 300 ||
+    !Array.isArray(queryRes.data)
+  ) {
     return [];
   }
 
-  const list: UserPurchaseRecord[] = [];
+  const out: UserPurchaseRecord[] = [];
   for (const row of queryRes.data) {
     if (!row?.document?.name) continue;
-    const segments = row.document.name.split('/');
-    const docId = segments[segments.length - 1] || '';
-    const d = parseRestFields(row.document.fields);
-    const createdIso =
-      typeof d.createdAt === 'string' && d.createdAt
-        ? new Date(d.createdAt).toISOString()
-        : new Date().toISOString();
+    const parsed = parsePurchaseDocRow(
+      row.document.name,
+      row.document.fields,
+      userId
+    );
+    if (parsed && parsed.userId === userId) {
+      out.push(parsed);
+    }
+  }
+  return out;
+}
 
-    list.push({
-      purchaseId: String(d.purchaseId || docId),
-      userId: String(d.userId || userId),
-      itemId: String(d.itemId || ''),
-      collectionName:
-        d.collectionName === 'ExamPackDocument' ? 'ExamPackDocument' : 'books',
-      urlSlug: String(d.urlSlug || ''),
-      title: String(d.title || 'Untitled'),
-      type: String(d.type || 'Ebook'),
-      authorName: String(d.authorName || 'ExamDash'),
-      language: String(d.language || 'English'),
-      currency: String(d.currency || 'INR'),
-      listPrice: Number(d.listPrice) || 0,
-      paidPrice: Number(d.paidPrice) || 0,
-      ...(typeof d.totalMocktest === 'number'
-        ? { totalMocktest: d.totalMocktest }
-        : {}),
-      paymentProvider:
-        d.paymentProvider === 'razorpay'
-          ? 'razorpay'
-          : d.paymentProvider === 'free'
-          ? 'free'
-          : undefined,
-      ...(typeof d.razorpayOrderId === 'string'
-        ? { razorpayOrderId: d.razorpayOrderId }
-        : {}),
-      ...(typeof d.razorpayPaymentId === 'string'
-        ? { razorpayPaymentId: d.razorpayPaymentId }
-        : {}),
-      status: 'completed',
-      createdAtIso: createdIso,
-    });
+/**
+ * One-shot server query for `/users/{userId}/purchases` across both the provisioned database
+ * and `(default)` database in `examdash-ed` using the caller's verified Bearer ID token.
+ * Automatically backfills missing `(default)` purchase docs so Firebase Storage rules grant full file access.
+ */
+export async function listUserPurchasesFromFirestore(
+  userId: string,
+  bearerIdToken: string
+): Promise<UserPurchaseRecord[]> {
+  const configuredDb = firebaseConfig.firestoreDatabaseId || '(default)';
+
+  const [primaryList, defaultList] = await Promise.all([
+    queryPurchasesInDatabase(configuredDb, userId, bearerIdToken, 'userId'),
+    configuredDb !== '(default)'
+      ? queryPurchasesInDatabase('(default)', userId, bearerIdToken, 'none')
+      : Promise.resolve([] as UserPurchaseRecord[]),
+  ]);
+
+  const defaultKeys = new Set(defaultList.map((r) => r.purchaseId));
+  const missingInDefault = primaryList.filter(
+    (r) => !defaultKeys.has(r.purchaseId)
+  );
+
+  if (missingInDefault.length > 0 && configuredDb !== '(default)') {
+    await mirrorVerifiedPurchasesToDefaultDb(
+      userId,
+      missingInDefault,
+      bearerIdToken
+    );
   }
 
+  const byKey = new Map<string, UserPurchaseRecord>();
+  for (const item of defaultList) {
+    byKey.set(item.purchaseId, item);
+  }
+  for (const item of primaryList) {
+    byKey.set(item.purchaseId, item);
+  }
+
+  const list = Array.from(byKey.values());
   list.sort(
     (a, b) =>
       new Date(b.createdAtIso).getTime() - new Date(a.createdAtIso).getTime()
@@ -491,6 +682,14 @@ export async function syncUserProfileInFirestore(params: {
       body: { writes },
     }).catch(() => {});
   }
+
+  await ensureDefaultDbUserDocument({
+    uid,
+    bearerIdToken: params.bearerIdToken,
+    displayName: params.displayName,
+    email: params.email,
+    photoURL: params.photoURL,
+  });
 }
 
 export async function deleteUserProfileFromFirestore(
@@ -557,4 +756,3 @@ export async function deleteUserProfileFromFirestore(
     },
   }).catch(() => {});
 }
-

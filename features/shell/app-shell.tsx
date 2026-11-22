@@ -44,13 +44,15 @@ const MOBILE_TABS = [
   { label: 'Library', href: '/purchased', icon: Library },
 ];
 
+const COPYRIGHT_YEAR = BUSINESS_INFO.effectiveDateIso.slice(0, 4) || '2026';
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '/';
   const { user, isAuthReady, isSigningIn, signInWithGoogle, signOutUser, deleteAccount } =
     useAuth();
   const { summary, isOpen: isCartOpen, openCart } = useCart();
   const { openSearch } = useSearchModal();
-  const { theme, toggleTheme } = useTheme();
+  const { toggleTheme } = useTheme();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -61,6 +63,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     (pathname.startsWith('/books/') && pathname !== '/books') ||
     (pathname.startsWith('/exams/') && pathname !== '/exams');
   const isAttemptRoute = pathname.startsWith('/attempt/');
+  const isReaderRoute = pathname.startsWith('/read/');
+
+  if (isReaderRoute) {
+    return <ClientErrorBoundary>{children}</ClientErrorBoundary>;
+  }
 
   return (
     <div className="min-h-[100svh] flex flex-col bg-[var(--bg-canvas)] text-[var(--text-main)]">
@@ -123,17 +130,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <button
               type="button"
-              aria-label={
-                theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'
-              }
+              aria-label="Toggle color theme"
               onClick={toggleTheme}
               className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors shrink-0"
             >
-              {theme === 'dark' ? (
-                <Sun className="w-4 h-4" aria-hidden="true" />
-              ) : (
-                <Moon className="w-4 h-4" aria-hidden="true" />
-              )}
+              <Sun className="hidden dark:block w-4 h-4" aria-hidden="true" />
+              <Moon className="block dark:hidden w-4 h-4" aria-hidden="true" />
             </button>
 
             <button
@@ -253,7 +255,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div>
                 <p className="font-semibold text-[var(--text-main)]">
-                  © {new Date().getFullYear()} {BUSINESS_INFO.brandName} — Operated by{' '}
+                  © {COPYRIGHT_YEAR} {BUSINESS_INFO.brandName} — Operated by{' '}
                   {BUSINESS_INFO.legalName}
                 </p>
                 <p className="mt-1">

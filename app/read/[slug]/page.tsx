@@ -55,7 +55,13 @@ export default async function ReadBookSlotPage({
       ? 'markdown'
       : sp.format === 'pdf'
       ? 'pdf'
-      : book.hasFullPdf || book.samplePdfUrl
+      : initialMode === 'full'
+      ? book.hasFullPdf
+        ? 'pdf'
+        : book.hasFullMarkdown
+        ? 'markdown'
+        : 'pdf'
+      : book.samplePdfUrl
       ? 'pdf'
       : 'markdown';
   const initialSource = sp.source === 'offline' ? 'offline' : 'online';

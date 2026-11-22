@@ -5,7 +5,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useSyncExternalStore,
+  useState,
 } from 'react';
 import { syncNativeSystemBars } from '../../lib/platform/capacitor-bridge';
 
@@ -27,50 +27,46 @@ const ThemeContext = createContext<ThemeContextValue>({
 const THEME_STORAGE_KEY = 'ed-theme';
 const THEME_EVENT = 'ed-theme-change';
 
-function subscribeTheme(callback: () => void) {
-  if (typeof window === 'undefined') return () => {};
-  window.addEventListener(THEME_EVENT, callback);
-  window.addEventListener('storage', callback);
-  return () => {
-    window.removeEventListener(THEME_EVENT, callback);
-    window.removeEventListener('storage', callback);
-  };
-}
-
 function getThemeSnapshot(): ThemeMode {
   if (typeof document === 'undefined') return 'light';
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
-function getServerThemeSnapshot(): ThemeMode {
-  return 'light';
-}
-
 function syncMetaThemeColor(mode: ThemeMode) {
   if (typeof document === 'undefined') return;
   const hex = mode === 'dark' ? DARK_THEME_HEX : LIGHT_THEME_HEX;
-  document.documentElement.style.colorScheme = mode;
-  let metaTheme = document.querySelector('meta[name="theme-color"]');
-  if (!metaTheme) {
-    metaTheme = document.createElement('meta');
+  const metaThemes = document.querySelectorAll('meta[name="theme-color"]');
+  if (metaThemes.length === 0) {
+    const metaTheme = document.createElement('meta');
     metaTheme.setAttribute('name', 'theme-color');
+    metaTheme.setAttribute('content', hex);
     document.head.appendChild(metaTheme);
+  } else {
+    metaThemes.forEach((metaTheme) => {
+      metaTheme.setAttribute('content', hex);
+    });
   }
-  metaTheme.setAttribute('content', hex);
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const theme = useSyncExternalStore(
-    subscribeTheme,
-    getThemeSnapshot,
-    getServerThemeSnapshot
-  );
+  const [theme, setTheme] = useState<ThemeMode>('light');
 
-  // Mirror active theme to <meta name="theme-color"> & Capacitor StatusBar/SystemBars on boot and change
+  // Sync active theme post-hydration & mirror to <meta name="theme-color"> + Capacitor SystemBars
   useEffect(() => {
-    syncMetaThemeColor(theme);
-    void syncNativeSystemBars(theme);
-  }, [theme]);
+    const syncFromDom = () => {
+      const current = getThemeSnapshot();
+      setTheme(current);
+      syncMetaThemeColor(current);
+      void syncNativeSystemBars(current);
+    };
+    syncFromDom();
+    window.addEventListener(THEME_EVENT, syncFromDom);
+    window.addEventListener('storage', syncFromDom);
+    return () => {
+      window.removeEventListener(THEME_EVENT, syncFromDom);
+      window.removeEventListener('storage', syncFromDom);
+    };
+  }, []);
 
   const applyTheme = useCallback((next: ThemeMode) => {
     const root = document.documentElement;

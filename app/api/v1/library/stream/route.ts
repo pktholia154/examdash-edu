@@ -1,5 +1,6 @@
 import https from 'node:https';
 import { NextRequest, NextResponse } from 'next/server';
+import { buildFirebaseStorageHeaders } from '../../../../../server/firebase/default-db-mirror';
 import { verifyBearerIdToken } from '../../../../../server/firebase/verify-auth';
 import { resolveBookStreamUpstream } from '../../../../../server/repositories/catalog-repository';
 
@@ -28,18 +29,17 @@ function fetchUpstreamBytes(
   }
 
   const maxBytes = options.maxBytes ?? 64 * 1024 * 1024; // 64 MB hard FinOps cap
-  const reqHeaders: Record<string, string> = {
-    Accept: '*/*',
-  };
-
-  if (options.rangeHeader) {
-    reqHeaders.Range = options.rangeHeader;
-  }
-
-  // Only attach Firebase ID token if URL does not already carry an explicit download token
-  if (options.firebaseIdToken && !parsed.searchParams.has('token')) {
-    reqHeaders.Authorization = `Firebase ${options.firebaseIdToken}`;
-  }
+  const reqHeaders = buildFirebaseStorageHeaders(
+    options.firebaseIdToken,
+    {
+      Accept: '*/*',
+      ...(options.rangeHeader ? { Range: options.rangeHeader } : {}),
+    },
+    {
+      omitAuthIfTokenParamPresent: true,
+      targetUrl,
+    }
+  );
 
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -102,7 +102,7 @@ function fetchUpstreamBytes(
  * - Supports `206 Partial Content` byte-range forwarding (`Range` / `Accept-Ranges: bytes`) for WebKit & mobile.
  * - Eliminates browser/Worker CORS blocks against `firebasestorage.googleapis.com`.
  * - Enforces <= 15m HMAC signature verification on `mode=full` streams so `fullPdfStoragePath`
- *   and `fullMarkdownStoragePath` never leak to public HTML.
+ *   and `fullMarkdownStoragePath` never leak to public HTML, and NEVER substitutes sample files in full mode.
  */
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
@@ -149,6 +149,8 @@ export async function GET(req: NextRequest) {
       uid,
       expMs,
       sig,
+      verifiedTokenUid,
+      bearerIdToken: rawBearerToken,
     });
 
     if (resolution.status === 'unauthorized') {
@@ -171,29 +173,33 @@ export async function GET(req: NextRequest) {
       firebaseIdToken: rawBearerToken,
     });
 
-    // If upstream full storage object lacks public/auth Storage rules in this bucket,
-    // gracefully fall back to verified sample stream if available and stamp header.
-    let servedFallbackSample = false;
+    // Single brief retry if `(default)` Firestore purchase mirror was just created milliseconds ago
     if (
       mode === 'full' &&
-      (upstream.statusCode === 401 || upstream.statusCode === 403 || upstream.statusCode === 404) &&
-      resolution.target.fallbackSampleUrl &&
-      resolution.target.fallbackSampleUrl !== resolution.target.upstreamUrl
+      rawBearerToken &&
+      (upstream.statusCode === 401 || upstream.statusCode === 403)
     ) {
-      upstream = await fetchUpstreamBytes(resolution.target.fallbackSampleUrl, {
+      await new Promise<void>((r) => setTimeout(r, 250));
+      upstream = await fetchUpstreamBytes(resolution.target.upstreamUrl, {
         rangeHeader,
+        firebaseIdToken: rawBearerToken,
       });
-      servedFallbackSample = true;
     }
 
     if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
       return NextResponse.json(
         {
-          error: `Upstream storage returned HTTP ${upstream.statusCode}.`,
+          error: `Unable to stream full ${format.toUpperCase()} file from Firebase Storage (HTTP ${upstream.statusCode}).`,
           code: 'UPSTREAM_STORAGE_ERROR',
+          upstreamStatus: upstream.statusCode,
         },
         {
-          status: upstream.statusCode === 404 ? 404 : 502,
+          status:
+            upstream.statusCode === 404
+              ? 404
+              : upstream.statusCode === 401 || upstream.statusCode === 403
+              ? 403
+              : 502,
           headers: { 'Cache-Control': 'private, no-store' },
         }
       );
@@ -212,11 +218,7 @@ export async function GET(req: NextRequest) {
     if (upstream.headers['content-range']) {
       responseHeaders.set('Content-Range', upstream.headers['content-range']);
     }
-    if (servedFallbackSample) {
-      responseHeaders.set('X-ExamDash-Stream-Source', 'sample-fallback');
-    } else {
-      responseHeaders.set('X-ExamDash-Stream-Source', mode);
-    }
+    responseHeaders.set('X-ExamDash-Stream-Source', mode);
 
     responseHeaders.set(
       'Cache-Control',

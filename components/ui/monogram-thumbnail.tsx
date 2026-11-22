@@ -10,7 +10,7 @@ export interface MonogramThumbnailProps {
   title: string;
   type: string;
   collectionName: CollectionName;
-  size?: 'xs' | 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'list' | 'md' | 'lg';
   showBadge?: boolean;
   className?: string;
 }
@@ -27,7 +27,10 @@ const BADGE_CLASSES: Record<ContentVisualKind, string> = {
   quizbook: 'bg-white/18 text-white',
 };
 
-const SIZE_CLASSES: Record<'xs' | 'sm' | 'md' | 'lg', { box: string; monogram: string }> = {
+const SIZE_CLASSES: Record<
+  'xs' | 'sm' | 'list' | 'md' | 'lg',
+  { box: string; monogram: string; badge?: string }
+> = {
   xs: {
     box: 'w-12 h-12 shrink-0',
     monogram: 'text-sm font-extrabold tracking-tight',
@@ -36,13 +39,23 @@ const SIZE_CLASSES: Record<'xs' | 'sm' | 'md' | 'lg', { box: string; monogram: s
     box: 'w-16 h-16 shrink-0',
     monogram: 'text-lg font-extrabold tracking-tight',
   },
+  list: {
+    box: 'w-20 h-20 sm:w-24 sm:h-24 shrink-0',
+    monogram: 'text-2xl sm:text-3xl font-extrabold tracking-tight',
+    badge:
+      'top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase leading-none',
+  },
   md: {
     box: 'w-full aspect-square',
     monogram: 'text-4xl sm:text-5xl font-extrabold tracking-tight',
+    badge:
+      'top-2.5 right-2.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase leading-tight',
   },
   lg: {
     box: 'w-full aspect-square max-w-[260px]',
     monogram: 'text-5xl sm:text-6xl font-extrabold tracking-tight',
+    badge:
+      'top-2.5 right-2.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase leading-tight',
   },
 };
 
@@ -75,13 +88,8 @@ export function MonogramThumbnail({
     >
       <span className={cn('leading-none', sizing.monogram)}>{monogram}</span>
 
-      {showBadge && size !== 'sm' && size !== 'xs' && (
-        <span
-          className={cn(
-            'absolute top-2.5 right-2.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase leading-tight',
-            BADGE_CLASSES[visual.kind]
-          )}
-        >
+      {showBadge && sizing.badge && (
+        <span className={cn('absolute', sizing.badge, BADGE_CLASSES[visual.kind])}>
           {visual.badgeLabel}
         </span>
       )}

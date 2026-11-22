@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Download, Share, Smartphone, X } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -10,19 +10,6 @@ interface BeforeInstallPromptEvent extends Event {
 
 const DISMISS_STORAGE_KEY = 'ed-install-banner-dismissed';
 const BANNER_EVENT = 'ed-install-banner-change';
-
-function subscribeBannerEnv(callback: () => void) {
-  if (typeof window === 'undefined') return () => {};
-  const mql = window.matchMedia('(display-mode: standalone)');
-  mql.addEventListener('change', callback);
-  window.addEventListener(BANNER_EVENT, callback);
-  window.addEventListener('storage', callback);
-  return () => {
-    mql.removeEventListener('change', callback);
-    window.removeEventListener(BANNER_EVENT, callback);
-    window.removeEventListener('storage', callback);
-  };
-}
 
 function getBannerVisibilitySnapshot(): 'hidden' | 'ios' | 'standard' {
   if (typeof window === 'undefined') return 'hidden';
@@ -43,22 +30,21 @@ function getBannerVisibilitySnapshot(): 'hidden' | 'ios' | 'standard' {
   return /iphone|ipad|ipod/.test(ua) ? 'ios' : 'standard';
 }
 
-function getServerBannerSnapshot(): 'hidden' | 'ios' | 'standard' {
-  return 'hidden';
-}
-
 export function InstallAppCallout() {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
-
-  const bannerMode = useSyncExternalStore(
-    subscribeBannerEnv,
-    getBannerVisibilitySnapshot,
-    getServerBannerSnapshot
+  const [bannerMode, setBannerMode] = useState<'hidden' | 'ios' | 'standard'>(
+    'hidden'
   );
 
   useEffect(() => {
+    const syncBanner = () => {
+      setBannerMode(getBannerVisibilitySnapshot());
+    };
+    syncBanner();
+
+    const mql = window.matchMedia('(display-mode: standalone)');
     const onBeforeInstall = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
@@ -68,9 +54,15 @@ export function InstallAppCallout() {
       window.dispatchEvent(new Event(BANNER_EVENT));
     };
 
+    mql.addEventListener('change', syncBanner);
+    window.addEventListener(BANNER_EVENT, syncBanner);
+    window.addEventListener('storage', syncBanner);
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onAppInstalled);
     return () => {
+      mql.removeEventListener('change', syncBanner);
+      window.removeEventListener(BANNER_EVENT, syncBanner);
+      window.removeEventListener('storage', syncBanner);
       window.removeEventListener('beforeinstallprompt', onBeforeInstall);
       window.removeEventListener('appinstalled', onAppInstalled);
     };

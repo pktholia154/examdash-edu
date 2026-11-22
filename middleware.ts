@@ -76,13 +76,17 @@ export function middleware(req: NextRequest) {
   });
 
   if (req.method === 'GET') {
-    // Keep edge s-maxage bounded (60s) so newly deployed Cloud Run revisions never serve
-    // hours-stale HTML referencing previous-build `/_next/static/chunks/*` hashes.
-    res.headers.set(
-      'Cache-Control',
-      'public, max-age=0, s-maxage=60, stale-if-error=60'
-    );
-    res.headers.set('Vary', 'Accept-Encoding');
+    if (process.env.NODE_ENV === 'production') {
+      // Keep edge s-maxage bounded (60s) so newly deployed Cloud Run revisions never serve
+      // hours-stale HTML referencing previous-build `/_next/static/chunks/*` hashes.
+      res.headers.set(
+        'Cache-Control',
+        'public, max-age=0, s-maxage=60, stale-if-error=60'
+      );
+      res.headers.set('Vary', 'Accept-Encoding');
+    } else {
+      res.headers.set('Cache-Control', 'no-store, must-revalidate');
+    }
   }
 
   res.headers.delete('set-cookie');

@@ -9,56 +9,44 @@ import React, {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import DOMPurify from 'dompurify';
+import 'katex/dist/katex.min.css';
 import {
   AlertCircle,
-  Check,
-  Download,
-  Eye,
-  EyeOff,
-  List,
   Loader2,
-  Maximize2,
-  Minimize2,
+  Menu,
+  Minus,
   Moon,
+  Plus,
   RefreshCw,
-  Search,
   Sun,
   Sunset,
-  Trash2,
   X,
 } from 'lucide-react';
 import type { PublicBookDTO } from '../../../lib/types/catalog';
-import {
-  deleteBookFormatOffline,
-  hasBookFormatOffline,
-  OFFLINE_VAULT_UPDATED_EVENT,
-  readBookFormatOffline,
-  saveBookFormatOffline,
-} from '../../../lib/offline/offline-vault';
+import { fetchClientStorageBytes } from '../../../lib/firebase/storage-client';
+import { readBookFormatOffline } from '../../../lib/offline/offline-vault';
 import { cn } from '../../../lib/utils';
-import { useToast } from '../../toast/toast-context';
 import {
   DiagramLightbox,
   type LightboxPayload,
 } from '../shared/diagram-lightbox';
 import {
-  hasOfflineAsset,
   isTallScriptLanguage,
   openExternalReaderUrl,
   readOfflineAsset,
   readStoredJsonSync,
   registerLifecycleFlush,
-  removeOfflineAsset,
-  saveOfflineAsset,
-  setPlatformImmersiveMode,
   writeStoredJsonSync,
   type MarkdownFontMode,
   type MarkdownReadingProgress,
   type ReaderComfortTheme,
 } from '../shared/platform-adapter';
+import {
+  ReaderTopBar,
+  type ReaderTopBarProps,
+} from '../shared/reader-top-bar';
 import { SampleUnlockCard } from '../shared/sample-unlock-card';
 import type {
-  MarkdownSearchEntry,
   MarkdownTocItem,
   MarkdownWorkerRequest,
   MarkdownWorkerResponse,
@@ -67,6 +55,8 @@ import type {
 export interface MarkdownViewerProps {
   book: PublicBookDTO;
   streamUrl: string;
+  fullStoragePath?: string;
+  directStreamUrl?: string;
   initialMarkdownText?: string;
   isSample: boolean;
   userId?: string;
@@ -74,7 +64,7 @@ export interface MarkdownViewerProps {
   bearerTokenProvider?: () => Promise<string | null>;
   onRefreshSignedUrl?: () => Promise<string | null>;
   onSwitchToFullMode?: () => void;
-  embeddedHeightClass?: string;
+  topBar?: ReaderTopBarProps;
 }
 
 interface SanitizedSection {
@@ -88,9 +78,12 @@ const MAX_MD_SCALE = 2.0;
 const MD_SCALE_STEP = 0.1;
 const PINCH_PROSE_DEADZONE_PX = 24;
 
-function sanitizeMarkdownHtml(rawHtml: string): string {
+function sanitizeAndHydrateMarkdownHtml(
+  rawHtml: string,
+  mathMap: Record<string, string>
+): string {
   if (typeof window === 'undefined') return '';
-  return DOMPurify.sanitize(rawHtml, {
+  const sanitized = DOMPurify.sanitize(rawHtml, {
     FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'style'],
     FORBID_ATTR: [
       'onerror',
@@ -101,28 +94,10 @@ function sanitizeMarkdownHtml(rawHtml: string): string {
       'onblur',
       'style',
     ],
-    ADD_TAGS: [
-      'details',
-      'summary',
-      'math',
-      'semantics',
-      'mrow',
-      'mi',
-      'mo',
-      'mn',
-      'msup',
-      'msub',
-      'mfrac',
-      'msqrt',
-      'mtext',
-      'annotation',
-    ],
     ADD_ATTR: [
-      'open',
       'data-block-id',
       'data-sec-id',
-      'data-code-copy',
-      'data-table-expand',
+      'data-katex-id',
       'data-md-lightbox',
       'loading',
       'decoding',
@@ -132,11 +107,29 @@ function sanitizeMarkdownHtml(rawHtml: string): string {
     ALLOWED_URI_REGEXP:
       /^(?:(?:https?|mailto|tel|blob):|data:image\/(?:png|jpe?g|webp|gif|avif);base64,|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
   });
+
+  if (!mathMap || Object.keys(mathMap).length === 0) {
+    return sanitized;
+  }
+
+  // Hydrate trusted KaTeX-rendered HTML (generated with trust: false) AFTER DOMPurify
+  // so KaTeX layout styles, fractions, roots, and SVGs render intact without relaxing DOMPurify.
+  return sanitized.replace(
+    /<(div|span)([^>]*?)data-katex-id="(math_\d+)"([^>]*)><\/\1>/g,
+    (fullMatch, tag: string, _before: string, mathId: string) => {
+      const rendered = mathMap[mathId];
+      if (!rendered) return fullMatch;
+      const cls = tag === 'div' ? 'ed-md-math-block' : 'ed-md-math-inline';
+      return `<${tag} class="${cls}">${rendered}</${tag}>`;
+    }
+  );
 }
 
 export function MarkdownViewer({
   book,
   streamUrl,
+  fullStoragePath,
+  directStreamUrl,
   initialMarkdownText,
   isSample,
   userId,
@@ -144,13 +137,12 @@ export function MarkdownViewer({
   bearerTokenProvider,
   onRefreshSignedUrl,
   onSwitchToFullMode,
-  embeddedHeightClass = 'h-[78svh] min-h-[520px]',
+  topBar,
 }: MarkdownViewerProps) {
   const router = useRouter();
-  const { showToast } = useToast();
 
   const progressKey = `ed-md-prog-v1:${book.id}:${isSample ? 'sample' : 'full'}`;
-  const vaultKey = `md_${book.id}_${isSample ? 'sample' : 'full'}.md`;
+  const vaultKey = `md_${book.id}_sample.md`;
 
   const savedInitial = useMemo(
     () => readStoredJsonSync<MarkdownReadingProgress>(progressKey),
@@ -171,24 +163,10 @@ export function MarkdownViewer({
 
   const [sections, setSections] = useState<SanitizedSection[]>([]);
   const [toc, setToc] = useState<MarkdownTocItem[]>([]);
-  const [searchIndex, setSearchIndex] = useState<MarkdownSearchEntry[]>([]);
-  const [hasSolutions, setHasSolutions] = useState(false);
-  const [allSolutionsOpen, setAllSolutionsOpen] = useState(false);
-
-  const [activeHeadingTitle, setActiveHeadingTitle] = useState<string>(book.title);
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
-  const [scrollProgressPct, setScrollProgressPct] = useState<number>(0);
-
   const [tocOpen, setTocOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(
-    null
-  );
   const [lightboxPayload, setLightboxPayload] =
     useState<LightboxPayload | null>(null);
-  const [isImmersive, setIsImmersive] = useState(false);
-  const [hudVisible, setHudVisible] = useState(true);
 
   const [loadingState, setLoadingState] = useState<'loading' | 'ready' | 'error'>(
     'loading'
@@ -198,23 +176,18 @@ export function MarkdownViewer({
     initialMarkdownText || ''
   );
 
-  const [isSavedOffline, setIsSavedOffline] = useState(false);
-  const [isSavingOffline, setIsSavingOffline] = useState(false);
-
   const rootContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const proseRef = useRef<HTMLElement | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-
   const workerRef = useRef<Worker | null>(null);
-  const codeMapRef = useRef<Record<string, string>>({});
-  const tableMapRef = useRef<Record<string, string>>({});
-  const rawMarkdownBytesRef = useRef<ArrayBuffer | null>(null);
 
   const [reloadNonce, setReloadNonce] = useState(0);
   const mdScaleRef = useRef<number>(mdScale);
   const bearerTokenProviderRef = useRef(bearerTokenProvider);
   const onRefreshSignedUrlRef = useRef(onRefreshSignedUrl);
+  const streamUrlRef = useRef(streamUrl);
+  const fullStoragePathRef = useRef(fullStoragePath);
+  const directStreamUrlRef = useRef(directStreamUrl);
   const flushProgressRef = useRef<() => void>(() => {});
   const restoredAnchorRef = useRef<boolean>(false);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -231,6 +204,16 @@ export function MarkdownViewer({
     onRefreshSignedUrlRef.current = onRefreshSignedUrl;
   }, [onRefreshSignedUrl]);
 
+  useEffect(() => {
+    streamUrlRef.current = streamUrl;
+    fullStoragePathRef.current = fullStoragePath;
+    directStreamUrlRef.current = directStreamUrl;
+  }, [directStreamUrl, fullStoragePath, streamUrl]);
+
+  const hasStreamTarget = Boolean(
+    streamUrl || fullStoragePath || directStreamUrl
+  );
+
   const pinchRef = useRef<{
     active: boolean;
     deadzonePassed: boolean;
@@ -243,33 +226,6 @@ export function MarkdownViewer({
     () => isTallScriptLanguage(book.language, rawMarkdownSample),
     [book.language, rawMarkdownSample]
   );
-
-  useEffect(() => {
-    let active = true;
-    const syncVaultState = async () => {
-      const exists =
-        !isSample && userId
-          ? await hasBookFormatOffline(userId, book.id, 'markdown')
-          : await hasOfflineAsset(vaultKey);
-      if (active) setIsSavedOffline(exists);
-    };
-    void syncVaultState();
-    window.addEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
-    return () => {
-      active = false;
-      window.removeEventListener(OFFLINE_VAULT_UPDATED_EVENT, syncVaultState);
-    };
-  }, [book.id, isSample, userId, vaultKey]);
-
-  useEffect(() => {
-    const onFsChange = () => {
-      if (!document.fullscreenElement && isImmersive) {
-        setIsImmersive(false);
-      }
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, [isImmersive]);
 
   // Capture current top-quarter [data-block-id] anchor for Zoom-Proof Persistence & Eye-Line Lock
   const captureEyeLineAnchor = useCallback((): {
@@ -371,15 +327,9 @@ export function MarkdownViewer({
     [captureEyeLineAnchor, scheduleProgressSave]
   );
 
-  // Keyboard shortcuts: Cmd/Ctrl + F (In-Book Search), Cmd/Ctrl + +/-/0 (Zoom)
+  // Keyboard shortcuts: Cmd/Ctrl + +/-/0 (Zoom), Escape closes TOC drawer
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        setSearchOpen(true);
-        setTimeout(() => searchInputRef.current?.focus(), 40);
-        return;
-      }
       if (e.metaKey || e.ctrlKey) {
         if (e.key === '=' || e.key === '+') {
           e.preventDefault();
@@ -392,16 +342,16 @@ export function MarkdownViewer({
           applyScaleWithEyeLineLock(1.0);
         }
       }
-      if (e.key === 'Escape') {
-        if (tocOpen) setTocOpen(false);
-        if (searchOpen) setSearchOpen(false);
+      if (e.key === 'Escape' && tocOpen) {
+        e.stopPropagation();
+        setTocOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [applyScaleWithEyeLineLock, searchOpen, tocOpen]);
+  }, [applyScaleWithEyeLineLock, tocOpen]);
 
-  // Mobile Two-Finger Pinch on Prose -> Live Floating "130%" Pill (24px deadzone), Commit on Lift
+  // Mobile Two-Finger Pinch on Prose -> Live Floating Scale Indicator, Commit on Lift
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
@@ -470,25 +420,27 @@ export function MarkdownViewer({
     };
   }, [applyScaleWithEyeLineLock]);
 
-  // Fetch & Parse Markdown via Worker + Main-Thread DOMPurify Sanitization
+  // Fetch & Parse Markdown via Worker + Main-Thread DOMPurify + KaTeX Hydration
   useEffect(() => {
     let cancelled = false;
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), 30_000);
 
     const readFromLocalVault = async (): Promise<ArrayBuffer | null> => {
-      if (!isSample && userId) {
-        const uidBuf = await readBookFormatOffline(userId, book.id, 'markdown');
-        if (uidBuf) return uidBuf;
+      if (!isSample) {
+        if (!userId) return null;
+        return readBookFormatOffline(userId, book.id, 'markdown');
       }
       return readOfflineAsset(vaultKey);
     };
 
     const fetchOnlineMarkdownBuffer = async (): Promise<ArrayBuffer> => {
-      let resolvedUrl = streamUrl;
+      let resolvedUrl = streamUrlRef.current;
+      const activeStoragePath = fullStoragePathRef.current;
+      const activeDirectUrl = directStreamUrlRef.current;
+
       if (!resolvedUrl && !isSample && onRefreshSignedUrlRef.current) {
         resolvedUrl = (await onRefreshSignedUrlRef.current()) || '';
-      }
-      if (!resolvedUrl) {
-        throw new Error('No Markdown stream URL configured for this book.');
       }
 
       const fetchWithToken = async (url: string): Promise<Response> => {
@@ -498,31 +450,82 @@ export function MarkdownViewer({
           const token = await tokenProvider();
           if (token) headers.Authorization = `Bearer ${token}`;
         }
-        return fetch(url, { method: 'GET', headers });
+        return fetch(url, {
+          method: 'GET',
+          headers,
+          signal: abortController.signal,
+        });
       };
 
-      let res = await fetchWithToken(resolvedUrl);
-      if (
-        (res.status === 401 || res.status === 403) &&
-        !isSample &&
-        onRefreshSignedUrlRef.current
-      ) {
-        const refreshed = await onRefreshSignedUrlRef.current();
-        if (refreshed) {
-          res = await fetchWithToken(refreshed);
+      if (resolvedUrl) {
+        try {
+          let res = await fetchWithToken(resolvedUrl);
+          if (
+            (res.status === 401 || res.status === 403) &&
+            !isSample &&
+            onRefreshSignedUrlRef.current
+          ) {
+            const refreshed = await onRefreshSignedUrlRef.current();
+            if (refreshed) {
+              streamUrlRef.current = refreshed;
+              res = await fetchWithToken(refreshed);
+            }
+          }
+
+          if (res.ok) {
+            return await res.arrayBuffer();
+          }
+
+          if (isSample || (!activeStoragePath && !activeDirectUrl)) {
+            const errObj = (await res.json().catch(() => null)) as
+              | { error?: string | { message?: string } }
+              | null;
+            const parsedErr =
+              typeof errObj?.error === 'string'
+                ? errObj.error
+                : typeof errObj?.error?.message === 'string'
+                ? errObj.error.message
+                : '';
+            throw new Error(
+              parsedErr ||
+                `Failed to load Markdown stream (HTTP ${res.status}).`
+            );
+          }
+        } catch (streamErr) {
+          if (
+            abortController.signal.aborted ||
+            isSample ||
+            (!activeStoragePath && !activeDirectUrl)
+          ) {
+            throw streamErr;
+          }
         }
       }
 
-      if (!res.ok) {
-        const errObj = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(
-          errObj.error || `Failed to load Markdown stream (HTTP ${res.status}).`
-        );
+      if (!isSample && activeStoragePath) {
+        try {
+          return await fetchClientStorageBytes(
+            activeStoragePath,
+            abortController.signal
+          );
+        } catch (storageErr) {
+          if (abortController.signal.aborted || !activeDirectUrl) {
+            throw storageErr;
+          }
+        }
       }
 
-      return res.arrayBuffer();
+      if (!isSample && activeDirectUrl) {
+        const directRes = await fetch(activeDirectUrl, {
+          method: 'GET',
+          signal: abortController.signal,
+        });
+        if (directRes.ok) {
+          return directRes.arrayBuffer();
+        }
+      }
+
+      throw new Error('No Markdown stream URL configured for this book.');
     };
 
     const runLoad = async () => {
@@ -537,16 +540,11 @@ export function MarkdownViewer({
         if (isSample) {
           const offlineBuf = await readFromLocalVault();
           if (offlineBuf) {
-            rawMarkdownBytesRef.current = offlineBuf;
             markdownText = new TextDecoder('utf-8').decode(offlineBuf);
           } else if (initialMarkdownText && initialMarkdownText.trim().length > 0) {
             markdownText = initialMarkdownText;
-            rawMarkdownBytesRef.current = new TextEncoder().encode(
-              markdownText
-            ).buffer;
-          } else if (streamUrl) {
+          } else if (streamUrlRef.current) {
             const buf = await fetchOnlineMarkdownBuffer();
-            rawMarkdownBytesRef.current = buf;
             markdownText = new TextDecoder('utf-8').decode(buf);
           } else {
             markdownText = `# ${book.title}\n\n${
@@ -567,21 +565,18 @@ export function MarkdownViewer({
             }
             if (!buf) {
               throw new Error(
-                'This Markdown edition is not saved offline on this device yet. Reconnect to read online or save offline.'
+                'This Markdown edition is not saved offline on this device yet. Reconnect to read online.'
               );
             }
-            rawMarkdownBytesRef.current = buf;
             markdownText = new TextDecoder('utf-8').decode(buf);
           } else {
             try {
               const buf = await fetchOnlineMarkdownBuffer();
-              rawMarkdownBytesRef.current = buf;
               markdownText = new TextDecoder('utf-8').decode(buf);
             } catch (onlineErr) {
               if (cancelled) return;
               const vaultFallback = await readFromLocalVault();
               if (vaultFallback) {
-                rawMarkdownBytesRef.current = vaultFallback;
                 markdownText = new TextDecoder('utf-8').decode(vaultFallback);
               } else {
                 throw onlineErr;
@@ -602,36 +597,23 @@ export function MarkdownViewer({
         const worker = workerRef.current;
         const reqId = `md_${Date.now()}`;
 
-        worker.onmessage = async (ev: MessageEvent<MarkdownWorkerResponse>) => {
+        worker.onmessage = (ev: MessageEvent<MarkdownWorkerResponse>) => {
           if (cancelled) return;
           const data = ev.data;
           if (!data || data.type !== 'PARSE_SUCCESS' || data.requestId !== reqId) {
             return;
           }
 
-          if (data.hasMath) {
-            await import('./katex-styles-loader').catch(() => {});
-          }
-          if (cancelled) return;
-
-          codeMapRef.current = data.codeMap;
-          tableMapRef.current = data.tableMap;
-
           const sanitized: SanitizedSection[] = data.sections.map((sec) => ({
             sectionId: sec.sectionId,
             headingTitle: sec.headingTitle,
-            safeHtml: sanitizeMarkdownHtml(sec.rawHtml),
+            safeHtml: sanitizeAndHydrateMarkdownHtml(sec.rawHtml, data.mathMap),
           }));
 
           setSections(sanitized);
           setToc(data.toc);
-          setSearchIndex(data.searchIndex);
-          setHasSolutions(data.hasSolutionAccordions);
           if (data.toc.length > 0) {
-            setActiveHeadingTitle(data.toc[0].text);
             setActiveHeadingId(data.toc[0].id);
-          } else {
-            setActiveHeadingTitle(book.title);
           }
           setLoadingState('ready');
         };
@@ -655,25 +637,33 @@ export function MarkdownViewer({
         if (cancelled) return;
         setLoadingState('error');
         setErrorMessage(
-          err instanceof Error ? err.message : 'Unable to load Markdown stream.'
+          abortController.signal.aborted
+            ? 'Timed out loading Markdown stream. Check your connection and retry.'
+            : err instanceof Error
+            ? err.message
+            : 'Unable to load Markdown stream.'
         );
+      } finally {
+        clearTimeout(timeoutId);
       }
     };
 
     void runLoad();
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
+      abortController.abort();
     };
   }, [
     book.fullDescription,
     book.id,
     book.seoDescription,
     book.title,
+    hasStreamTarget,
     initialMarkdownText,
     isSample,
     preferOffline,
     reloadNonce,
-    streamUrl,
     userId,
     vaultKey,
   ]);
@@ -712,21 +702,17 @@ export function MarkdownViewer({
           scroller.scrollTop +
           (blockRect.top - scrollerRect.top) +
           blockRect.height * (savedInitial.blockProgressRatio || 0) -
-          36;
+          24;
         scroller.scrollTo({ top: Math.max(0, targetTop), behavior: 'instant' });
       }
     });
   }, [loadingState, savedInitial, sections.length]);
 
-  // Scroll listener -> 2px progress hairline + Active Chapter/Heading tracking
+  // Scroll listener -> Active H1 tracking + Progress persistence
   const handleScroll = useCallback(() => {
     const scroller = scrollerRef.current;
     const prose = proseRef.current;
     if (!scroller || !prose) return;
-
-    const maxScroll = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
-    const pct = Math.min(100, Math.max(0, (scroller.scrollTop / maxScroll) * 100));
-    setScrollProgressPct(pct);
 
     if (toc.length > 0) {
       const scrollerTop = scroller.getBoundingClientRect().top;
@@ -744,98 +730,38 @@ export function MarkdownViewer({
           }
         }
       }
-      setActiveHeadingTitle(currentToc.text);
       setActiveHeadingId(currentToc.id);
     }
 
     scheduleProgressSave();
   }, [scheduleProgressSave, toc]);
 
-  // Jump to Heading or Search Match Block
-  const jumpToBlockOrHeading = useCallback(
-    (opts: { headingId?: string; blockId?: string; highlight?: boolean }) => {
-      const scroller = scrollerRef.current;
-      const prose = proseRef.current;
-      if (!scroller || !prose) return;
+  // Jump to Heading
+  const jumpToHeading = useCallback((headingId: string) => {
+    const scroller = scrollerRef.current;
+    const prose = proseRef.current;
+    if (!scroller || !prose || !headingId) return;
 
-      const selector = opts.headingId
-        ? `#${CSS.escape(opts.headingId)}`
-        : opts.blockId
-        ? `[data-block-id="${CSS.escape(opts.blockId)}"]`
-        : '';
-      if (!selector) return;
+    const targetEl = prose.querySelector<HTMLElement>(
+      `#${CSS.escape(headingId)}`
+    );
+    if (!targetEl) return;
 
-      const targetEl = prose.querySelector<HTMLElement>(selector);
-      if (!targetEl) return;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const targetRect = targetEl.getBoundingClientRect();
+    const destination = Math.max(
+      0,
+      scroller.scrollTop + (targetRect.top - scrollerRect.top) - 16
+    );
+    scroller.scrollTo({ top: destination, behavior: 'smooth' });
+  }, []);
 
-      const scrollerRect = scroller.getBoundingClientRect();
-      const targetRect = targetEl.getBoundingClientRect();
-      const destination = Math.max(
-        0,
-        scroller.scrollTop + (targetRect.top - scrollerRect.top) - 32
-      );
-      scroller.scrollTo({ top: destination, behavior: 'smooth' });
-
-      if (opts.highlight && opts.blockId) {
-        // Remove previous highlight class
-        prose
-          .querySelectorAll('.ed-md-block-highlight')
-          .forEach((el) => el.classList.remove('ed-md-block-highlight'));
-        targetEl.classList.add('ed-md-block-highlight');
-        setHighlightedBlockId(opts.blockId);
-      }
-    },
-    []
-  );
-
-  // Clear search highlight when search closes
-  useEffect(() => {
-    if (!searchOpen && highlightedBlockId && proseRef.current) {
-      proseRef.current
-        .querySelectorAll('.ed-md-block-highlight')
-        .forEach((el) => el.classList.remove('ed-md-block-highlight'));
-      setHighlightedBlockId(null);
-    }
-  }, [highlightedBlockId, searchOpen]);
-
-  // Single Delegated Click / Link / Lightbox / Code-Copy Interceptor
+  // Delegated Click / Link / Image Lightbox Interceptor
   const handleProseClick = useCallback(
     (e: React.MouseEvent<HTMLElement>) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
 
-      // 1. 1-Tap Copy Code Button
-      const copyBtn = target.closest<HTMLButtonElement>('[data-code-copy]');
-      if (copyBtn) {
-        e.preventDefault();
-        const codeId = copyBtn.getAttribute('data-code-copy') || '';
-        const rawCode = codeMapRef.current[codeId] ?? '';
-        if (rawCode && navigator.clipboard?.writeText) {
-          void navigator.clipboard.writeText(rawCode).then(() => {
-            showToast('Code snippet copied to clipboard!', 'success');
-          });
-        }
-        return;
-      }
-
-      // 2. Expand Wide Table into Pinch-Zoom Lightbox
-      const expandTableBtn =
-        target.closest<HTMLButtonElement>('[data-table-expand]');
-      if (expandTableBtn) {
-        e.preventDefault();
-        const tableId = expandTableBtn.getAttribute('data-table-expand') || '';
-        const rawTable = tableMapRef.current[tableId] ?? '';
-        if (rawTable) {
-          setLightboxPayload({
-            kind: 'table',
-            title: `${book.title} — Expanded Data Table`,
-            sanitizedTableHtml: sanitizeMarkdownHtml(rawTable),
-          });
-        }
-        return;
-      }
-
-      // 3. Tap-to-Expand Image / Diagram Lightbox
       const imgEl = target.closest<HTMLImageElement>('img');
       if (imgEl && imgEl.src) {
         e.preventDefault();
@@ -848,7 +774,6 @@ export function MarkdownViewer({
         return;
       }
 
-      // 4. Delegated Link Interceptor (#anchor, internal /books|/exams, external Capacitor Browser)
       const anchorEl = target.closest<HTMLAnchorElement>('a[href]');
       if (anchorEl) {
         const rawHref = anchorEl.getAttribute('href') || '';
@@ -857,7 +782,7 @@ export function MarkdownViewer({
         if (rawHref.startsWith('#')) {
           e.preventDefault();
           const slug = decodeURIComponent(rawHref.slice(1));
-          jumpToBlockOrHeading({ headingId: slug });
+          jumpToHeading(slug);
           return;
         }
 
@@ -873,106 +798,8 @@ export function MarkdownViewer({
         }
       }
     },
-    [book.title, jumpToBlockOrHeading, router, showToast]
+    [book.title, jumpToHeading, router]
   );
-
-  // Reveal / Collapse All MCQ Solutions Toggle
-  const handleToggleAllSolutions = () => {
-    const next = !allSolutionsOpen;
-    setAllSolutionsOpen(next);
-    const prose = proseRef.current;
-    if (!prose) return;
-    prose.querySelectorAll<HTMLDetailsElement>('details').forEach((d) => {
-      d.open = next;
-    });
-  };
-
-  const handleToggleOfflineVault = async () => {
-    if (isSavedOffline) {
-      if (!isSample && userId) {
-        await deleteBookFormatOffline(userId, book.id, 'markdown');
-      } else {
-        await removeOfflineAsset(vaultKey);
-      }
-      setIsSavedOffline(false);
-      showToast('Removed offline Markdown copy from device vault.');
-      return;
-    }
-    const buf = rawMarkdownBytesRef.current;
-    if (!buf) return;
-    setIsSavingOffline(true);
-    try {
-      if (!isSample && userId) {
-        const ctrl = new AbortController();
-        await saveBookFormatOffline({
-          uid: userId,
-          itemId: book.id,
-          urlSlug: book.urlSlug,
-          format: 'markdown',
-          remoteUpdatedAtMs:
-            new Date(book.updatedAtIso).getTime() || Date.now(),
-          getIdToken: bearerTokenProviderRef.current || (async () => null),
-          signal: ctrl.signal,
-          prebuiltBuffer: buf.slice(0),
-        });
-        setIsSavedOffline(true);
-        showToast('Saved Markdown book to offline study vault!', 'success');
-      } else {
-        const ok = await saveOfflineAsset(vaultKey, buf);
-        if (ok) {
-          setIsSavedOffline(true);
-          showToast('Saved Markdown book to offline study vault!', 'success');
-        } else {
-          showToast('Unable to save offline copy on this browser.', 'danger');
-        }
-      }
-    } catch (err) {
-      showToast(
-        err instanceof Error
-          ? err.message
-          : 'Unable to save offline copy on this device.',
-        'danger'
-      );
-    } finally {
-      setIsSavingOffline(false);
-    }
-  };
-
-  const handleToggleImmersive = async () => {
-    const next = !isImmersive;
-    setIsImmersive(next);
-    await setPlatformImmersiveMode(next, rootContainerRef.current);
-  };
-
-  // Filtered In-Book Search Results
-  const searchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (q.length < 2) return [];
-    const matches: Array<{
-      blockId: string;
-      headingTitle: string;
-      snippet: string;
-    }> = [];
-
-    for (const item of searchIndex) {
-      const idx = item.text.toLowerCase().indexOf(q);
-      if (idx !== -1) {
-        const start = Math.max(0, idx - 42);
-        const end = Math.min(item.text.length, idx + q.length + 68);
-        const snippet =
-          (start > 0 ? '…' : '') +
-          item.text.slice(start, end) +
-          (end < item.text.length ? '…' : '');
-        matches.push({
-          blockId: item.blockId,
-          headingTitle: item.headingTitle,
-          snippet,
-        });
-        if (matches.length >= 40) break;
-      }
-    }
-    return matches;
-  }, [searchIndex, searchQuery]);
 
   const displayedScalePct = Math.round((livePinchScale ?? mdScale) * 100);
 
@@ -981,310 +808,142 @@ export function MarkdownViewer({
       <div
         ref={rootContainerRef}
         className={cn(
-          'relative flex flex-col rounded-xl border border-[var(--reader-border,var(--border-subtle))] overflow-hidden',
+          'relative flex flex-col w-full h-full overflow-hidden',
           comfortTheme === 'light' && 'ed-reader-skin-light',
           comfortTheme === 'sepia' && 'ed-reader-skin-sepia',
-          comfortTheme === 'dark' && 'ed-reader-skin-dark',
-          isImmersive
-            ? 'fixed inset-0 z-50 h-[100dvh] w-screen rounded-none border-0'
-            : embeddedHeightClass
+          comfortTheme === 'dark' && 'ed-reader-skin-dark'
         )}
         style={{ backgroundColor: 'var(--reader-bg)', color: 'var(--reader-ink)' }}
       >
-        {/* 2px Top Reading-Progress Hairline */}
-        <div
-          aria-hidden="true"
-          className="h-0.5 w-full bg-[var(--reader-border)] shrink-0 overflow-hidden"
-        >
-          <div
-            className="h-full bg-[var(--reader-accent)] transition-transform duration-150 origin-left"
-            style={{
-              transform: `scaleX(${scrollProgressPct / 100})`,
-            }}
-          />
-        </div>
+        {/* Bar 1: Title, PDF/Markdown Toggle, Cross Button */}
+        {topBar && <ReaderTopBar {...topBar} />}
 
-        {/* Context Header & Study Controls */}
-        {hudVisible && (
-          <div
-            data-nosnippet=""
-            className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-[var(--reader-border)] bg-[var(--reader-bg)] shrink-0"
-            style={{
-              paddingTop: isImmersive
-                ? 'calc(0.5rem + var(--safe-area-inset-top))'
-                : undefined,
-            }}
-          >
-            {/* Active Chapter / Slide-Over TOC Trigger */}
+        {/* Bar 2: Minimal Single-Row Controls — Menu (H1 TOC), Font Type, +/- Zoom, Light/Sepia/Dark */}
+        <div
+          data-nosnippet=""
+          className="flex items-center justify-between gap-1.5 w-full px-2.5 sm:px-4 py-1.5 border-b border-[var(--reader-border)] bg-[var(--reader-bg)] text-[var(--reader-ink)] shrink-0"
+        >
+          {/* Left: Menu (H1 TOC) + Font Type */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setTocOpen(true)}
-              aria-label="Open Table of Contents"
-              className="inline-flex items-center gap-2 min-h-[44px] px-3 rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] transition-colors max-w-[220px] sm:max-w-xs"
+              aria-label="Open menu table of contents"
+              className="inline-flex items-center justify-center gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] transition-colors"
             >
-              <List className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="text-xs sm:text-sm font-semibold truncate">
-                {activeHeadingTitle}
-              </span>
+              <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span className="hidden sm:inline text-xs font-semibold">Menu</span>
             </button>
 
-            {/* Typography, Scale, Search, Solutions, Skin & Vault Controls */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              {/* In-Book Search Trigger */}
+            <button
+              type="button"
+              onClick={() => {
+                setFontMode((m) => (m === 'sans' ? 'serif' : 'sans'));
+                scheduleProgressSave();
+              }}
+              aria-label={`Switch to ${fontMode === 'sans' ? 'Serif' : 'Sans'} font`}
+              className="inline-flex items-center justify-center h-8 sm:h-9 px-2 sm:px-2.5 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap"
+            >
+              {fontMode === 'sans' ? 'Sans' : 'Serif'}
+            </button>
+          </div>
+
+          {/* Right: +/- Zoom + Light/Sepia/Dark */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div
+              role="group"
+              aria-label="Text zoom controls"
+              className="inline-flex items-center rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5 tabular-nums"
+            >
               <button
                 type="button"
-                aria-pressed={searchOpen}
-                onClick={() => {
-                  setSearchOpen((v) => !v);
-                  setTimeout(() => searchInputRef.current?.focus(), 40);
-                }}
-                aria-label="Search inside book"
-                className={cn(
-                  'inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--reader-border)] transition-colors',
-                  searchOpen
-                    ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
-                    : 'bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)]'
-                )}
+                disabled={mdScale <= MIN_MD_SCALE}
+                onClick={() => applyScaleWithEyeLineLock(mdScale - MD_SCALE_STEP)}
+                aria-label="Decrease text size"
+                className="inline-flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
               >
-                <Search className="w-4 h-4" aria-hidden="true" />
+                <Minus className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
-
-              {/* Reveal / Hide All Solutions (shown automatically for Question Banks) */}
-              {hasSolutions && (
-                <button
-                  type="button"
-                  onClick={handleToggleAllSolutions}
-                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] text-xs font-semibold transition-colors whitespace-nowrap"
-                >
-                  {allSolutionsOpen ? (
-                    <>
-                      <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span className="hidden md:inline">Hide Answers</span>
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span className="hidden md:inline">Show Answers</span>
-                    </>
-                  )}
-                </button>
-              )}
-
-              {/* 1-Tap Sans <-> Serif Reader Toggle */}
               <button
                 type="button"
+                onClick={() => applyScaleWithEyeLineLock(1.0)}
+                aria-label="Reset text size to 100%"
+                className="h-7 sm:h-8 px-1.5 sm:px-2 text-[11px] sm:text-xs font-semibold rounded hover:bg-[var(--reader-elevated)] transition-colors whitespace-nowrap"
+              >
+                {displayedScalePct}%
+              </button>
+              <button
+                type="button"
+                disabled={mdScale >= MAX_MD_SCALE}
+                onClick={() => applyScaleWithEyeLineLock(mdScale + MD_SCALE_STEP)}
+                aria-label="Increase text size"
+                className="inline-flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div
+              role="group"
+              aria-label="Reading theme mode"
+              className="inline-flex items-center rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5"
+            >
+              <button
+                type="button"
+                aria-pressed={comfortTheme === 'light'}
                 onClick={() => {
-                  setFontMode((m) => (m === 'sans' ? 'serif' : 'sans'));
+                  setComfortTheme('light');
                   scheduleProgressSave();
                 }}
-                aria-label={`Switch to ${fontMode === 'sans' ? 'Serif' : 'Sans'} font`}
-                className="inline-flex items-center justify-center min-h-[44px] px-3 rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] text-xs font-semibold transition-colors whitespace-nowrap"
+                aria-label="Light mode"
+                className={cn(
+                  'inline-flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded transition-colors',
+                  comfortTheme === 'light'
+                    ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
+                    : 'hover:bg-[var(--reader-elevated)]'
+                )}
               >
-                {fontMode === 'sans' ? 'Sans' : 'Serif'}
+                <Sun className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
-
-              {/* Synchronous Eye-Line Lock A- / 100% / A+ Controls */}
-              <div
-                role="group"
-                aria-label="Text size controls"
-                className="inline-flex items-center rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5 tabular-nums"
-              >
-                <button
-                  type="button"
-                  disabled={mdScale <= MIN_MD_SCALE}
-                  onClick={() => applyScaleWithEyeLineLock(mdScale - MD_SCALE_STEP)}
-                  aria-label="Decrease text size"
-                  className="min-h-[40px] px-2.5 text-xs font-bold rounded-md hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
-                >
-                  A−
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyScaleWithEyeLineLock(1.0)}
-                  aria-label="Reset text size to 100%"
-                  className="min-h-[40px] px-2 text-xs font-semibold rounded-md hover:bg-[var(--reader-elevated)] transition-colors whitespace-nowrap"
-                >
-                  {displayedScalePct}%
-                </button>
-                <button
-                  type="button"
-                  disabled={mdScale >= MAX_MD_SCALE}
-                  onClick={() => applyScaleWithEyeLineLock(mdScale + MD_SCALE_STEP)}
-                  aria-label="Increase text size"
-                  className="min-h-[40px] px-2.5 text-xs font-bold rounded-md hover:bg-[var(--reader-elevated)] disabled:opacity-40 transition-colors"
-                >
-                  A+
-                </button>
-              </div>
-
-              {/* Comfort Skins (Light / Warm Sepia / True Dark) */}
-              <div
-                role="group"
-                aria-label="Reading comfort theme"
-                className="inline-flex items-center rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5"
-              >
-                <button
-                  type="button"
-                  aria-pressed={comfortTheme === 'light'}
-                  onClick={() => {
-                    setComfortTheme('light');
-                    scheduleProgressSave();
-                  }}
-                  aria-label="Light mode"
-                  className={cn(
-                    'inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md transition-colors',
-                    comfortTheme === 'light'
-                      ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
-                      : 'hover:bg-[var(--reader-elevated)]'
-                  )}
-                >
-                  <Sun className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={comfortTheme === 'sepia'}
-                  onClick={() => {
-                    setComfortTheme('sepia');
-                    scheduleProgressSave();
-                  }}
-                  aria-label="Warm sepia mode"
-                  className={cn(
-                    'inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md transition-colors',
-                    comfortTheme === 'sepia'
-                      ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
-                      : 'hover:bg-[var(--reader-elevated)]'
-                  )}
-                >
-                  <Sunset className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={comfortTheme === 'dark'}
-                  onClick={() => {
-                    setComfortTheme('dark');
-                    scheduleProgressSave();
-                  }}
-                  aria-label="True dark mode"
-                  className={cn(
-                    'inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-md transition-colors',
-                    comfortTheme === 'dark'
-                      ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
-                      : 'hover:bg-[var(--reader-elevated)]'
-                  )}
-                >
-                  <Moon className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
-              </div>
-
-              {/* Offline Study Vault Toggle */}
               <button
                 type="button"
-                disabled={isSavingOffline || loadingState !== 'ready'}
-                onClick={() => void handleToggleOfflineVault()}
-                aria-label={
-                  isSavedOffline
-                    ? 'Remove offline Markdown copy'
-                    : 'Save Markdown book for offline study'
-                }
-                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] disabled:opacity-40 text-xs font-semibold transition-colors whitespace-nowrap"
-              >
-                {isSavedOffline ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-[var(--status-success)]" aria-hidden="true" />
-                    <span className="hidden sm:inline">Offline</span>
-                    <Trash2 className="w-3 h-3 opacity-60" aria-hidden="true" />
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span className="hidden sm:inline">
-                      {isSavingOffline ? 'Saving...' : 'Offline'}
-                    </span>
-                  </>
+                aria-pressed={comfortTheme === 'sepia'}
+                onClick={() => {
+                  setComfortTheme('sepia');
+                  scheduleProgressSave();
+                }}
+                aria-label="Sepia mode"
+                className={cn(
+                  'inline-flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded transition-colors',
+                  comfortTheme === 'sepia'
+                    ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
+                    : 'hover:bg-[var(--reader-elevated)]'
                 )}
+              >
+                <Sunset className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
-
-              {/* Fullscreen / Immersive Toggle */}
               <button
                 type="button"
-                onClick={() => void handleToggleImmersive()}
-                aria-label={isImmersive ? 'Exit full screen' : 'Full screen reader'}
-                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] transition-colors"
-              >
-                {isImmersive ? (
-                  <Minimize2 className="w-4 h-4" aria-hidden="true" />
-                ) : (
-                  <Maximize2 className="w-4 h-4" aria-hidden="true" />
+                aria-pressed={comfortTheme === 'dark'}
+                onClick={() => {
+                  setComfortTheme('dark');
+                  scheduleProgressSave();
+                }}
+                aria-label="Dark mode"
+                className={cn(
+                  'inline-flex items-center justify-center h-7 w-7 sm:h-8 sm:w-8 rounded transition-colors',
+                  comfortTheme === 'dark'
+                    ? 'bg-[var(--reader-accent)] text-[var(--reader-accent-ink)]'
+                    : 'hover:bg-[var(--reader-elevated)]'
                 )}
+              >
+                <Moon className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Lightweight In-Book Search Panel */}
-        {searchOpen && (
-          <div
-            data-nosnippet=""
-            className="border-b border-[var(--reader-border)] bg-[var(--reader-surface)] p-3 space-y-2.5 shrink-0"
-          >
-            <div className="flex items-center gap-2 max-w-2xl mx-auto">
-              <div className="relative flex-1">
-                <Search
-                  className="w-4 h-4 text-[var(--reader-muted)] absolute start-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                  aria-hidden="true"
-                />
-                <input
-                  ref={searchInputRef}
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search terms, concepts, or question numbers..."
-                  className="w-full min-h-[44px] ps-9 pe-3 rounded-lg border border-[var(--reader-border-strong)] bg-[var(--reader-bg)] text-base text-[var(--reader-ink)]"
-                />
-              </div>
-              <span className="text-xs font-semibold text-[var(--reader-muted)] tabular-nums whitespace-nowrap">
-                {searchQuery.trim().length >= 2
-                  ? `${searchResults.length} hits`
-                  : 'Min 2 chars'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setSearchOpen(false)}
-                aria-label="Close in-book search"
-                className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-[var(--reader-border)] bg-[var(--reader-bg)]"
-              >
-                <X className="w-4 h-4" aria-hidden="true" />
-              </button>
-            </div>
-
-            {searchResults.length > 0 && (
-              <div className="max-h-48 overflow-y-auto max-w-2xl mx-auto divide-y divide-[var(--reader-border)] rounded-lg border border-[var(--reader-border)] bg-[var(--reader-bg)]">
-                {searchResults.map((hit, idx) => (
-                  <button
-                    key={`${hit.blockId}-${idx}`}
-                    type="button"
-                    onClick={() =>
-                      jumpToBlockOrHeading({
-                        blockId: hit.blockId,
-                        highlight: true,
-                      })
-                    }
-                    className="w-full text-start px-3.5 py-2.5 hover:bg-[var(--reader-elevated)] transition-colors block"
-                  >
-                    <p className="text-[11px] font-semibold text-[var(--reader-muted)] truncate">
-                      {hit.headingTitle}
-                    </p>
-                    <p className="text-xs text-[var(--reader-ink)] line-clamp-2 mt-0.5">
-                      {hit.snippet}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Slide-Over Table of Contents Drawer */}
+        {/* Slide-Over Menu (Strictly H1 Table of Contents) */}
         {tocOpen && (
           <div
             data-nosnippet=""
@@ -1294,24 +953,29 @@ export function MarkdownViewer({
             <aside
               aria-label="Table of contents"
               onClick={(e) => e.stopPropagation()}
-              className="w-80 max-w-[86vw] h-full bg-[var(--reader-bg)] border-e border-[var(--reader-border-strong)] flex flex-col"
+              className="w-72 max-w-[85vw] h-full bg-[var(--reader-bg)] border-e border-[var(--reader-border-strong)] flex flex-col"
             >
-              <div className="flex items-center justify-between gap-3 px-4 py-3.5 border-b border-[var(--reader-border)]">
-                <h2 className="text-sm font-bold truncate">Table of Contents</h2>
+              <div
+                className="flex items-center justify-between gap-2 px-3.5 py-2.5 border-b border-[var(--reader-border)]"
+                style={{
+                  paddingTop: 'calc(0.625rem + var(--safe-area-inset-top))',
+                }}
+              >
+                <h2 className="text-sm font-bold truncate">Contents</h2>
                 <button
                   type="button"
                   onClick={() => setTocOpen(false)}
-                  aria-label="Close Table of Contents"
-                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg hover:bg-[var(--reader-elevated)]"
+                  aria-label="Close table of contents"
+                  className="inline-flex items-center justify-center h-9 w-9 rounded-md hover:bg-[var(--reader-elevated)]"
                 >
                   <X className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              <div className="flex-1 overflow-y-auto p-2 space-y-1">
                 {toc.length === 0 ? (
                   <p className="text-xs text-[var(--reader-muted)] p-3">
-                    No chapter headings detected in this document.
+                    No chapters found in this document.
                   </p>
                 ) : (
                   toc.map((entry) => {
@@ -1322,12 +986,10 @@ export function MarkdownViewer({
                         type="button"
                         onClick={() => {
                           setTocOpen(false);
-                          jumpToBlockOrHeading({ headingId: entry.id });
+                          jumpToHeading(entry.id);
                         }}
                         className={cn(
-                          'w-full text-start min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm transition-colors flex items-center',
-                          entry.level === 2 && 'ps-6',
-                          entry.level === 3 && 'ps-9 text-xs',
+                          'w-full text-start min-h-[44px] px-3 py-2 rounded-md text-xs sm:text-sm transition-colors flex items-center',
                           isActive
                             ? 'bg-[var(--reader-elevated)] font-bold text-[var(--reader-ink)]'
                             : 'font-medium text-[var(--reader-muted)] hover:bg-[var(--reader-surface)] hover:text-[var(--reader-ink)]'
@@ -1343,33 +1005,29 @@ export function MarkdownViewer({
           </div>
         )}
 
-        {/* Main Scrollable Reflowable Prose Stage */}
+        {/* Full-Width Scrollable Prose Stage with Minimal Mobile Margins */}
         <div
           ref={scrollerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-8 py-6 sm:py-10"
+          className="flex-1 overflow-y-auto overscroll-contain px-2.5 sm:px-6 lg:px-10 py-3 sm:py-5"
           style={{
-            paddingBottom: isImmersive
-              ? 'calc(2.5rem + var(--safe-area-inset-bottom))'
-              : undefined,
+            paddingBottom: 'calc(1.5rem + var(--safe-area-inset-bottom))',
           }}
         >
           {loadingState === 'loading' && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[320px] text-center">
+            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
               <Loader2
-                className="w-7 h-7 animate-spin text-[var(--reader-muted)] mb-3"
+                className="w-6 h-6 animate-spin text-[var(--reader-muted)] mb-2.5"
                 aria-hidden="true"
               />
-              <p className="text-sm font-semibold">
-                Chunking & Sanitizing Study Sections...
-              </p>
+              <p className="text-sm font-semibold">Loading content...</p>
             </div>
           )}
 
           {loadingState === 'error' && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[320px] text-center p-6">
+            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center p-6">
               <AlertCircle
-                className="w-7 h-7 text-[var(--status-danger)] mb-3"
+                className="w-6 h-6 text-[var(--status-danger)] mb-2.5"
                 aria-hidden="true"
               />
               <h3 className="text-base font-bold">Unable to Load Markdown</h3>
@@ -1383,7 +1041,7 @@ export function MarkdownViewer({
                   setErrorMessage('');
                   setReloadNonce((n) => n + 1);
                 }}
-                className="mt-5 inline-flex items-center justify-center gap-2 min-h-[48px] px-5 rounded-lg bg-[var(--reader-accent)] text-[var(--reader-accent-ink)] text-sm font-semibold"
+                className="mt-5 inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-lg bg-[var(--reader-accent)] text-[var(--reader-accent-ink)] text-sm font-semibold"
               >
                 <RefreshCw className="w-4 h-4" aria-hidden="true" />
                 <span>Retry</span>
@@ -1419,9 +1077,8 @@ export function MarkdownViewer({
                 ))}
               </article>
 
-              {/* End-of-Sample Native Unlock Card */}
               {isSample && (
-                <div className="mt-8">
+                <div className="mt-6">
                   <SampleUnlockCard
                     book={book}
                     formatLabel="Markdown"
@@ -1433,46 +1090,18 @@ export function MarkdownViewer({
           )}
         </div>
 
-        {/* Live Mobile Pinch Scale Pill */}
+        {/* Live Mobile Pinch Scale Indicator */}
         {livePinchScale !== null && (
           <div
             aria-live="polite"
-            className="pointer-events-none absolute top-16 left-1/2 -translate-x-1/2 z-20 rounded-lg border border-[var(--reader-border-strong)] bg-[var(--reader-bg)]/95 px-3.5 py-1.5 text-xs font-bold tabular-nums text-[var(--reader-ink)] shadow-sm"
+            className="pointer-events-none absolute top-24 left-1/2 -translate-x-1/2 z-20 rounded-md border border-[var(--reader-border-strong)] bg-[var(--reader-bg)]/95 px-3 py-1 text-xs font-bold tabular-nums text-[var(--reader-ink)] shadow-sm"
           >
             {Math.round(livePinchScale * 100)}%
           </div>
         )}
-
-        {/* Footer Progress Summary & Focus Mode Toggle */}
-        {hudVisible && loadingState === 'ready' && (
-          <div
-            data-nosnippet=""
-            className="flex items-center justify-between gap-3 px-4 py-2 border-t border-[var(--reader-border)] bg-[var(--reader-bg)] text-xs text-[var(--reader-muted)] tabular-nums shrink-0"
-          >
-            <span>{Math.round(scrollProgressPct)}% read</span>
-            <button
-              type="button"
-              onClick={() => setHudVisible(false)}
-              className="min-h-[36px] px-2 font-semibold hover:text-[var(--reader-ink)]"
-            >
-              Focus Mode
-            </button>
-          </div>
-        )}
-
-        {!hudVisible && (
-          <button
-            type="button"
-            onClick={() => setHudVisible(true)}
-            aria-label="Show reader controls"
-            className="absolute top-3 end-3 z-20 min-h-[44px] px-3 rounded-lg border border-[var(--reader-border-strong)] bg-[var(--reader-bg)]/90 backdrop-blur-xs text-xs font-semibold text-[var(--reader-ink)]"
-          >
-            Controls
-          </button>
-        )}
       </div>
 
-      {/* Full-Screen Pinch-Zoom Lightbox for Diagrams & Expanded Tables */}
+      {/* Full-Screen Pinch-Zoom Lightbox for Diagrams */}
       <DiagramLightbox
         payload={lightboxPayload}
         onClose={() => setLightboxPayload(null)}

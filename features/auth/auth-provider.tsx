@@ -36,6 +36,7 @@ import { useToast } from '../toast/toast-context';
 interface AuthContextValue {
   user: AppAuthUser | null;
   isAuthReady: boolean;
+  isEntitlementsReady: boolean;
   isSigningIn: boolean;
   purchases: UserPurchaseRecord[];
   ownedCompositeKeys: Set<string>;
@@ -51,6 +52,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   isAuthReady: false,
+  isEntitlementsReady: false,
   isSigningIn: false,
   purchases: [],
   ownedCompositeKeys: new Set(),
@@ -66,6 +68,7 @@ const AuthContext = createContext<AuthContextValue>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AppAuthUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isEntitlementsReady, setIsEntitlementsReady] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [purchases, setPurchases] = useState<UserPurchaseRecord[]>([]);
   const { showToast } = useToast();
@@ -75,18 +78,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchOneShotLibraryEntitlements = useCallback(
     async (activeUser: AppAuthUser, syncProfile: boolean = false) => {
-      // 1. Hydrate local cached entitlements immediately for instant offline / zero-CLS UX
-      const cached = await readCachedUserEntitlements(activeUser.uid);
-      if (cached.length > 0) {
-        setPurchases((prev) => (prev.length > 0 ? prev : cached));
-      }
-
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        return;
-      }
-
-      // 2. One-shot authenticated GET /api/v1/library (replaces Firestore Listen/channel XHR)
       try {
+        // 1. Hydrate local cached entitlements immediately for instant offline / zero-CLS UX
+        const cached = await readCachedUserEntitlements(activeUser.uid);
+        if (cached.length > 0) {
+          setPurchases((prev) => (prev.length > 0 ? prev : cached));
+        }
+
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          return;
+        }
+
+        // 2. One-shot authenticated GET /api/v1/library (replaces Firestore Listen/channel XHR)
         const token = await activeUser.getIdToken();
         const endpoint = syncProfile
           ? apiUrl('/api/v1/library?syncProfile=1')
@@ -118,6 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch {
         // Offline or transient network issue — cached entitlements remain active
+      } finally {
+        setIsEntitlementsReady(true);
       }
     },
     []
@@ -135,11 +140,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void requestPersistentWebStorage();
         if (fetchedUidRef.current !== current.uid) {
           fetchedUidRef.current = current.uid;
+          setIsEntitlementsReady(false);
           void fetchOneShotLibraryEntitlements(current, true);
         }
       } else {
         fetchedUidRef.current = null;
         setPurchases([]);
+        setIsEntitlementsReady(true);
         void writePersistedAuthHint(false);
       }
     });
@@ -157,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Anonymous visitors & Googlebot: zero Firebase Auth/Firestore chunks, iframes, or XHRs!
       if (!previouslyAuthed) {
         setIsAuthReady(true);
+        setIsEntitlementsReady(true);
         return;
       }
 
@@ -165,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         if (!cancelled) {
           setIsAuthReady(true);
+          setIsEntitlementsReady(true);
         }
       }
     };
@@ -320,6 +329,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         isAuthReady,
+        isEntitlementsReady,
         isSigningIn,
         purchases: activePurchases,
         ownedCompositeKeys,
