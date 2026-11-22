@@ -143,8 +143,8 @@ export default async function BookDetailPage({
       />
 
       <article className="w-full min-w-0">
-        {/* Header Block: Side-by-Side Thumbnail (Left) + Metadata (Right) on All Screens */}
-        <div className="flex flex-row items-start gap-4 sm:gap-6 max-md:gap-3.5 pb-6 max-md:pb-4 border-b border-[var(--border-subtle)]">
+        {/* Header Block: Side-by-Side Thumbnail (Left) + Title (Right) on All Screens */}
+        <div className="flex flex-row items-center gap-4 sm:gap-6 max-md:gap-3.5 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
           <MonogramThumbnail
             title={book.title}
             type={book.type}
@@ -160,50 +160,6 @@ export default async function BookDetailPage({
             <h1 className="mt-1.5 max-md:mt-1 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
               {book.title}
             </h1>
-
-            {book.seoDescription && (
-              <p className="mt-2.5 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
-                {book.seoDescription}
-              </p>
-            )}
-
-            <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums">
-              <span>
-                Author:{' '}
-                <strong className="font-semibold text-[var(--text-main)]">
-                  {book.authorName}
-                </strong>
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>Published {formatReadableDate(book.publishAtIso)}</span>
-              <span aria-hidden="true">·</span>
-              <span>Updated {formatReadableDate(book.updatedAtIso)}</span>
-              {reviewSummary.reviewCount > 0 && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <a
-                    href="#learner-reviews"
-                    className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline underline-offset-4"
-                  >
-                    <Star
-                      className="w-3.5 h-3.5 fill-[var(--status-warning)] text-[var(--status-warning)] shrink-0"
-                      aria-hidden="true"
-                    />
-                    <span>{reviewSummary.averageRating.toFixed(1)}</span>
-                    <span className="font-normal text-[var(--text-muted)]">
-                      ({reviewSummary.reviewCount}{' '}
-                      {reviewSummary.reviewCount === 1 ? 'review' : 'reviews'})
-                    </span>
-                  </a>
-                </>
-              )}
-            </div>
-
-            {book.tags.length > 0 && (
-              <p className="mt-2 text-xs text-[var(--text-muted)]">
-                Topics: {book.tags.join(' · ')}
-              </p>
-            )}
           </div>
         </div>
 
@@ -222,6 +178,59 @@ export default async function BookDetailPage({
           samplePdfUrl={book.samplePdfUrl || undefined}
           sampleMarkdownUrl={book.sampleMarkdownUrl || undefined}
         />
+
+        {/* Summary, Author/Date Metadata & Topics below Install App Banner */}
+        <div className="mt-5 max-md:mt-4 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
+          {book.seoDescription && (
+            <p className="text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
+              {book.seoDescription}
+            </p>
+          )}
+
+          <div
+            className={
+              book.seoDescription
+                ? 'mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
+                : 'flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
+            }
+          >
+            <span>
+              Author:{' '}
+              <strong className="font-semibold text-[var(--text-main)]">
+                {book.authorName}
+              </strong>
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>Published {formatReadableDate(book.publishAtIso)}</span>
+            <span aria-hidden="true">·</span>
+            <span>Updated {formatReadableDate(book.updatedAtIso)}</span>
+            {reviewSummary.reviewCount > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <a
+                  href="#learner-reviews"
+                  className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline underline-offset-4"
+                >
+                  <Star
+                    className="w-3.5 h-3.5 fill-[var(--status-warning)] text-[var(--status-warning)] shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span>{reviewSummary.averageRating.toFixed(1)}</span>
+                  <span className="font-normal text-[var(--text-muted)]">
+                    ({reviewSummary.reviewCount}{' '}
+                    {reviewSummary.reviewCount === 1 ? 'review' : 'reviews'})
+                  </span>
+                </a>
+              </>
+            )}
+          </div>
+
+          {book.tags.length > 0 && (
+            <p className="mt-2 text-xs text-[var(--text-muted)]">
+              Topics: {book.tags.join(' · ')}
+            </p>
+          )}
+        </div>
 
         {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
         <section aria-labelledby="book-description-heading" className="mt-8 max-md:mt-6">

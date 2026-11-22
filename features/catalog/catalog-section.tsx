@@ -1,25 +1,34 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ArrowUpDown, RotateCcw } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, Loader2, RotateCcw } from 'lucide-react';
 import type {
   CatalogCardDTO,
   CatalogItemDTO,
+  CollectionName,
   SortOption,
 } from '../../lib/types/catalog';
 import { EmptyState } from '../../components/ui/state-blocks';
 import { CatalogCard } from './catalog-card';
+import { apiUrl } from '../../lib/platform/api-base';
 import { cn } from '../../lib/utils';
 
 export interface CatalogSectionProps {
   id?: string;
   heading: string;
-  subheading: string;
+  subheading?: string;
+  progressUnit?: string;
   storageKey?: string;
   items: Array<CatalogCardDTO | CatalogItemDTO>;
   viewAllHref?: string;
   viewAllLabel?: string;
   showFilters?: boolean;
+  collectionName?: CollectionName;
+  pageSize?: number;
+  initialHasMore?: boolean;
+  initialNextOffset?: number;
+  totalCount?: number;
+  loadMoreLabel?: string;
 }
 
 const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
@@ -32,11 +41,27 @@ export function CatalogSection({
   id,
   heading,
   subheading,
+  progressUnit,
   items,
   viewAllHref,
   viewAllLabel,
   showFilters = true,
+  collectionName,
+  pageSize = 10,
+  initialHasMore = false,
+  initialNextOffset,
+  totalCount,
+  loadMoreLabel = 'Load More',
 }: CatalogSectionProps) {
+  const [loadedItems, setLoadedItems] =
+    useState<Array<CatalogCardDTO | CatalogItemDTO>>(items);
+  const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
+  const [nextOffset, setNextOffset] = useState<number>(
+    typeof initialNextOffset === 'number' ? initialNextOffset : items.length
+  );
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [selectedType, setSelectedType] = useState<string>('ALL');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('ALL');
   const [selectedTag, setSelectedTag] = useState<string>('ALL');
@@ -44,33 +69,35 @@ export function CatalogSection({
 
   const facets = useMemo(() => {
     const types = Array.from(
-      new Set(items.map((i) => i.type).filter(Boolean))
+      new Set(loadedItems.map((i) => i.type).filter(Boolean))
     ).sort();
     const languages = Array.from(
-      new Set(items.map((i) => i.language).filter(Boolean))
+      new Set(loadedItems.map((i) => i.language).filter(Boolean))
     ).sort();
     const tags = Array.from(
-      new Set(items.flatMap((i) => i.tags).filter(Boolean))
+      new Set(loadedItems.flatMap((i) => i.tags).filter(Boolean))
     )
       .sort()
       .slice(0, 10);
 
     return { types, languages, tags };
-  }, [items]);
+  }, [loadedItems]);
 
   const filteredAndSorted = useMemo(() => {
-    const filtered = showFilters
-      ? items.filter((item) => {
-          if (selectedType !== 'ALL' && item.type !== selectedType) return false;
-          if (selectedLanguage !== 'ALL' && item.language !== selectedLanguage) {
-            return false;
-          }
-          if (selectedTag !== 'ALL' && !item.tags.includes(selectedTag)) {
-            return false;
-          }
-          return true;
-        })
-      : [...items];
+    if (!showFilters) {
+      return loadedItems;
+    }
+
+    const filtered = loadedItems.filter((item) => {
+      if (selectedType !== 'ALL' && item.type !== selectedType) return false;
+      if (selectedLanguage !== 'ALL' && item.language !== selectedLanguage) {
+        return false;
+      }
+      if (selectedTag !== 'ALL' && !item.tags.includes(selectedTag)) {
+        return false;
+      }
+      return true;
+    });
 
     filtered.sort((a, b) => {
       if (sortBy === 'price_asc') return a.buyPrice - b.buyPrice;
@@ -86,7 +113,14 @@ export function CatalogSection({
     });
 
     return filtered;
-  }, [items, selectedLanguage, selectedTag, selectedType, showFilters, sortBy]);
+  }, [
+    loadedItems,
+    selectedLanguage,
+    selectedTag,
+    selectedType,
+    showFilters,
+    sortBy,
+  ]);
 
   const hasActiveFilters =
     showFilters &&
@@ -100,6 +134,73 @@ export function CatalogSection({
     setSelectedTag('ALL');
   };
 
+  const handleLoadMore = async () => {
+    if (!collectionName || isLoadingMore || !hasMore) return;
+    setIsLoadingMore(true);
+    setLoadError(null);
+
+    try {
+      const safeLimit = Math.max(1, Math.min(24, Math.floor(pageSize) || 10));
+      const endpoint = apiUrl(
+        `/api/v1/catalog/items?collection=${encodeURIComponent(
+          collectionName
+        )}&limit=${encodeURIComponent(
+          String(safeLimit)
+        )}&offset=${encodeURIComponent(String(nextOffset))}`
+      );
+      const response = await fetch(endpoint, { cache: 'no-store' });
+      const data = (await response.json()) as {
+        items?: CatalogCardDTO[];
+        hasMore?: boolean;
+        nextOffset?: number;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setLoadError(
+          data?.error || 'Unable to load more items. Please try again.'
+        );
+        return;
+      }
+
+      const incoming = Array.isArray(data.items) ? data.items : [];
+      setLoadedItems((prev) => {
+        const seen = new Set(prev.map((x) => `${x.collectionName}:${x.id}`));
+        const unique = incoming.filter(
+          (x) => !seen.has(`${x.collectionName}:${x.id}`)
+        );
+        return unique.length > 0 ? [...prev, ...unique] : prev;
+      });
+      setHasMore(Boolean(data.hasMore));
+      setNextOffset(
+        typeof data.nextOffset === 'number'
+          ? data.nextOffset
+          : nextOffset + incoming.length
+      );
+    } catch {
+      setLoadError('Network error while loading more items. Please try again.');
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
+  const effectiveTotal =
+    typeof totalCount === 'number' && totalCount >= loadedItems.length
+      ? totalCount
+      : loadedItems.length;
+
+  const badgeCount = hasActiveFilters
+    ? filteredAndSorted.length
+    : hasMore && typeof totalCount === 'number'
+      ? effectiveTotal
+      : loadedItems.length;
+
+  const resolvedSubheading = progressUnit
+    ? `Showing ${loadedItems.length}${
+        effectiveTotal > loadedItems.length ? ` of ${effectiveTotal}` : ''
+      } ${progressUnit}`
+    : subheading;
+
   return (
     <section id={id} className="ed-container py-8 sm:py-10 max-md:py-5">
       {/* Section Header */}
@@ -108,10 +209,14 @@ export function CatalogSection({
           <h2 className="text-[length:var(--text-h2)] font-extrabold tracking-tight text-[var(--text-main)]">
             {heading}{' '}
             <span className="text-sm font-medium text-[var(--text-muted)] tabular-nums">
-              ({filteredAndSorted.length})
+              ({badgeCount})
             </span>
           </h2>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">{subheading}</p>
+          {resolvedSubheading && (
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              {resolvedSubheading}
+            </p>
+          )}
         </div>
 
         {viewAllHref && viewAllLabel && (
@@ -127,7 +232,7 @@ export function CatalogSection({
       </div>
 
       {/* Button-Driven Filter & Sort Controls (Zero Crawlable Filter Query Links) */}
-      {showFilters && items.length > 0 && (
+      {showFilters && loadedItems.length > 0 && (
         <div className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-6 max-md:mt-3 max-md:pb-4 max-md:gap-2.5">
           <div className="flex flex-wrap items-center gap-2 max-md:flex-nowrap ed-mobile-scroll-strip max-md:w-full max-md:pb-1">
             <button
@@ -141,7 +246,7 @@ export function CatalogSection({
                   : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
               )}
             >
-              All ({items.length})
+              All ({loadedItems.length})
             </button>
 
             {facets.types.map((t) => (
@@ -244,7 +349,7 @@ export function CatalogSection({
       )}
 
       {/* Catalog Items or Empty State (List View Default) */}
-      {items.length === 0 ? (
+      {loadedItems.length === 0 ? (
         <div className="mt-6">
           <EmptyState
             title={`No ${heading.toLowerCase()} published yet`}
@@ -259,15 +364,60 @@ export function CatalogSection({
           onAction={resetFilters}
         />
       ) : (
-        <div className={cn('flex flex-col gap-3', !showFilters && 'mt-6')}>
-          {filteredAndSorted.map((item) => (
-            <CatalogCard
-              key={`${item.collectionName}:${item.id}`}
-              item={item}
-              viewMode="list"
-            />
-          ))}
-        </div>
+        <>
+          <div className={cn('flex flex-col gap-3', !showFilters && 'mt-6')}>
+            {filteredAndSorted.map((item) => (
+              <CatalogCard
+                key={`${item.collectionName}:${item.id}`}
+                item={item}
+                viewMode="list"
+              />
+            ))}
+          </div>
+
+          {hasMore && collectionName && (
+            <div className="mt-6 flex flex-col items-center gap-2">
+              {loadError && (
+                <p
+                  role="alert"
+                  className="text-xs font-medium text-[var(--semantic-danger)] text-center"
+                >
+                  {loadError}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+                aria-busy={isLoadingMore}
+                className="min-h-[48px] w-full sm:w-auto sm:min-w-[220px] px-6 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] active:scale-[0.99] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoadingMore ? (
+                  <>
+                    <Loader2
+                      className="w-4 h-4 animate-spin"
+                      aria-hidden="true"
+                    />
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{loadMoreLabel}</span>
+                    <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                  </>
+                )}
+              </button>
+
+              {typeof totalCount === 'number' &&
+                totalCount > loadedItems.length && (
+                  <p className="text-xs text-[var(--text-muted)] tabular-nums">
+                    Showing {loadedItems.length} of {effectiveTotal}
+                  </p>
+                )}
+            </div>
+          )}
+        </>
       )}
     </section>
   );

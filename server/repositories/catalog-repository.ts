@@ -21,6 +21,50 @@ import {
  * Protected asset paths (`fullPdfStoragePath`, `fullMarkdownStoragePath`, `fullJsonStoragePath`)
  * are stripped to boolean existence flags on all public catalog/detail/search routes.
  */
+const PUBLIC_BOOK_CARD_FIELDS = [
+  'id',
+  'title',
+  'urlSlug',
+  'seoDescription',
+  'type',
+  'language',
+  'publisher',
+  'authorName',
+  'tags',
+  'currency',
+  'listPrice',
+  'buyPrice',
+  'isPublished',
+  'isDeleted',
+  'publishAt',
+  'updatedAt',
+  'createdAt',
+  'samplePdfUrl',
+  'sampleMarkdownUrl',
+] as const;
+
+const PUBLIC_EXAM_CARD_FIELDS = [
+  'id',
+  'title',
+  'urlSlug',
+  'seoDescription',
+  'type',
+  'language',
+  'publisher',
+  'authorName',
+  'tags',
+  'currency',
+  'listPrice',
+  'buyPrice',
+  'isPublished',
+  'isDeleted',
+  'publishAt',
+  'updatedAt',
+  'createdAt',
+  'totalMocktest',
+  'sampleJsonStoragePath',
+] as const;
+
 const PUBLIC_BOOK_FIELDS = [
   'id',
   'title',
@@ -70,6 +114,11 @@ const PUBLIC_EXAM_FIELDS = [
   'sampleJsonStoragePath',
   'fullJsonStoragePath',
 ] as const;
+
+const supportsPublishAtOrder: Record<CollectionName, boolean> = {
+  books: true,
+  ExamPackDocument: true,
+};
 
 type FirestoreRestFieldMap = Record<string, Record<string, unknown>>;
 
@@ -192,6 +241,202 @@ function runDefaultFirestoreQuery(
     req.on('error', reject);
     req.write(payload);
     req.end();
+  });
+}
+
+/**
+ * Executes a lightweight Firestore COUNT() aggregation query for published catalog documents
+ * without transferring document payloads. Falls back gracefully to `null` if unavailable.
+ */
+export function getLiveCollectionCount(
+  collectionId: CollectionName
+): Promise<number | null> {
+  const projectId = firebaseConfig.projectId || 'examdash-ed';
+  const apiKey = firebaseConfig.apiKey || '';
+  const payload = JSON.stringify({
+    structuredAggregationQuery: {
+      aggregations: [{ alias: 'total', count: {} }],
+      structuredQuery: {
+        from: [{ collectionId }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'isPublished' },
+            op: 'EQUAL',
+            value: { booleanValue: true },
+          },
+        },
+      },
+    },
+  });
+
+  const urlPath = `/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/(default)/documents:runAggregationQuery${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
+
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'firestore.googleapis.com',
+        port: 443,
+        path: urlPath,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+        timeout: 5000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+            resolve(null);
+            return;
+          }
+          try {
+            const rows = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Array<{
+              result?: {
+                aggregateFields?: {
+                  total?: { integerValue?: string | number };
+                };
+              };
+            }>;
+            const rawVal = rows?.[0]?.result?.aggregateFields?.total?.integerValue;
+            const parsed = Number(rawVal);
+            resolve(Number.isFinite(parsed) && parsed >= 0 ? parsed : null);
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.on('error', () => resolve(null));
+    req.write(payload);
+    req.end();
+  });
+}
+
+export interface CatalogPageResult<T> {
+  items: T[];
+  hasMore: boolean;
+  nextOffset: number;
+}
+
+async function runPaginatedCollectionQuery<T>(params: {
+  collectionId: CollectionName;
+  fields: readonly string[];
+  limit: number;
+  offset: number;
+  mapper: (docId: string, raw: Record<string, unknown>) => T;
+}): Promise<CatalogPageResult<T>> {
+  const safeLimit = Math.max(1, Math.min(24, Math.floor(params.limit) || 10));
+  const safeOffset = Math.max(0, Math.min(5000, Math.floor(params.offset) || 0));
+  const nowMs = Date.now();
+  const items: T[] = [];
+  let hasMore = false;
+  let currentOffset = safeOffset;
+
+  const queryBatch = async (batchOffset: number, batchLimit: number) => {
+    const baseQuery: Record<string, unknown> = {
+      from: [{ collectionId: params.collectionId }],
+      select: {
+        fields: params.fields.map((fieldPath) => ({ fieldPath })),
+      },
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'isPublished' },
+          op: 'EQUAL',
+          value: { booleanValue: true },
+        },
+      },
+      limit: batchLimit,
+      ...(batchOffset > 0 ? { offset: batchOffset } : {}),
+    };
+
+    if (supportsPublishAtOrder[params.collectionId]) {
+      try {
+        return await runDefaultFirestoreQuery({
+          ...baseQuery,
+          orderBy: [{ field: { fieldPath: 'publishAt' }, direction: 'DESCENDING' }],
+        });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : '';
+        if (msg.includes('HTTP 400') || msg.includes('FAILED_PRECONDITION')) {
+          supportsPublishAtOrder[params.collectionId] = false;
+          return runDefaultFirestoreQuery(baseQuery);
+        }
+        throw error;
+      }
+    }
+
+    return runDefaultFirestoreQuery(baseQuery);
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const remaining = safeLimit - items.length;
+    const rawLimit = remaining > 0 ? remaining + 1 : 1;
+    const docs = await queryBatch(currentOffset, rawLimit);
+
+    let consumedRaw = 0;
+    for (const docSnap of docs) {
+      const live = isDocumentLive(docSnap.data, nowMs);
+      if (items.length >= safeLimit) {
+        if (live) {
+          hasMore = true;
+          break;
+        }
+        consumedRaw += 1;
+        continue;
+      }
+      consumedRaw += 1;
+      if (live) {
+        items.push(params.mapper(docSnap.docId, docSnap.data));
+      }
+    }
+
+    currentOffset += consumedRaw;
+
+    if (hasMore || docs.length < rawLimit) {
+      break;
+    }
+  }
+
+  return {
+    items,
+    hasMore,
+    nextOffset: currentOffset,
+  };
+}
+
+export async function getLiveBooksPage(options?: {
+  limit?: number;
+  offset?: number;
+}): Promise<CatalogPageResult<PublicBookDTO>> {
+  return runPaginatedCollectionQuery({
+    collectionId: 'books',
+    fields: PUBLIC_BOOK_CARD_FIELDS,
+    limit: options?.limit ?? 10,
+    offset: options?.offset ?? 0,
+    mapper: mapBookToPublicDTO,
+  });
+}
+
+export async function getLiveExamsPage(options?: {
+  limit?: number;
+  offset?: number;
+}): Promise<CatalogPageResult<PublicExamDTO>> {
+  return runPaginatedCollectionQuery({
+    collectionId: 'ExamPackDocument',
+    fields: PUBLIC_EXAM_CARD_FIELDS,
+    limit: options?.limit ?? 10,
+    offset: options?.offset ?? 0,
+    mapper: mapExamToPublicDTO,
   });
 }
 

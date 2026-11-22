@@ -9,7 +9,6 @@ import {
   ExternalLink,
   LayoutGrid,
   Loader2,
-  X,
 } from 'lucide-react';
 import { usePWAInstall } from './pwa-install-provider';
 
@@ -20,12 +19,10 @@ export interface InstallAppCalloutProps {
 }
 
 /**
- * Adaptive PWA Install / Open-in-App Callout Card
- * Used seamlessly on the Home page canvas and on Book/Exam detail pages right below the Buy Now / Sample bar.
+ * Minimal Adaptive PWA Install Banner
+ * Renders identically on the Home page and on Book/Exam detail pages.
  */
 export function InstallAppCallout({
-  variant = 'home',
-  itemKind,
   className = '',
 }: InstallAppCalloutProps) {
   const {
@@ -33,117 +30,46 @@ export function InstallAppCallout({
     progressLabel,
     progressPercent,
     openInAppHref,
-    isBannerDismissed,
     triggerPrimaryAction,
-    dismissBanner,
   } = usePWAInstall();
 
   if (status === 'hidden') {
     return null;
   }
 
-  const isTransientOrInstalled =
-    status === 'installing' ||
-    status === 'installed-success' ||
-    status === 'open-in-app';
-
-  if (isBannerDismissed && !isTransientOrInstalled) {
-    return null;
-  }
-
-  const isDetail = variant === 'detail';
   const showProgressBar =
     status === 'installing' || status === 'installed-success';
-
-  const defaultInstallCta = isDetail ? 'Install Now' : 'Install App';
-
-  let title = isDetail
-    ? itemKind === 'exam'
-      ? 'Practice This Exam in the ExamDash App'
-      : itemKind === 'book'
-      ? 'Read This Book in the ExamDash App'
-      : 'Install ExamDash App'
-    : 'Install ExamDash App';
-  let subtitle = isDetail
-    ? itemKind === 'exam'
-      ? 'Attempt full-length timed mocks offline with instant analytics in a distraction-free app window.'
-      : itemKind === 'book'
-      ? 'Read offline with dark & sepia comfort themes and instant chapter sync in the standalone app.'
-      : 'Launch ebooks, quizbooks, and timed mock exam sets in a distraction-free standalone window.'
-    : 'Launch ebooks, quizbooks, and timed mock exam sets in a distraction-free standalone window.';
-
-  if (status === 'installing') {
-    title = progressLabel || 'Building app package...';
-    subtitle = 'Verifying Home Screen icon and standalone workspace package...';
-  } else if (status === 'installed-success') {
-    title = 'ExamDash Installed on Your Device';
-    subtitle = 'Your Home Screen icon is ready for instant standalone access.';
-  } else if (status === 'open-in-app') {
-    title = isDetail
-      ? itemKind === 'exam'
-        ? 'Open This Exam Pack in ExamDash App'
-        : itemKind === 'book'
-        ? 'Open This Book in ExamDash App'
-        : 'ExamDash App is Installed'
-      : 'ExamDash App is Installed';
-    subtitle =
-      'Switch from this browser tab into your standalone ExamDash app window.';
-  } else if (status === 'apple-ios') {
-    title = isDetail
-      ? 'Install ExamDash on Home Screen'
-      : 'Install ExamDash on Home Screen';
-    subtitle = isDetail
-      ? itemKind === 'exam'
-        ? 'Add to Home Screen for full-screen timed mock tests on iPhone or iPad.'
-        : 'Add to Home Screen for full-screen offline reading on iPhone or iPad.'
-      : 'Open ebooks and mock exam sets full-screen like a native iPhone or iPad app.';
-  } else if (status === 'apple-mac-safari') {
-    title = 'Add ExamDash to your Mac Dock';
-    subtitle =
-      'Launch distraction-free study and mock exam windows directly from macOS.';
-  } else if (status === 'in-app-webview') {
-    title = 'Open in Browser to Install ExamDash';
-    subtitle =
-      'In-app browsers block Home Screen installs. Open in Chrome or Safari to install.';
-  }
 
   return (
     <div
       data-nosnippet=""
-      className={`relative overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 max-md:px-3.5 ${
-        isDetail ? 'py-3' : 'py-3.5 max-md:py-3'
-      } transition-colors ${className}`}
+      className={`relative overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2.5 transition-colors ${className}`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 max-md:gap-2.5">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
           <Image
             src="/assets/aistudio/exam-dash_logo_ef0c6c39.png"
             alt="ExamDash app icon"
-            width={isDetail ? 36 : 40}
-            height={isDetail ? 36 : 40}
+            width={32}
+            height={32}
             referrerPolicy="no-referrer"
-            className={`${
-              isDetail ? 'w-9 h-9 rounded-lg' : 'w-10 h-10 rounded-xl'
-            } object-cover shrink-0`}
+            className="w-8 h-8 rounded-lg object-cover shrink-0"
           />
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-[var(--text-main)]">
-              {title}
-            </p>
-            <p className="text-xs text-[var(--text-muted)]">{subtitle}</p>
-          </div>
+          <p className="text-sm font-semibold text-[var(--text-main)] truncate">
+            ExamDash App
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 max-md:w-full max-md:justify-between">
+        <div className="flex items-center shrink-0">
           {status === 'installing' && (
             <button
               type="button"
               disabled
               aria-live="polite"
-              className="inline-flex items-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap shrink-0 cursor-wait max-md:flex-1 max-md:justify-center min-w-0"
+              className="inline-flex items-center gap-1.5 min-h-[40px] max-md:min-h-[44px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap shrink-0 cursor-wait"
             >
               <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
-              <span className="truncate">{progressLabel || 'Building app package...'}</span>
+              <span>{progressLabel || 'Installing...'}</span>
             </button>
           )}
 
@@ -151,10 +77,10 @@ export function InstallAppCallout({
             <div
               role="status"
               aria-live="polite"
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
+              className="inline-flex items-center gap-1.5 min-h-[40px] max-md:min-h-[44px] px-3.5 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap shrink-0"
             >
-              <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">Successfully Installed</span>
+              <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>Installed</span>
             </div>
           )}
 
@@ -164,7 +90,7 @@ export function InstallAppCallout({
               href={openInAppHref}
               target="_blank"
               rel="noopener"
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
+              className="inline-flex items-center gap-1.5 min-h-[40px] max-md:min-h-[44px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
             >
               <span>Open in App</span>
               <ArrowUpRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -173,49 +99,17 @@ export function InstallAppCallout({
 
           {(status === 'ready-to-install' ||
             status === 'apple-ios' ||
-            status === 'iframe-preview') && (
+            status === 'iframe-preview' ||
+            status === 'apple-mac-safari' ||
+            status === 'in-app-webview') && (
             <button
               id="btn-install"
               type="button"
               onClick={() => void triggerPrimaryAction()}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
+              className="inline-flex items-center gap-1.5 min-h-[40px] max-md:min-h-[44px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
             >
               <Download className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span>{defaultInstallCta}</span>
-            </button>
-          )}
-
-          {status === 'apple-mac-safari' && (
-            <button
-              id="btn-install"
-              type="button"
-              onClick={() => void triggerPrimaryAction()}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
-            >
-              <LayoutGrid className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span>Add to Dock</span>
-            </button>
-          )}
-
-          {status === 'in-app-webview' && (
-            <button
-              type="button"
-              onClick={() => void triggerPrimaryAction()}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
-            >
-              <ExternalLink className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">Open in Browser to Install</span>
-            </button>
-          )}
-
-          {!isTransientOrInstalled && (
-            <button
-              type="button"
-              aria-label="Dismiss install banner"
-              onClick={dismissBanner}
-              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
-            >
-              <X className="w-4 h-4" aria-hidden="true" />
+              <span>Install App</span>
             </button>
           )}
         </div>
@@ -230,7 +124,7 @@ export function InstallAppCallout({
           aria-valuemax={100}
           aria-valuenow={progressPercent}
           aria-label={progressLabel || 'App installation progress'}
-          className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]"
+          className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]"
         >
           <div
             className={`h-full w-full origin-left rounded-full transition-transform duration-700 ease-out ${

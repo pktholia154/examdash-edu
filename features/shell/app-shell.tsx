@@ -48,7 +48,7 @@ const MOBILE_TABS = [
   { label: 'Home', href: '/', icon: Compass },
   { label: 'Books', href: '/books', icon: BookOpen },
   { label: 'Exams', href: '/exams', icon: ClipboardCheck },
-  { label: 'Library', href: '/purchased', icon: Library },
+  { label: 'Purchased', href: '/purchased', icon: Library },
   { label: 'Profile', href: '/profile', icon: UserIcon },
 ];
 

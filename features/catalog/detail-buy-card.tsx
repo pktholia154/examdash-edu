@@ -336,20 +336,32 @@ export function DetailBuyCard({
             <button
               type="button"
               onClick={() => openSampleReader(defaultBookSampleFormat)}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-4 max-md:px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap min-w-0"
+              className="ed-sample-cta inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-5 max-md:px-3.5 rounded-lg border text-sm font-semibold whitespace-nowrap min-w-0"
             >
-              <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">Sample</span>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]"
+              >
+                <span className="ed-sample-cta-sheen" />
+              </span>
+              <BookOpen className="relative z-10 w-4 h-4 shrink-0" aria-hidden="true" />
+              <span className="relative z-10 truncate">Sample</span>
             </button>
           )}
 
           {hasExamSample && sampleJsonUrl && (
             <a
               href={sampleJsonUrl}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-4 max-md:px-3 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap min-w-0"
+              className="ed-sample-cta inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-5 max-md:px-3 rounded-lg border text-sm font-semibold whitespace-nowrap min-w-0"
             >
-              <Play className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">Try Sample Mock</span>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]"
+              >
+                <span className="ed-sample-cta-sheen" />
+              </span>
+              <Play className="relative z-10 w-4 h-4 shrink-0" aria-hidden="true" />
+              <span className="relative z-10 truncate">Try Sample Mock</span>
             </a>
           )}
         </div>

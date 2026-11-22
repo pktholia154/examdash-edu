@@ -1,17 +1,25 @@
 import type { Metadata } from 'next';
 import React from 'react';
-import { getLiveBooks } from '../../server/repositories/catalog-repository';
+import {
+  getLiveBooksPage,
+  getLiveCollectionCount,
+  type CatalogPageResult,
+} from '../../server/repositories/catalog-repository';
 import { getPublishedReviewAggregates } from '../../server/repositories/review-repository';
 import { Breadcrumbs } from '../../components/ui/breadcrumbs';
 import { CatalogSection } from '../../features/catalog/catalog-section';
 import { ErrorState } from '../../components/ui/state-blocks';
 import { buildReviewTargetKey } from '../../lib/reviews/validation';
 import { getCanonicalOrigin } from '../../lib/seo/schema';
-import { toCatalogCardDTO, type ReviewAggregateBadge } from '../../lib/types/catalog';
+import {
+  toCatalogCardDTO,
+  type PublicBookDTO,
+  type ReviewAggregateBadge,
+} from '../../lib/types/catalog';
 
 export const dynamic = 'force-dynamic';
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 10;
 
 export async function generateMetadata({
   searchParams,
@@ -47,15 +55,22 @@ export default async function BooksCatalogPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const sp = await searchParams;
-  const pageNum = Math.max(1, Number(sp.page) || 1);
+  const pageNum = Math.max(1, Math.floor(Number(sp.page) || 1));
+  const offset = Math.min(5000, (pageNum - 1) * PAGE_SIZE);
 
-  let books: Awaited<ReturnType<typeof getLiveBooks>> = [];
+  let booksPage: CatalogPageResult<PublicBookDTO> = {
+    items: [],
+    hasMore: false,
+    nextOffset: offset,
+  };
+  let totalBooksCount: number | null = null;
   let reviewAggregates = new Map<string, ReviewAggregateBadge>();
   let fetchError: string | null = null;
 
   try {
-    [books, reviewAggregates] = await Promise.all([
-      getLiveBooks(),
+    [booksPage, totalBooksCount, reviewAggregates] = await Promise.all([
+      getLiveBooksPage({ limit: PAGE_SIZE, offset }),
+      getLiveCollectionCount('books'),
       getPublishedReviewAggregates(),
     ]);
   } catch (err) {
@@ -63,24 +78,23 @@ export default async function BooksCatalogPage({
       err instanceof Error ? err.message : 'Unable to fetch books catalog.';
   }
 
-  const totalPages = Math.max(1, Math.ceil(books.length / PAGE_SIZE));
-  const clampedPage = Math.min(pageNum, totalPages);
-  const startIdx = (clampedPage - 1) * PAGE_SIZE;
-  const pagedBooks = books
-    .slice(startIdx, startIdx + PAGE_SIZE)
-    .map((b) =>
-      toCatalogCardDTO(b, reviewAggregates.get(buildReviewTargetKey('books', b.id)))
-    );
+  const pagedBooks = booksPage.items.map((b) =>
+    toCatalogCardDTO(b, reviewAggregates.get(buildReviewTargetKey('books', b.id)))
+  );
+  const effectiveTotal =
+    totalBooksCount !== null
+      ? Math.max(totalBooksCount, offset + pagedBooks.length)
+      : undefined;
 
   return (
     <div className="pt-8 max-md:pt-4">
       <div className="ed-container">
         <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Books' }]} />
         <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)]">
-          Books & Question Banks
+          Exam Books Pdfs
         </h1>
         <p className="mt-2 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] max-w-2xl">
-          Verified digital textbooks and MCQ banks published directly from the ExamDash curriculum repository, with instant chapter previews before purchase.
+          Download free exam books PDFs, previous papers, study guides, and revision notes. Boost your competitive test preparation with instant access to comprehensive study materials.
         </p>
       </div>
 
@@ -89,41 +103,20 @@ export default async function BooksCatalogPage({
           <ErrorState message={fetchError} />
         </div>
       ) : (
-        <>
-          <CatalogSection
-            heading="Published Books"
-            subheading={`Showing ${pagedBooks.length} of ${books.length} available titles`}
-            storageKey="hub-books"
-            items={pagedBooks}
-          />
-
-          {totalPages > 1 && (
-            <nav
-              aria-label="Books catalog pagination"
-              className="ed-container pb-8 flex items-center justify-center gap-2"
-            >
-              {Array.from({ length: totalPages }).map((_, idx) => {
-                const p = idx + 1;
-                const href = p === 1 ? '/books' : `/books?page=${p}`;
-                const active = p === clampedPage;
-                return (
-                  <a
-                    key={p}
-                    href={href}
-                    aria-current={active ? 'page' : undefined}
-                    className={
-                      active
-                        ? 'min-h-[48px] min-w-[48px] px-3 inline-flex items-center justify-center rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold tabular-nums'
-                        : 'min-h-[48px] min-w-[48px] px-3 inline-flex items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-sm font-medium text-[var(--text-main)] hover:bg-[var(--bg-elevated)] tabular-nums'
-                    }
-                  >
-                    {p}
-                  </a>
-                );
-              })}
-            </nav>
-          )}
-        </>
+        <CatalogSection
+          key={`books-offset-${offset}`}
+          heading="Published Books"
+          progressUnit="available titles"
+          storageKey="hub-books"
+          items={pagedBooks}
+          showFilters={false}
+          collectionName="books"
+          pageSize={PAGE_SIZE}
+          initialHasMore={booksPage.hasMore}
+          initialNextOffset={booksPage.nextOffset}
+          totalCount={effectiveTotal}
+          loadMoreLabel="Load More Books"
+        />
       )}
     </div>
   );

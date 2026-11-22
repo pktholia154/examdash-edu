@@ -862,7 +862,7 @@ export function PurchasedLibraryView({
 
   if (!isAuthReady || (user && !isEntitlementsReady && purchases.length === 0)) {
     return (
-      <div className="ed-container py-8 space-y-3">
+      <div className="w-full max-w-[82rem] mx-auto ps-[max(0.625rem,var(--safe-area-inset-left))] pe-[max(0.625rem,var(--safe-area-inset-right))] py-4 space-y-3 md:ps-[clamp(1rem,3vw,2rem)] md:pe-[clamp(1rem,3vw,2rem)] md:py-8">
         <div className="h-14 w-full rounded-xl ed-skeleton" />
         <div className="h-28 w-full rounded-xl ed-skeleton" />
         <div className="h-32 w-full rounded-xl ed-skeleton" />
@@ -872,8 +872,8 @@ export function PurchasedLibraryView({
 
   if (!user) {
     return (
-      <div className="ed-container py-12 max-md:py-6">
-        <div className="max-w-lg mx-auto text-center rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-8 max-md:p-5">
+      <div className="w-full max-w-[82rem] mx-auto ps-[max(0.625rem,var(--safe-area-inset-left))] pe-[max(0.625rem,var(--safe-area-inset-right))] py-6 md:ps-[clamp(1rem,3vw,2rem)] md:pe-[clamp(1rem,3vw,2rem)] md:py-12">
+        <div className="max-w-lg mx-auto text-center px-2 py-6 md:rounded-[var(--radius-card)] md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-surface)] md:p-8">
           <div className="w-12 h-12 rounded-xl bg-[var(--bg-elevated)] flex items-center justify-center text-[var(--text-main)] mx-auto mb-4">
             <Lock className="w-5 h-5" aria-hidden="true" />
           </div>
@@ -888,7 +888,7 @@ export function PurchasedLibraryView({
             type="button"
             disabled={isSigningIn}
             onClick={() => void signInWithGoogle()}
-            className="mt-6 inline-flex items-center justify-center min-h-[48px] px-6 max-md:w-full rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
+            className="mt-6 inline-flex items-center justify-center min-h-[48px] px-6 w-full md:w-auto rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
           >
             {isSigningIn ? 'Signing in...' : 'Continue with Google'}
           </button>
@@ -900,14 +900,14 @@ export function PurchasedLibraryView({
   const totalPurchasesCount = bookPurchases.length + examPurchases.length;
 
   return (
-    <div className="ed-container py-6 sm:py-8 space-y-5 max-md:py-4 max-md:space-y-4">
+    <div className="w-full max-w-[82rem] mx-auto ps-[max(0.625rem,var(--safe-area-inset-left))] pe-[max(0.625rem,var(--safe-area-inset-right))] py-3 space-y-3 md:ps-[clamp(1rem,3vw,2rem)] md:pe-[clamp(1rem,3vw,2rem)] md:py-8 md:space-y-5">
       {/* Header Row */}
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[var(--text-main)]">
+      <div className="flex items-center justify-between gap-2 md:flex-wrap md:items-baseline">
+        <div className="min-w-0">
+          <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-[var(--text-main)]">
             Purchased Library
           </h1>
-          <p className="mt-0.5 text-xs sm:text-sm text-[var(--text-muted)] tabular-nums">
+          <p className="mt-0.5 text-xs md:text-sm text-[var(--text-muted)] tabular-nums">
             <span>
               {totalPurchasesCount}{' '}
               {totalPurchasesCount === 1 ? 'Item' : 'Items'} Unlocked
@@ -937,7 +937,7 @@ export function PurchasedLibraryView({
           type="button"
           disabled={!isOnline || isSyncingEntitlements}
           onClick={() => void handleSyncEntitlements()}
-          className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0"
+          className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-2 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-40 transition-colors whitespace-nowrap shrink-0 md:min-h-[44px] md:px-3.5 md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-surface)] md:hover:bg-[var(--bg-elevated)] md:text-[var(--text-main)]"
         >
           <RefreshCw
             className={cn(
@@ -946,7 +946,16 @@ export function PurchasedLibraryView({
             )}
             aria-hidden="true"
           />
-          <span>{isSyncingEntitlements ? 'Syncing...' : 'Sync Purchases'}</span>
+          <span>
+            {isSyncingEntitlements ? (
+              'Syncing...'
+            ) : (
+              <>
+                <span className="hidden md:inline">Sync Purchases</span>
+                <span className="md:hidden">Sync</span>
+              </>
+            )}
+          </span>
         </button>
       </div>
 
@@ -954,23 +963,36 @@ export function PurchasedLibraryView({
       <div
         role="region"
         aria-label="Purchased library controls"
-        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:p-3.5 space-y-3 tabular-nums"
+        className="space-y-2.5 tabular-nums md:rounded-[var(--radius-card)] md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-surface)] md:p-3.5 md:space-y-3"
       >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 md:gap-3">
           {/* Interactive Filter Tabs */}
           <div
             role="tablist"
             aria-label="Filter library items"
-            className="flex items-center gap-1 overflow-x-auto ed-mobile-scroll-strip rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1"
+            className="flex items-center gap-4 overflow-x-auto ed-mobile-scroll-strip border-b border-[var(--border-subtle)] md:gap-1 md:rounded-lg md:border md:bg-[var(--bg-elevated)] md:p-1"
           >
             {(
               [
-                { id: 'all', label: `All (${totalPurchasesCount})` },
-                { id: 'books', label: `Books (${bookPurchases.length})` },
-                { id: 'exams', label: `Exams (${examPurchases.length})` },
+                {
+                  id: 'all',
+                  desktopLabel: `All (${totalPurchasesCount})`,
+                  mobileLabel: `All (${totalPurchasesCount})`,
+                },
+                {
+                  id: 'books',
+                  desktopLabel: `Books (${bookPurchases.length})`,
+                  mobileLabel: `Books (${bookPurchases.length})`,
+                },
+                {
+                  id: 'exams',
+                  desktopLabel: `Exams (${examPurchases.length})`,
+                  mobileLabel: `Exams (${examPurchases.length})`,
+                },
                 {
                   id: 'offline',
-                  label: `Saved Offline (${savedItemCount})`,
+                  desktopLabel: `Saved Offline (${savedItemCount})`,
+                  mobileLabel: `Offline (${savedItemCount})`,
                 },
               ] as const
             ).map((tab) => (
@@ -981,21 +1003,22 @@ export function PurchasedLibraryView({
                 aria-selected={filterTab === tab.id}
                 onClick={() => setFilterTab(tab.id)}
                 className={cn(
-                  'min-h-[44px] px-3 sm:px-3.5 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[40px] px-0.5 pb-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 border-b-2 md:min-h-[44px] md:px-3.5 md:pb-0 md:rounded-md md:text-sm md:border',
                   filterTab === tab.id
-                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] border border-[var(--border-subtle)]'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
+                    ? 'border-[var(--brand-primary)] text-[var(--text-main)] md:bg-[var(--bg-surface)] md:border-[var(--border-subtle)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]'
                 )}
               >
-                {tab.label}
+                <span className="hidden md:inline">{tab.desktopLabel}</span>
+                <span className="md:hidden">{tab.mobileLabel}</span>
               </button>
             ))}
           </div>
 
           {/* Search + Network + Vault Storage */}
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5">
+          <div className="flex flex-wrap md:flex-nowrap items-center gap-x-2.5 gap-y-2 md:gap-2.5">
             {totalPurchasesCount > 1 && (
-              <div className="relative flex-1 sm:w-60 min-w-[180px] max-md:min-w-0 max-md:w-full max-md:basis-full">
+              <div className="relative flex-1 w-full basis-full min-w-0 md:basis-auto md:w-60 md:min-w-[180px]">
                 <Search
                   className="w-4 h-4 text-[var(--text-muted)] absolute start-3 top-1/2 -translate-y-1/2 pointer-events-none"
                   aria-hidden="true"
@@ -1006,14 +1029,14 @@ export function PurchasedLibraryView({
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Filter unlocked items..."
                   aria-label="Filter unlocked items"
-                  className="w-full min-h-[44px] ps-9 pe-8 max-md:pe-11 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-base sm:text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--brand-primary)]"
+                  className="w-full min-h-[42px] ps-9 pe-11 rounded-lg border-0 bg-[var(--bg-elevated)]/80 text-base text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-primary)] md:min-h-[44px] md:pe-8 md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-canvas)] md:text-sm md:focus:ring-0 md:focus:border-[var(--brand-primary)]"
                 />
                 {searchQuery && (
                   <button
                     type="button"
                     onClick={() => setSearchQuery('')}
                     aria-label="Clear filter query"
-                    className="absolute end-1.5 max-md:end-0.5 top-1/2 -translate-y-1/2 w-8 h-8 max-md:w-11 max-md:h-11 inline-flex items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                    className="absolute end-0.5 md:end-1.5 top-1/2 -translate-y-1/2 w-11 h-11 md:w-8 md:h-8 inline-flex items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--text-main)]"
                   >
                     <X className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
@@ -1024,7 +1047,7 @@ export function PurchasedLibraryView({
             <span
               role="status"
               className={cn(
-                'inline-flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap px-2',
+                'inline-flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap px-0 md:px-2',
                 isOnline
                   ? 'text-[var(--text-muted)]'
                   : 'text-[var(--status-warning)]'
@@ -1050,7 +1073,7 @@ export function PurchasedLibraryView({
               type="button"
               aria-expanded={manageStorageOpen}
               onClick={() => setManageStorageOpen((v) => !v)}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0 ms-auto sm:ms-0"
+              className="inline-flex items-center gap-1.5 min-h-[36px] px-1 rounded-lg text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0 ms-auto md:ms-0 md:min-h-[44px] md:px-3 md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-canvas)] md:hover:bg-[var(--bg-elevated)]"
             >
               <HardDrive
                 className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0"
@@ -1064,7 +1087,7 @@ export function PurchasedLibraryView({
 
         {/* Inline Storage Management Drawer */}
         {manageStorageOpen && (
-          <div className="pt-3 border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="pt-2.5 pb-1 border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2.5 text-xs md:pt-3 md:pb-0 md:gap-3">
             <div className="text-[var(--text-muted)]">
               <span>
                 Offline Vault:{' '}
@@ -1088,7 +1111,7 @@ export function PurchasedLibraryView({
                 type="button"
                 disabled={storageUsage.vaultBytes === 0 || isClearingCache}
                 onClick={() => void handleClearAllCache()}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--status-danger)] text-[var(--status-danger)] hover:bg-[var(--status-danger-bg)] disabled:opacity-40 text-xs font-semibold transition-colors whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 rounded-lg text-[var(--status-danger)] hover:bg-[var(--status-danger-bg)] disabled:opacity-40 text-xs font-semibold transition-colors whitespace-nowrap md:min-h-[44px] md:px-3.5 md:border md:border-[var(--status-danger)]"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>{isClearingCache ? 'Clearing...' : 'Clear Cache'}</span>
@@ -1096,7 +1119,7 @@ export function PurchasedLibraryView({
               <button
                 type="button"
                 onClick={() => setManageStorageOpen(false)}
-                className="inline-flex items-center justify-center min-h-[44px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
+                className="inline-flex items-center justify-center min-h-[40px] px-2.5 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap md:min-h-[44px] md:px-3 md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-canvas)]"
               >
                 Done
               </button>
@@ -1114,7 +1137,7 @@ export function PurchasedLibraryView({
           actionHref="/"
         />
       ) : visibleBookRows.length === 0 && visibleExamRows.length === 0 ? (
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-8 text-center space-y-3">
+        <div className="py-8 px-2 text-center space-y-3 md:rounded-[var(--radius-card)] md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-surface)] md:p-8">
           <p className="text-base font-bold text-[var(--text-main)]">
             {normalizedQuery
               ? 'No purchased items match your search'
@@ -1122,7 +1145,7 @@ export function PurchasedLibraryView({
               ? 'No items saved offline yet'
               : 'No items in this category yet'}
           </p>
-          <p className="text-xs sm:text-sm text-[var(--text-muted)] max-w-md mx-auto">
+          <p className="text-xs md:text-sm text-[var(--text-muted)] max-w-md mx-auto">
             {normalizedQuery
               ? 'Clear the search filter to see all unlocked books and exam packs.'
               : filterTab === 'offline'
@@ -1135,7 +1158,7 @@ export function PurchasedLibraryView({
               setFilterTab('all');
               setSearchQuery('');
             }}
-            className="inline-flex items-center justify-center min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs sm:text-sm font-semibold whitespace-nowrap"
+            className="inline-flex items-center justify-center min-h-[44px] md:min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs md:text-sm font-semibold whitespace-nowrap"
           >
             Show All Purchased Items
           </button>
@@ -1145,7 +1168,7 @@ export function PurchasedLibraryView({
         <div
           role="list"
           aria-label="Purchased items list"
-          className="divide-y divide-[var(--border-subtle)] rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden tabular-nums"
+          className="divide-y divide-[var(--border-subtle)] border-t border-[var(--border-subtle)] tabular-nums md:rounded-[var(--radius-card)] md:border md:bg-[var(--bg-surface)] md:overflow-hidden"
         >
           {/* A. Purchased Book Rows (Unified Read Online + Save Offline) */}
           {visibleBookRows.map((row) => {
@@ -1180,9 +1203,9 @@ export function PurchasedLibraryView({
               <div
                 key={record.purchaseId}
                 role="listitem"
-                className="p-4 sm:p-5 max-md:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 max-md:gap-3"
+                className="py-4 px-0 flex flex-col gap-3 md:p-5 md:flex-row md:items-center md:justify-between md:gap-4"
               >
-                <div className="flex items-start sm:items-center gap-4 min-w-0 flex-1">
+                <div className="flex items-start md:items-center gap-3 md:gap-4 min-w-0 flex-1">
                   <Link
                     href={`/books/${record.urlSlug}`}
                     aria-label={`View details for ${record.title}`}
@@ -1194,13 +1217,15 @@ export function PurchasedLibraryView({
                       collectionName="books"
                       size="list"
                       showBadge={true}
+                      className="max-md:w-[72px] max-md:h-[72px]"
+                      contentOffsetClass="max-md:mt-1.5"
                     />
                   </Link>
 
-                  <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="min-w-0 flex-1 space-y-1 md:space-y-1.5">
                     <Link
                       href={`/books/${record.urlSlug}`}
-                      className="text-base sm:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug block"
+                      className="text-base md:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug block"
                     >
                       {record.title}
                     </Link>
@@ -1238,10 +1263,10 @@ export function PurchasedLibraryView({
                       )}
                     </div>
 
-                    <div className="pt-0.5">
+                    <div className="hidden md:block pt-0.5">
                       <Link
                         href={`/books/${record.urlSlug}#reviews`}
-                        className="inline-flex items-center gap-1 max-md:min-h-[44px] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
                       >
                         <span>Book Details & Verified Review</span>
                         <ArrowRight
@@ -1254,13 +1279,13 @@ export function PurchasedLibraryView({
                 </div>
 
                 {/* Single Unified Book Action Cluster */}
-                <div className="flex flex-wrap items-center gap-2 shrink-0 sm:ms-4 max-md:w-full">
+                <div className="flex flex-wrap items-center gap-2 shrink-0 w-full md:w-auto md:ms-4">
                   {isDownloading ? (
                     <button
                       type="button"
                       onClick={() => cancelActiveDownload(taskKey)}
                       aria-label={`Cancel offline book download (${activePct}%)`}
-                      className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 max-md:w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs sm:text-sm font-bold text-[var(--text-main)] whitespace-nowrap"
+                      className="inline-flex items-center justify-center gap-2 min-h-[42px] md:min-h-[48px] px-4 w-full md:w-auto rounded-lg bg-[var(--bg-elevated)] text-xs md:text-sm font-bold text-[var(--text-main)] whitespace-nowrap md:border md:border-[var(--border-strong)]"
                     >
                       <Loader2
                         className="w-4 h-4 animate-spin shrink-0"
@@ -1273,11 +1298,11 @@ export function PurchasedLibraryView({
                       />
                     </button>
                   ) : isBookOfflineReady ? (
-                    <div className="inline-flex flex-wrap items-center gap-2 max-md:flex max-md:w-full">
+                    <div className="flex w-full items-center gap-2 md:inline-flex md:w-auto md:flex-wrap">
                       <div
                         role="group"
                         aria-label={`${record.title} reading mode`}
-                        className="inline-flex items-center rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] overflow-hidden max-md:flex-1"
+                        className="inline-flex flex-1 items-center gap-2 md:flex-none md:gap-0 md:rounded-lg md:border md:border-[var(--border-strong)] md:bg-[var(--bg-canvas)] md:overflow-hidden"
                       >
                         <button
                           type="button"
@@ -1286,10 +1311,10 @@ export function PurchasedLibraryView({
                             void handleLaunchBookReader(row, 'online')
                           }
                           className={cn(
-                            'inline-flex items-center justify-center min-h-[48px] px-3.5 sm:px-4 max-md:flex-1 text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap disabled:opacity-40',
+                            'inline-flex items-center justify-center flex-1 min-h-[42px] px-3 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap disabled:opacity-40 md:flex-none md:min-h-[48px] md:px-4 md:rounded-none md:text-sm',
                             isOnline && selectedMode === 'online'
                               ? 'bg-[var(--bg-elevated)] text-[var(--text-main)]'
-                              : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)]/60'
+                              : 'bg-[var(--bg-elevated)]/80 text-[var(--text-main)] md:bg-transparent md:text-[var(--text-muted)] md:hover:text-[var(--text-main)] md:hover:bg-[var(--bg-elevated)]/60'
                           )}
                         >
                           {launchingTaskKey === launchKey
@@ -1298,7 +1323,7 @@ export function PurchasedLibraryView({
                         </button>
                         <span
                           aria-hidden="true"
-                          className="w-px h-6 bg-[var(--border-subtle)]"
+                          className="hidden md:block w-px h-6 bg-[var(--border-subtle)]"
                         />
                         <button
                           type="button"
@@ -1306,10 +1331,10 @@ export function PurchasedLibraryView({
                             void handleLaunchBookReader(row, 'offline')
                           }
                           className={cn(
-                            'inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 sm:px-4 max-md:flex-1 text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap',
+                            'inline-flex items-center justify-center gap-1.5 flex-1 min-h-[42px] px-3 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap md:flex-none md:min-h-[48px] md:px-4 md:rounded-none md:text-sm',
                             selectedMode === 'offline'
                               ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
-                              : 'text-[var(--text-main)] hover:bg-[var(--bg-elevated)]'
+                              : 'bg-[var(--bg-elevated)]/80 text-[var(--text-main)] md:bg-transparent md:hover:bg-[var(--bg-elevated)]'
                           )}
                         >
                           <Check
@@ -1330,7 +1355,7 @@ export function PurchasedLibraryView({
                             )
                           }
                           aria-label={`Update offline files for ${record.title}`}
-                          className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-xs sm:text-sm font-semibold text-[var(--text-main)] whitespace-nowrap"
+                          className="inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 rounded-lg bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap md:min-h-[48px] md:px-3.5 md:border md:border-[var(--border-strong)] md:bg-[var(--bg-canvas)] md:hover:bg-[var(--bg-elevated)] md:text-sm"
                         >
                           <RefreshCw
                             className="w-3.5 h-3.5 shrink-0"
@@ -1344,20 +1369,20 @@ export function PurchasedLibraryView({
                         type="button"
                         onClick={() => void handleDeleteBookBundleOffline(record)}
                         aria-label={`Delete offline copy of ${record.title}`}
-                        className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:border-[var(--status-danger)] transition-colors"
+                        className="inline-flex items-center justify-center min-h-[42px] min-w-[42px] rounded-lg text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:bg-[var(--status-danger-bg)] transition-colors md:min-h-[48px] md:min-w-[48px] md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-canvas)] md:hover:bg-transparent md:hover:border-[var(--status-danger)]"
                       >
                         <Trash2 className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
                   ) : (
-                    <div className="inline-flex flex-wrap items-center gap-2 max-md:flex max-md:w-full">
+                    <div className="flex w-full items-center gap-2 md:inline-flex md:w-auto md:flex-wrap">
                       <button
                         type="button"
                         disabled={!isOnline || launchingTaskKey === launchKey}
                         onClick={() =>
                           void handleLaunchBookReader(row, 'online')
                         }
-                        className="inline-flex items-center justify-center min-h-[48px] px-4 max-md:flex-1 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs sm:text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap"
+                        className="inline-flex items-center justify-center flex-1 min-h-[42px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap md:flex-none md:min-h-[48px] md:px-4 md:text-sm"
                       >
                         {launchingTaskKey === launchKey
                           ? 'Opening...'
@@ -1373,7 +1398,7 @@ export function PurchasedLibraryView({
                             remoteUpdatedAtMs
                           )
                         }
-                        className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 max-md:flex-1 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs sm:text-sm font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap"
+                        className="inline-flex items-center justify-center gap-1.5 flex-1 min-h-[42px] px-3.5 rounded-lg bg-[var(--bg-elevated)]/85 hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap md:flex-none md:min-h-[48px] md:px-4 md:text-sm md:border md:border-[var(--border-strong)] md:bg-[var(--bg-canvas)] md:hover:bg-[var(--bg-elevated)]"
                       >
                         <Download
                           className="w-4 h-4 shrink-0"
@@ -1489,16 +1514,16 @@ export function PurchasedLibraryView({
               return (
                 <div
                   key={mockSet.id}
-                  className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 py-2.5 border-t border-[var(--border-subtle)]/70 first:border-t-0"
+                  className="flex flex-col lg:flex-row lg:items-center justify-between gap-1.5 md:gap-2.5 py-2 md:py-2.5 border-t border-[var(--border-subtle)]/70 first:border-t-0"
                 >
                   <div className="min-w-0 flex items-baseline gap-2">
                     <span
                       aria-hidden="true"
-                      className="font-mono text-xs text-[var(--text-muted)] shrink-0 select-none"
+                      className="hidden md:inline font-mono text-xs text-[var(--text-muted)] shrink-0 select-none"
                     >
                       {isLastBranch ? '└─' : '├─'}
                     </span>
-                    <div className="min-w-0 text-xs sm:text-sm flex flex-wrap items-baseline gap-x-2 gap-y-0.5 tabular-nums">
+                    <div className="min-w-0 text-xs md:text-sm flex flex-wrap items-baseline gap-x-2 gap-y-0.5 tabular-nums">
                       <span className="font-semibold text-[var(--text-main)]">
                         {mockSet.title}
                       </span>
@@ -1525,7 +1550,7 @@ export function PurchasedLibraryView({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-start lg:self-auto">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 w-full md:w-auto md:gap-2 shrink-0 self-start lg:self-auto">
                     {latestAttempt && (
                       <button
                         type="button"
@@ -1538,10 +1563,10 @@ export function PurchasedLibraryView({
                           )
                         }
                         aria-label={`View full telemetry, solution review, and analysis for ${mockSet.title}`}
-                        className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--brand-primary)]/40 bg-[var(--bg-elevated)] hover:border-[var(--brand-primary)] text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0"
+                        className="inline-flex items-center gap-1.5 min-h-[40px] px-0 text-xs font-semibold text-[var(--accent-active)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0 md:justify-center md:min-h-[44px] md:px-3.5 md:rounded-lg md:border md:border-[var(--brand-primary)]/40 md:bg-[var(--bg-elevated)] md:hover:border-[var(--brand-primary)] md:text-[var(--text-main)]"
                       >
                         <BarChart3
-                          className="w-3.5 h-3.5 text-[var(--brand-primary)] shrink-0"
+                          className="w-3.5 h-3.5 text-current md:text-[var(--brand-primary)] shrink-0"
                           aria-hidden="true"
                         />
                         <span>
@@ -1560,7 +1585,7 @@ export function PurchasedLibraryView({
                       onClick={() =>
                         void handleLaunchExamSet(record, mockSet.id, setSource)
                       }
-                      className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0"
+                      className="inline-flex items-center gap-1 min-h-[40px] px-0 ms-auto text-xs font-bold text-[var(--text-main)] hover:opacity-80 disabled:opacity-40 transition-colors whitespace-nowrap shrink-0 md:ms-0 md:justify-center md:gap-1.5 md:min-h-[44px] md:px-3.5 md:rounded-lg md:border md:border-[var(--border-strong)] md:bg-[var(--bg-canvas)] md:hover:bg-[var(--bg-elevated)] md:hover:opacity-100 md:font-semibold"
                     >
                       <span>
                         {launchingTaskKey === setLaunchKey
@@ -1585,11 +1610,11 @@ export function PurchasedLibraryView({
               <div
                 key={record.purchaseId}
                 role="listitem"
-                className="p-4 sm:p-5 max-md:p-3.5 space-y-3.5 max-md:space-y-3"
+                className="py-4 px-0 space-y-3 md:p-5 md:space-y-3.5"
               >
                 {/* Pack Header Row */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 max-md:gap-3">
-                  <div className="flex items-start sm:items-center gap-4 min-w-0 flex-1">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4">
+                  <div className="flex items-start md:items-center gap-3 md:gap-4 min-w-0 flex-1">
                     <Link
                       href={`/exams/${record.urlSlug}`}
                       aria-label={`View details for ${record.title}`}
@@ -1601,13 +1626,15 @@ export function PurchasedLibraryView({
                         collectionName="ExamPackDocument"
                         size="list"
                         showBadge={true}
+                        className="max-md:w-[72px] max-md:h-[72px]"
+                        contentOffsetClass="max-md:mt-1.5"
                       />
                     </Link>
 
-                    <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="min-w-0 flex-1 space-y-1 md:space-y-1.5">
                       <Link
                         href={`/exams/${record.urlSlug}`}
-                        className="text-base sm:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug block"
+                        className="text-base md:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug block"
                       >
                         {record.title}
                       </Link>
@@ -1668,10 +1695,10 @@ export function PurchasedLibraryView({
                         )}
                       </div>
 
-                      <div className="pt-0.5">
+                      <div className="hidden md:block pt-0.5">
                         <Link
                           href={`/exams/${record.urlSlug}#reviews`}
-                          className="inline-flex items-center gap-1 max-md:min-h-[44px] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
                         >
                           <span>Exam Syllabus & Verified Review</span>
                           <ArrowRight
@@ -1684,7 +1711,7 @@ export function PurchasedLibraryView({
                   </div>
 
                   {/* Pack Header Actions */}
-                  <div className="flex flex-wrap items-center gap-2 shrink-0 sm:ms-4 max-md:w-full">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 w-full md:w-auto md:ms-4">
                     <button
                       type="button"
                       disabled={
@@ -1698,7 +1725,7 @@ export function PurchasedLibraryView({
                           effectivePackOffline ? 'offline' : 'online'
                         )
                       }
-                      className="inline-flex items-center justify-center min-h-[48px] px-4 max-md:flex-1 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs sm:text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap"
+                      className="inline-flex items-center justify-center flex-1 min-h-[42px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity whitespace-nowrap md:flex-none md:min-h-[48px] md:px-4 md:text-sm"
                     >
                       {launchingTaskKey === headerLaunchKey
                         ? 'Opening...'
@@ -1716,7 +1743,7 @@ export function PurchasedLibraryView({
                         type="button"
                         onClick={() => cancelActiveDownload(packTaskKey)}
                         aria-label={`Cancel exam pack download (${activePackPct}%)`}
-                        className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 max-md:flex-1 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs sm:text-sm font-bold text-[var(--text-main)] whitespace-nowrap"
+                        className="inline-flex items-center justify-center gap-2 flex-1 min-h-[42px] px-3.5 rounded-lg bg-[var(--bg-elevated)] text-xs font-bold text-[var(--text-main)] whitespace-nowrap md:flex-none md:min-h-[48px] md:px-4 md:border md:border-[var(--border-strong)] md:text-sm"
                       >
                         <Loader2
                           className="w-4 h-4 animate-spin shrink-0"
@@ -1729,7 +1756,7 @@ export function PurchasedLibraryView({
                         />
                       </button>
                     ) : isPackSavedOffline ? (
-                      <div className="inline-flex flex-wrap items-center gap-2 max-md:flex-1">
+                      <div className="inline-flex flex-1 flex-wrap items-center gap-2 md:flex-none">
                         <button
                           type="button"
                           aria-pressed={effectivePackOffline}
@@ -1741,10 +1768,10 @@ export function PurchasedLibraryView({
                             }))
                           }
                           className={cn(
-                            'inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 sm:px-4 max-md:flex-1 rounded-lg border text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap',
+                            'inline-flex items-center justify-center gap-1.5 flex-1 min-h-[42px] px-3 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap md:flex-none md:min-h-[48px] md:px-4 md:border md:text-sm',
                             effectivePackOffline
-                              ? 'border-[var(--status-success)] bg-[var(--status-success)] text-white'
-                              : 'border-[var(--border-strong)] bg-[var(--bg-canvas)] text-[var(--text-main)] hover:bg-[var(--bg-elevated)]'
+                              ? 'bg-[var(--status-success)] text-white md:border-[var(--status-success)]'
+                              : 'bg-[var(--bg-elevated)]/85 text-[var(--text-main)] md:border-[var(--border-strong)] md:bg-[var(--bg-canvas)] md:hover:bg-[var(--bg-elevated)]'
                           )}
                         >
                           <Check
@@ -1765,7 +1792,7 @@ export function PurchasedLibraryView({
                               )
                             }
                             aria-label={`Update offline exam sets for ${record.title}`}
-                            className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-xs sm:text-sm font-semibold text-[var(--text-main)] whitespace-nowrap"
+                            className="inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 rounded-lg bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap md:min-h-[48px] md:px-3.5 md:border md:border-[var(--border-strong)] md:bg-[var(--bg-canvas)] md:hover:bg-[var(--bg-elevated)] md:text-sm"
                           >
                             <RefreshCw
                               className="w-3.5 h-3.5 shrink-0"
@@ -1781,7 +1808,7 @@ export function PurchasedLibraryView({
                             void handleDeleteExamPackOffline(record)
                           }
                           aria-label={`Delete offline exam sets for ${record.title}`}
-                          className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:border-[var(--status-danger)] transition-colors"
+                          className="inline-flex items-center justify-center min-h-[42px] min-w-[42px] rounded-lg text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:bg-[var(--status-danger-bg)] transition-colors md:min-h-[48px] md:min-w-[48px] md:border md:border-[var(--border-subtle)] md:bg-[var(--bg-canvas)] md:hover:bg-transparent md:hover:border-[var(--status-danger)]"
                         >
                           <Trash2 className="w-4 h-4" aria-hidden="true" />
                         </button>
@@ -1797,7 +1824,7 @@ export function PurchasedLibraryView({
                             expectedSetIds
                           )
                         }
-                        className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 max-md:flex-1 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs sm:text-sm font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap"
+                        className="inline-flex items-center justify-center gap-1.5 flex-1 min-h-[42px] px-3.5 rounded-lg bg-[var(--bg-elevated)]/85 hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap md:flex-none md:min-h-[48px] md:px-4 md:text-sm md:border md:border-[var(--border-strong)] md:bg-[var(--bg-canvas)] md:hover:bg-[var(--bg-elevated)]"
                       >
                         <Download
                           className="w-4 h-4 shrink-0"
@@ -1811,7 +1838,7 @@ export function PurchasedLibraryView({
 
                 {/* Set-1 Always Pinned + Expandable Sets 2..N (Auto-expanded when any remaining set has attempts or in-progress state) */}
                 {firstSet && (
-                  <div className="ps-2 sm:ps-28 space-y-1">
+                  <div className="ps-2.5 border-s-2 border-[var(--border-subtle)] space-y-0.5 md:ps-28 md:border-s-0 md:space-y-1">
                     {renderSetRow(firstSet, remainingSets.length === 0)}
 
                     {remainingSets.length > 0 && (
@@ -1825,11 +1852,11 @@ export function PurchasedLibraryView({
                               [record.itemId]: !isRemainingOpen,
                             }))
                           }
-                          className="inline-flex items-center gap-2 min-h-[44px] px-2 -ms-2 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)]/60 transition-colors whitespace-nowrap"
+                          className="inline-flex items-center gap-1.5 md:gap-2 min-h-[40px] px-0 ms-0 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap md:min-h-[44px] md:px-2 md:-ms-2 md:hover:bg-[var(--bg-elevated)]/60"
                         >
                           <span
                             aria-hidden="true"
-                            className="font-mono text-[var(--text-muted)]"
+                            className="hidden md:inline font-mono text-[var(--text-muted)]"
                           >
                             └─
                           </span>
@@ -1852,7 +1879,7 @@ export function PurchasedLibraryView({
                         </button>
 
                         {isRemainingOpen && (
-                          <div className="ps-4 sm:ps-6 pt-1 divide-y divide-[var(--border-subtle)]/70">
+                          <div className="pt-0.5 divide-y divide-[var(--border-subtle)]/70 md:ps-6 md:pt-1">
                             {remainingSets.map((s, idx) =>
                               renderSetRow(s, idx === remainingSets.length - 1)
                             )}

@@ -1,11 +1,18 @@
 import React from 'react';
 import {
-  getLiveBooks,
-  getLiveExams,
+  getLiveBooksPage,
+  getLiveCollectionCount,
+  getLiveExamsPage,
+  type CatalogPageResult,
 } from '../server/repositories/catalog-repository';
 import { getPublishedReviewAggregates } from '../server/repositories/review-repository';
 import { buildReviewTargetKey } from '../lib/reviews/validation';
-import { toCatalogCardDTO, type ReviewAggregateBadge } from '../lib/types/catalog';
+import {
+  toCatalogCardDTO,
+  type PublicBookDTO,
+  type PublicExamDTO,
+  type ReviewAggregateBadge,
+} from '../lib/types/catalog';
 import { HomeSearchBar } from '../features/catalog/search-hero';
 import { InstallAppCallout } from '../features/pwa/install-banner';
 import { KpiStrip } from '../features/catalog/kpi-strip';
@@ -15,24 +22,51 @@ import { HomeComplianceSection } from '../components/legal/home-compliance-secti
 
 export const dynamic = 'force-dynamic';
 
+const HOME_LIST_LIMIT = 5;
+
 export default async function HomePage() {
   let fetchError: string | null = null;
-  let books: Awaited<ReturnType<typeof getLiveBooks>> = [];
-  let exams: Awaited<ReturnType<typeof getLiveExams>> = [];
+  let booksPage: CatalogPageResult<PublicBookDTO> = {
+    items: [],
+    hasMore: false,
+    nextOffset: 0,
+  };
+  let examsPage: CatalogPageResult<PublicExamDTO> = {
+    items: [],
+    hasMore: false,
+    nextOffset: 0,
+  };
+  let booksTotalCount: number | null = null;
+  let examsTotalCount: number | null = null;
   let reviewAggregates = new Map<string, ReviewAggregateBadge>();
 
   try {
-    [books, exams, reviewAggregates] = await Promise.all([
-      getLiveBooks(),
-      getLiveExams(),
-      getPublishedReviewAggregates(),
-    ]);
+    [booksPage, examsPage, booksTotalCount, examsTotalCount, reviewAggregates] =
+      await Promise.all([
+        getLiveBooksPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
+        getLiveExamsPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
+        getLiveCollectionCount('books'),
+        getLiveCollectionCount('ExamPackDocument'),
+        getPublishedReviewAggregates(),
+      ]);
   } catch (error) {
     fetchError =
       error instanceof Error
         ? error.message
         : 'Unable to reach Firestore catalog.';
   }
+
+  const books = booksPage.items;
+  const exams = examsPage.items;
+
+  const displayBookCount =
+    booksTotalCount !== null
+      ? Math.max(books.length, booksTotalCount)
+      : books.length;
+  const displayExamCount =
+    examsTotalCount !== null
+      ? Math.max(exams.length, examsTotalCount)
+      : exams.length;
 
   const totalMocks = exams.reduce((acc, e) => acc + e.totalMocktest, 0);
   const potentialSavings =
@@ -58,13 +92,16 @@ export default async function HomePage() {
       </h1>
 
       <div className="ed-container pt-6 sm:pt-7 max-md:pt-3.5">
-        <HomeSearchBar bookCount={books.length} examCount={exams.length} />
+        <HomeSearchBar
+          bookCount={displayBookCount}
+          examCount={displayExamCount}
+        />
         <InstallAppCallout variant="home" className="mt-3.5 max-md:mt-3" />
       </div>
 
       <KpiStrip
-        totalCatalogBooks={books.length}
-        totalCatalogExams={exams.length}
+        totalCatalogBooks={displayBookCount}
+        totalCatalogExams={displayExamCount}
         totalCatalogMocks={totalMocks}
         catalogPotentialSavings={potentialSavings}
         primaryCurrency={primaryCurrency}
@@ -88,6 +125,12 @@ export default async function HomePage() {
             viewAllHref="/books"
             viewAllLabel="All Books"
             showFilters={false}
+            collectionName="books"
+            pageSize={HOME_LIST_LIMIT}
+            initialHasMore={booksPage.hasMore}
+            initialNextOffset={booksPage.nextOffset}
+            totalCount={booksTotalCount !== null ? displayBookCount : undefined}
+            loadMoreLabel="Load More Books"
           />
 
           <div className="ed-container">
@@ -103,6 +146,12 @@ export default async function HomePage() {
             viewAllHref="/exams"
             viewAllLabel="All Exam Packs"
             showFilters={false}
+            collectionName="ExamPackDocument"
+            pageSize={HOME_LIST_LIMIT}
+            initialHasMore={examsPage.hasMore}
+            initialNextOffset={examsPage.nextOffset}
+            totalCount={examsTotalCount !== null ? displayExamCount : undefined}
+            loadMoreLabel="Load More Exam Packs"
           />
         </>
       )}

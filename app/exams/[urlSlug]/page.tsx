@@ -157,8 +157,8 @@ export default async function ExamDetailPage({
       />
 
       <article className="w-full min-w-0">
-        {/* Header Block: Side-by-Side Thumbnail (Left) + Metadata (Right) on All Screens */}
-        <div className="flex flex-row items-start gap-4 sm:gap-6 max-md:gap-3.5 pb-6 max-md:pb-4 border-b border-[var(--border-subtle)]">
+        {/* Header Block: Side-by-Side Thumbnail (Left) + Title (Right) on All Screens */}
+        <div className="flex flex-row items-center gap-4 sm:gap-6 max-md:gap-3.5 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
           <MonogramThumbnail
             title={exam.title}
             type={exam.type}
@@ -174,67 +174,6 @@ export default async function ExamDetailPage({
             <h1 className="mt-1.5 max-md:mt-1 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
               {exam.title}
             </h1>
-
-            {exam.seoDescription && (
-              <p className="mt-2.5 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
-                {exam.seoDescription}
-              </p>
-            )}
-
-            <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums">
-              <span>
-                Faculty:{' '}
-                <strong className="font-semibold text-[var(--text-main)]">
-                  {exam.authorName}
-                </strong>
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>
-                <strong className="font-semibold text-[var(--text-main)]">
-                  {exam.totalMocktest}
-                </strong>{' '}
-                Mock {exam.totalMocktest === 1 ? 'Test' : 'Tests'}
-              </span>
-              {totalQuestionsSum > 0 && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>{totalQuestionsSum} Questions</span>
-                </>
-              )}
-              {totalMarksSum > 0 && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>{totalMarksSum} Marks</span>
-                </>
-              )}
-              <span aria-hidden="true">·</span>
-              <span>Updated {formatReadableDate(exam.updatedAtIso)}</span>
-              {reviewSummary.reviewCount > 0 && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <a
-                    href="#learner-reviews"
-                    className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline underline-offset-4"
-                  >
-                    <Star
-                      className="w-3.5 h-3.5 fill-[var(--status-warning)] text-[var(--status-warning)] shrink-0"
-                      aria-hidden="true"
-                    />
-                    <span>{reviewSummary.averageRating.toFixed(1)}</span>
-                    <span className="font-normal text-[var(--text-muted)]">
-                      ({reviewSummary.reviewCount}{' '}
-                      {reviewSummary.reviewCount === 1 ? 'review' : 'reviews'})
-                    </span>
-                  </a>
-                </>
-              )}
-            </div>
-
-            {exam.tags.length > 0 && (
-              <p className="mt-2 text-xs text-[var(--text-muted)]">
-                Topics: {exam.tags.join(' · ')}
-              </p>
-            )}
           </div>
         </div>
 
@@ -253,6 +192,76 @@ export default async function ExamDetailPage({
           listPrice={exam.listPrice}
           sampleJsonUrl={sampleTrialHref}
         />
+
+        {/* Summary, Faculty/Stats Metadata & Topics below Install App Banner */}
+        <div className="mt-5 max-md:mt-4 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
+          {exam.seoDescription && (
+            <p className="text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
+              {exam.seoDescription}
+            </p>
+          )}
+
+          <div
+            className={
+              exam.seoDescription
+                ? 'mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
+                : 'flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
+            }
+          >
+            <span>
+              Faculty:{' '}
+              <strong className="font-semibold text-[var(--text-main)]">
+                {exam.authorName}
+              </strong>
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              <strong className="font-semibold text-[var(--text-main)]">
+                {exam.totalMocktest}
+              </strong>{' '}
+              Mock {exam.totalMocktest === 1 ? 'Test' : 'Tests'}
+            </span>
+            {totalQuestionsSum > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{totalQuestionsSum} Questions</span>
+              </>
+            )}
+            {totalMarksSum > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{totalMarksSum} Marks</span>
+              </>
+            )}
+            <span aria-hidden="true">·</span>
+            <span>Updated {formatReadableDate(exam.updatedAtIso)}</span>
+            {reviewSummary.reviewCount > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <a
+                  href="#learner-reviews"
+                  className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline underline-offset-4"
+                >
+                  <Star
+                    className="w-3.5 h-3.5 fill-[var(--status-warning)] text-[var(--status-warning)] shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span>{reviewSummary.averageRating.toFixed(1)}</span>
+                  <span className="font-normal text-[var(--text-muted)]">
+                    ({reviewSummary.reviewCount}{' '}
+                    {reviewSummary.reviewCount === 1 ? 'review' : 'reviews'})
+                  </span>
+                </a>
+              </>
+            )}
+          </div>
+
+          {exam.tags.length > 0 && (
+            <p className="mt-2 text-xs text-[var(--text-muted)]">
+              Topics: {exam.tags.join(' · ')}
+            </p>
+          )}
+        </div>
 
         {/* Sortable MocktestTitles Syllabus Table */}
         <SyllabusTable
