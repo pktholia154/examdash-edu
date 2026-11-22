@@ -10,10 +10,6 @@ import React, {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  claimFreeThroughCheckoutAdapter,
-  purchasePaidThroughCheckoutAdapter,
-} from '../../lib/payments/checkout-adapter';
-import {
   calculateCartSummary,
   makeCompositeKey,
   makeFirestoreSafeCartKey,
@@ -296,6 +292,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       setIsCheckingOut(true);
       try {
+        const { claimFreeThroughCheckoutAdapter } = await import(
+          '../../lib/payments/checkout-adapter'
+        );
         const outcome = await claimFreeThroughCheckoutAdapter({
           refs,
           token: session.token,
@@ -353,6 +352,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       setIsCheckingOut(true);
       try {
+        const { purchasePaidThroughCheckoutAdapter } = await import(
+          '../../lib/payments/checkout-adapter'
+        );
         const outcome = await purchasePaidThroughCheckoutAdapter({
           refs,
           user: session.activeUser,

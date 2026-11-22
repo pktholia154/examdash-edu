@@ -12,12 +12,15 @@ import DOMPurify from 'dompurify';
 import 'katex/dist/katex.min.css';
 import {
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
   Menu,
   Minus,
   Moon,
   Plus,
   RefreshCw,
+  Search,
   Sun,
   Sunset,
   X,
@@ -47,6 +50,7 @@ import {
 } from '../shared/reader-top-bar';
 import { SampleUnlockCard } from '../shared/sample-unlock-card';
 import type {
+  MarkdownChapterChunk,
   MarkdownTocItem,
   MarkdownWorkerRequest,
   MarkdownWorkerResponse,
@@ -65,12 +69,6 @@ export interface MarkdownViewerProps {
   onRefreshSignedUrl?: () => Promise<string | null>;
   onSwitchToFullMode?: () => void;
   topBar?: ReaderTopBarProps;
-}
-
-interface SanitizedSection {
-  sectionId: string;
-  headingTitle: string;
-  safeHtml: string;
 }
 
 const MIN_MD_SCALE = 0.8;
@@ -125,6 +123,46 @@ function sanitizeAndHydrateMarkdownHtml(
   );
 }
 
+function resolveInitialChapterIndex(
+  chapters: MarkdownChapterChunk[],
+  saved: MarkdownReadingProgress | null
+): number {
+  if (chapters.length === 0 || !saved) return 0;
+
+  if (saved.chapterHeadingId) {
+    const byHeading = chapters.findIndex(
+      (ch) => ch.headingId === saved.chapterHeadingId
+    );
+    if (byHeading >= 0) return byHeading;
+  }
+
+  if (saved.blockId) {
+    const match = saved.blockId.match(/^blk_(\d+)$/);
+    if (match) {
+      const blockNum = Number(match[1]);
+      const byBlock = chapters.findIndex(
+        (ch) =>
+          ch.startBlockNum > 0 &&
+          blockNum >= ch.startBlockNum &&
+          blockNum <= ch.endBlockNum
+      );
+      if (byBlock >= 0) return byBlock;
+    }
+  }
+
+  if (
+    typeof saved.chapterIndex === 'number' &&
+    Number.isFinite(saved.chapterIndex)
+  ) {
+    return Math.min(
+      chapters.length - 1,
+      Math.max(0, Math.floor(saved.chapterIndex))
+    );
+  }
+
+  return 0;
+}
+
 export function MarkdownViewer({
   book,
   streamUrl,
@@ -161,10 +199,15 @@ export function MarkdownViewer({
     savedInitial?.theme ?? 'light'
   );
 
-  const [sections, setSections] = useState<SanitizedSection[]>([]);
+  const [chapters, setChapters] = useState<MarkdownChapterChunk[]>([]);
   const [toc, setToc] = useState<MarkdownTocItem[]>([]);
-  const [activeHeadingId, setActiveHeadingId] = useState<string>('');
+  const [mathMap, setMathMap] = useState<Record<string, string>>({});
+  const [activeChapterIndex, setActiveChapterIndex] = useState<number>(0);
+  const [activeSubheadingId, setActiveSubheadingId] = useState<string>('');
+  const [chapterScrollRatio, setChapterScrollRatio] = useState<number>(0);
+
   const [tocOpen, setTocOpen] = useState(false);
+  const [tocQuery, setTocQuery] = useState('');
   const [lightboxPayload, setLightboxPayload] =
     useState<LightboxPayload | null>(null);
 
@@ -179,10 +222,17 @@ export function MarkdownViewer({
   const rootContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const proseRef = useRef<HTMLElement | null>(null);
+  const tocListRef = useRef<HTMLDivElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
+
+  const pendingAnchorRef = useRef<string | null>(null);
+  const skipNextChapterResetScrollRef = useRef<boolean>(true);
 
   const [reloadNonce, setReloadNonce] = useState(0);
   const mdScaleRef = useRef<number>(mdScale);
+  const activeChapterIndexRef = useRef<number>(activeChapterIndex);
+  const chaptersRef = useRef<MarkdownChapterChunk[]>(chapters);
+  const savedInitialRef = useRef<MarkdownReadingProgress | null>(savedInitial);
   const bearerTokenProviderRef = useRef(bearerTokenProvider);
   const onRefreshSignedUrlRef = useRef(onRefreshSignedUrl);
   const streamUrlRef = useRef(streamUrl);
@@ -195,6 +245,18 @@ export function MarkdownViewer({
   useEffect(() => {
     mdScaleRef.current = mdScale;
   }, [mdScale]);
+
+  useEffect(() => {
+    activeChapterIndexRef.current = activeChapterIndex;
+  }, [activeChapterIndex]);
+
+  useEffect(() => {
+    chaptersRef.current = chapters;
+  }, [chapters]);
+
+  useEffect(() => {
+    savedInitialRef.current = savedInitial;
+  }, [savedInitial]);
 
   useEffect(() => {
     bearerTokenProviderRef.current = bearerTokenProvider;
@@ -226,6 +288,89 @@ export function MarkdownViewer({
     () => isTallScriptLanguage(book.language, rawMarkdownSample),
     [book.language, rawMarkdownSample]
   );
+
+  // Fast O(1) lookup from any #heading-slug to its owning chapter index
+  const anchorToChapterMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < chapters.length; i++) {
+      const ch = chapters[i];
+      for (const anchor of ch.anchorIds) {
+        if (!map.has(anchor)) {
+          map.set(anchor, i);
+        }
+      }
+    }
+    return map;
+  }, [chapters]);
+
+  const safeChapterIndex =
+    chapters.length > 0
+      ? Math.min(chapters.length - 1, Math.max(0, activeChapterIndex))
+      : 0;
+  const activeChapter: MarkdownChapterChunk | null =
+    chapters[safeChapterIndex] ?? null;
+  const prevChapter: MarkdownChapterChunk | null =
+    safeChapterIndex > 0 ? chapters[safeChapterIndex - 1] ?? null : null;
+  const nextChapter: MarkdownChapterChunk | null =
+    safeChapterIndex < chapters.length - 1
+      ? chapters[safeChapterIndex + 1] ?? null
+      : null;
+
+  const [sanitizedByChapterId, setSanitizedByChapterId] = useState<
+    Record<string, string>
+  >({});
+
+  const activeChapterSafeHtml = useMemo(() => {
+    if (!activeChapter) return '';
+    const cached = sanitizedByChapterId[activeChapter.chapterId];
+    if (cached !== undefined) return cached;
+    return sanitizeAndHydrateMarkdownHtml(activeChapter.rawHtml, mathMap);
+  }, [activeChapter, mathMap, sanitizedByChapterId]);
+
+  // Persist active chapter HTML in state cache & pre-warm next chapter during idle time
+  useEffect(() => {
+    if (loadingState !== 'ready' || !activeChapter) return;
+
+    const needsActive =
+      sanitizedByChapterId[activeChapter.chapterId] === undefined;
+    const needsNext =
+      Boolean(nextChapter) &&
+      sanitizedByChapterId[nextChapter!.chapterId] === undefined;
+
+    if (!needsActive && !needsNext) return;
+
+    const warmChapters = () => {
+      setSanitizedByChapterId((prev) => {
+        let nextState: Record<string, string> | null = null;
+        if (prev[activeChapter.chapterId] === undefined) {
+          nextState = {
+            ...(nextState ?? prev),
+            [activeChapter.chapterId]: sanitizeAndHydrateMarkdownHtml(
+              activeChapter.rawHtml,
+              mathMap
+            ),
+          };
+        }
+        if (nextChapter && prev[nextChapter.chapterId] === undefined) {
+          nextState = {
+            ...(nextState ?? prev),
+            [nextChapter.chapterId]: sanitizeAndHydrateMarkdownHtml(
+              nextChapter.rawHtml,
+              mathMap
+            ),
+          };
+        }
+        return nextState ?? prev;
+      });
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const idleId = window.requestIdleCallback(warmChapters, { timeout: 500 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timer = setTimeout(warmChapters, 100);
+    return () => clearTimeout(timer);
+  }, [activeChapter, loadingState, mathMap, nextChapter, sanitizedByChapterId]);
 
   // Capture current top-quarter [data-block-id] anchor for Zoom-Proof Persistence & Eye-Line Lock
   const captureEyeLineAnchor = useCallback((): {
@@ -267,10 +412,19 @@ export function MarkdownViewer({
   }, []);
 
   const flushProgressNow = useCallback(() => {
-    if (sections.length === 0) return;
+    const list = chaptersRef.current;
+    if (list.length === 0) return;
+    const idx = Math.min(
+      list.length - 1,
+      Math.max(0, activeChapterIndexRef.current)
+    );
+    const currentChapter = list[idx];
     const anchor = captureEyeLineAnchor();
+
     const payload: MarkdownReadingProgress = {
-      blockId: anchor?.blockId ?? '',
+      chapterIndex: idx,
+      chapterHeadingId: currentChapter?.headingId ?? '',
+      blockId: anchor?.blockId || currentChapter?.firstBlockId || '',
       blockProgressRatio: anchor?.blockRatio ?? 0,
       mdScale: mdScaleRef.current,
       fontMode,
@@ -278,19 +432,123 @@ export function MarkdownViewer({
       updatedAt: Date.now(),
     };
     writeStoredJsonSync(progressKey, payload);
-  }, [captureEyeLineAnchor, comfortTheme, fontMode, progressKey, sections.length]);
+  }, [captureEyeLineAnchor, comfortTheme, fontMode, progressKey]);
 
   const scheduleProgressSave = useCallback(() => {
     if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
     progressTimerRef.current = setTimeout(() => {
       flushProgressNow();
-    }, 1000);
+    }, 800);
   }, [flushProgressNow]);
 
   useEffect(() => {
     flushProgressRef.current = flushProgressNow;
     return registerLifecycleFlush(flushProgressNow);
   }, [flushProgressNow]);
+
+  // Jump to an in-chapter heading by slug
+  const scrollToHeadingInCurrentChapter = useCallback(
+    (headingId: string, behavior: ScrollBehavior = 'smooth') => {
+      const scroller = scrollerRef.current;
+      const prose = proseRef.current;
+      if (!scroller || !prose || !headingId) return;
+
+      const targetEl = prose.querySelector<HTMLElement>(
+        `#${CSS.escape(headingId)}`
+      );
+      if (!targetEl) return;
+
+      const scrollerRect = scroller.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+      const destination = Math.max(
+        0,
+        scroller.scrollTop + (targetRect.top - scrollerRect.top) - 16
+      );
+      scroller.scrollTo({ top: destination, behavior });
+    },
+    []
+  );
+
+  // Switch active chapter (renders strictly one chapter at a time)
+  const selectChapter = useCallback(
+    (
+      nextIndexRaw: number,
+      options?: { anchorId?: string; closeToc?: boolean }
+    ) => {
+      const total = chaptersRef.current.length;
+      if (total === 0) return;
+      const nextIdx = Math.min(total - 1, Math.max(0, nextIndexRaw));
+
+      if (options?.closeToc) {
+        setTocOpen(false);
+      }
+
+      const targetChapter = chaptersRef.current[nextIdx];
+      const anchorId = options?.anchorId?.trim() || '';
+
+      if (nextIdx === activeChapterIndexRef.current) {
+        if (anchorId && anchorId !== targetChapter?.headingId) {
+          setActiveSubheadingId(anchorId);
+          scrollToHeadingInCurrentChapter(anchorId, 'smooth');
+        } else {
+          setActiveSubheadingId('');
+          setChapterScrollRatio(0);
+          scrollerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+        }
+        scheduleProgressSave();
+        return;
+      }
+
+      skipNextChapterResetScrollRef.current = false;
+      pendingAnchorRef.current =
+        anchorId && anchorId !== targetChapter?.headingId ? anchorId : null;
+      setActiveSubheadingId(pendingAnchorRef.current || '');
+      setChapterScrollRatio(0);
+      activeChapterIndexRef.current = nextIdx;
+      setActiveChapterIndex(nextIdx);
+    },
+    [scheduleProgressSave, scrollToHeadingInCurrentChapter]
+  );
+
+  // After switching chapters, scroll to top (or to pending cross-chapter #anchor) and save progress
+  useEffect(() => {
+    if (loadingState !== 'ready' || chapters.length === 0) return;
+
+    if (skipNextChapterResetScrollRef.current) {
+      return;
+    }
+
+    const pendingAnchor = pendingAnchorRef.current;
+    pendingAnchorRef.current = null;
+
+    requestAnimationFrame(() => {
+      const scroller = scrollerRef.current;
+      if (!scroller) return;
+      if (pendingAnchor) {
+        scrollToHeadingInCurrentChapter(pendingAnchor, 'instant');
+      } else {
+        scroller.scrollTo({ top: 0, behavior: 'instant' });
+      }
+      scheduleProgressSave();
+    });
+  }, [
+    activeChapterIndex,
+    chapters.length,
+    loadingState,
+    scheduleProgressSave,
+    scrollToHeadingInCurrentChapter,
+  ]);
+
+  // Auto-scroll active chapter entry into view when opening the TOC drawer
+  useEffect(() => {
+    if (!tocOpen) return;
+    requestAnimationFrame(() => {
+      const activeBtn = tocListRef.current?.querySelector<HTMLElement>(
+        '[data-toc-active="true"]'
+      );
+      activeBtn?.scrollIntoView({ block: 'nearest' });
+    });
+  }, [tocOpen]);
 
   // Synchronous Eye-Line Lock Reflow Zoom (--md-scale)
   const applyScaleWithEyeLineLock = useCallback(
@@ -327,29 +585,56 @@ export function MarkdownViewer({
     [captureEyeLineAnchor, scheduleProgressSave]
   );
 
-  // Keyboard shortcuts: Cmd/Ctrl + +/-/0 (Zoom), Escape closes TOC drawer
+  // Keyboard shortcuts: Cmd/Ctrl + +/-/0 (Zoom), Alt + Left/Right (Prev/Next Chapter), Escape closes TOC drawer
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        Boolean(target?.isContentEditable);
+
       if (e.metaKey || e.ctrlKey) {
         if (e.key === '=' || e.key === '+') {
           e.preventDefault();
           applyScaleWithEyeLineLock(mdScaleRef.current + MD_SCALE_STEP);
-        } else if (e.key === '-') {
+          return;
+        }
+        if (e.key === '-') {
           e.preventDefault();
           applyScaleWithEyeLineLock(mdScaleRef.current - MD_SCALE_STEP);
-        } else if (e.key === '0') {
+          return;
+        }
+        if (e.key === '0') {
           e.preventDefault();
           applyScaleWithEyeLineLock(1.0);
+          return;
         }
       }
+
       if (e.key === 'Escape' && tocOpen) {
         e.stopPropagation();
         setTocOpen(false);
+        return;
+      }
+
+      if (!isEditable && !tocOpen && e.altKey && !e.metaKey && !e.ctrlKey) {
+        if (e.key === 'ArrowLeft' && activeChapterIndexRef.current > 0) {
+          e.preventDefault();
+          selectChapter(activeChapterIndexRef.current - 1);
+        } else if (
+          e.key === 'ArrowRight' &&
+          activeChapterIndexRef.current < chaptersRef.current.length - 1
+        ) {
+          e.preventDefault();
+          selectChapter(activeChapterIndexRef.current + 1);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [applyScaleWithEyeLineLock, tocOpen]);
+  }, [applyScaleWithEyeLineLock, selectChapter, tocOpen]);
 
   // Mobile Two-Finger Pinch on Prose -> Live Floating Scale Indicator, Commit on Lift
   useEffect(() => {
@@ -420,7 +705,7 @@ export function MarkdownViewer({
     };
   }, [applyScaleWithEyeLineLock]);
 
-  // Fetch & Parse Markdown via Worker + Main-Thread DOMPurify + KaTeX Hydration
+  // Fetch & Parse Markdown into Chapters via Web Worker
   useEffect(() => {
     let cancelled = false;
     const abortController = new AbortController();
@@ -623,17 +908,24 @@ export function MarkdownViewer({
             return;
           }
 
-          const sanitized: SanitizedSection[] = data.sections.map((sec) => ({
-            sectionId: sec.sectionId,
-            headingTitle: sec.headingTitle,
-            safeHtml: sanitizeAndHydrateMarkdownHtml(sec.rawHtml, data.mathMap),
-          }));
+          setSanitizedByChapterId({});
+          restoredAnchorRef.current = false;
+          skipNextChapterResetScrollRef.current = true;
 
-          setSections(sanitized);
+          const initialIdx = resolveInitialChapterIndex(
+            data.chapters,
+            savedInitialRef.current
+          );
+
+          chaptersRef.current = data.chapters;
+          activeChapterIndexRef.current = initialIdx;
+
+          setMathMap(data.mathMap);
+          setChapters(data.chapters);
           setToc(data.toc);
-          if (data.toc.length > 0) {
-            setActiveHeadingId(data.toc[0].id);
-          }
+          setActiveChapterIndex(initialIdx);
+          setActiveSubheadingId('');
+          setChapterScrollRatio(0);
           setLoadingState('ready');
         };
 
@@ -649,6 +941,7 @@ export function MarkdownViewer({
           type: 'PARSE_MARKDOWN',
           requestId: reqId,
           markdown: markdownText,
+          bookTitle: book.title,
           assetBaseUrl:
             typeof window !== 'undefined' ? window.location.origin : undefined,
         } satisfies MarkdownWorkerRequest);
@@ -695,11 +988,11 @@ export function MarkdownViewer({
     };
   }, []);
 
-  // Restore saved [data-block-id] + blockProgressRatio once sections mount
+  // Restore saved [data-block-id] + blockProgressRatio inside the restored chapter on initial mount
   useEffect(() => {
     if (
       loadingState !== 'ready' ||
-      sections.length === 0 ||
+      chapters.length === 0 ||
       restoredAnchorRef.current
     ) {
       return;
@@ -725,57 +1018,43 @@ export function MarkdownViewer({
         scroller.scrollTo({ top: Math.max(0, targetTop), behavior: 'instant' });
       }
     });
-  }, [loadingState, savedInitial, sections.length]);
+  }, [chapters.length, loadingState, savedInitial]);
 
-  // Scroll listener -> Active H1 tracking + Progress persistence
+  // Scroll listener -> Subheading tracking within active chapter + Scroll progress + Persistence
   const handleScroll = useCallback(() => {
     const scroller = scrollerRef.current;
     const prose = proseRef.current;
     if (!scroller || !prose) return;
 
-    if (toc.length > 0) {
+    const maxScroll = scroller.scrollHeight - scroller.clientHeight;
+    const ratio =
+      maxScroll > 4 ? Math.min(1, Math.max(0, scroller.scrollTop / maxScroll)) : 1;
+    setChapterScrollRatio(ratio);
+
+    const subs = activeChapter?.subheadings;
+    if (subs && subs.length > 0) {
       const scrollerTop = scroller.getBoundingClientRect().top;
-      let currentToc = toc[0];
-      for (let i = 0; i < toc.length; i++) {
+      let currentSub = '';
+      for (let i = 0; i < subs.length; i++) {
         const el = prose.querySelector<HTMLElement>(
-          `#${CSS.escape(toc[i].id)}`
+          `#${CSS.escape(subs[i].id)}`
         );
         if (el) {
           const topRel = el.getBoundingClientRect().top - scrollerTop;
-          if (topRel <= 96) {
-            currentToc = toc[i];
+          if (topRel <= 108) {
+            currentSub = subs[i].id;
           } else {
             break;
           }
         }
       }
-      setActiveHeadingId(currentToc.id);
+      setActiveSubheadingId(currentSub);
     }
 
     scheduleProgressSave();
-  }, [scheduleProgressSave, toc]);
+  }, [activeChapter, scheduleProgressSave]);
 
-  // Jump to Heading
-  const jumpToHeading = useCallback((headingId: string) => {
-    const scroller = scrollerRef.current;
-    const prose = proseRef.current;
-    if (!scroller || !prose || !headingId) return;
-
-    const targetEl = prose.querySelector<HTMLElement>(
-      `#${CSS.escape(headingId)}`
-    );
-    if (!targetEl) return;
-
-    const scrollerRect = scroller.getBoundingClientRect();
-    const targetRect = targetEl.getBoundingClientRect();
-    const destination = Math.max(
-      0,
-      scroller.scrollTop + (targetRect.top - scrollerRect.top) - 16
-    );
-    scroller.scrollTo({ top: destination, behavior: 'smooth' });
-  }, []);
-
-  // Delegated Click / Link / Image Lightbox Interceptor
+  // Delegated Click / Cross-Chapter Anchor / Image Lightbox Interceptor
   const handleProseClick = useCallback(
     (e: React.MouseEvent<HTMLElement>) => {
       const target = e.target as HTMLElement | null;
@@ -800,8 +1079,14 @@ export function MarkdownViewer({
 
         if (rawHref.startsWith('#')) {
           e.preventDefault();
-          const slug = decodeURIComponent(rawHref.slice(1));
-          jumpToHeading(slug);
+          const slug = decodeURIComponent(rawHref.slice(1)).trim();
+          if (!slug) return;
+          const ownerIdx = anchorToChapterMap.get(slug);
+          if (ownerIdx !== undefined && ownerIdx !== safeChapterIndex) {
+            selectChapter(ownerIdx, { anchorId: slug });
+          } else {
+            scrollToHeadingInCurrentChapter(slug, 'smooth');
+          }
           return;
         }
 
@@ -817,10 +1102,59 @@ export function MarkdownViewer({
         }
       }
     },
-    [book.title, jumpToHeading, router]
+    [
+      anchorToChapterMap,
+      book.title,
+      router,
+      safeChapterIndex,
+      scrollToHeadingInCurrentChapter,
+      selectChapter,
+    ]
   );
 
+  const normalizedTocQuery = tocQuery.trim().toLowerCase();
+  const showTocSearch = useMemo(() => {
+    if (toc.length >= 5) return true;
+    const totalSubs = toc.reduce((acc, item) => acc + item.subheadings.length, 0);
+    return totalSubs >= 6;
+  }, [toc]);
+
+  const filteredToc = useMemo(() => {
+    if (!normalizedTocQuery) {
+      return toc.map((entry) => ({
+        entry,
+        matchingSubs: entry.subheadings,
+      }));
+    }
+
+    const results: Array<{
+      entry: MarkdownTocItem;
+      matchingSubs: MarkdownTocItem['subheadings'];
+    }> = [];
+
+    for (const entry of toc) {
+      const titleMatches = entry.text.toLowerCase().includes(normalizedTocQuery);
+      const subMatches = entry.subheadings.filter((sub) =>
+        sub.text.toLowerCase().includes(normalizedTocQuery)
+      );
+      if (titleMatches || subMatches.length > 0) {
+        results.push({
+          entry,
+          matchingSubs: titleMatches && subMatches.length === 0 ? entry.subheadings : subMatches,
+        });
+      }
+    }
+
+    return results;
+  }, [normalizedTocQuery, toc]);
+
   const displayedScalePct = Math.round((livePinchScale ?? mdScale) * 100);
+  const overallProgressRatio =
+    chapters.length <= 1
+      ? chapterScrollRatio
+      : Math.min(1, Math.max(0, (safeChapterIndex + chapterScrollRatio) / chapters.length));
+
+  const proseColumnMaxWidth = `min(100%, calc(48rem * ${mdScale}))`;
 
   return (
     <>
@@ -837,22 +1171,74 @@ export function MarkdownViewer({
         {/* Bar 1: Title, PDF/Markdown Toggle, Cross Button */}
         {topBar && <ReaderTopBar {...topBar} />}
 
-        {/* Bar 2: Minimal Single-Row Controls — Menu (H1 TOC), Font Type, +/- Zoom, Light/Sepia/Dark */}
+        {/* Bar 2: Single-Row Reader Controls — Chapter Menu, Prev/Next (Desktop), Font Type, +/- Zoom, Comfort Skin */}
         <div
           data-nosnippet=""
-          className="flex items-center justify-between gap-1.5 w-full px-2.5 sm:px-4 py-1.5 border-b border-[var(--reader-border)] bg-[var(--reader-bg)] text-[var(--reader-ink)] shrink-0"
+          className="relative flex items-center justify-between gap-1.5 w-full px-2.5 sm:px-4 py-1.5 border-b border-[var(--reader-border)] bg-[var(--reader-bg)] text-[var(--reader-ink)] shrink-0"
         >
-          {/* Left: Menu (H1 TOC) + Font Type */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* Left: Chapter TOC Menu + Compact Desktop Chapter Stepper + Font Type */}
+          <div className="flex items-center gap-1.5 shrink-0 min-w-0">
             <button
               type="button"
               onClick={() => setTocOpen(true)}
-              aria-label="Open menu table of contents"
-              className="inline-flex items-center justify-center gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] transition-colors"
+              aria-label={
+                chapters.length > 1
+                  ? `Open chapters menu, chapter ${safeChapterIndex + 1} of ${chapters.length}`
+                  : 'Open table of contents'
+              }
+              className="inline-flex items-center justify-center gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] transition-colors whitespace-nowrap shrink-0"
             >
               <Menu className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="hidden sm:inline text-xs font-semibold">Menu</span>
+              {chapters.length > 1 ? (
+                <>
+                  <span className="sm:hidden text-[11px] font-semibold tabular-nums">
+                    {safeChapterIndex + 1}/{chapters.length}
+                  </span>
+                  <span className="hidden sm:inline text-xs font-semibold tabular-nums">
+                    Chapter {safeChapterIndex + 1} / {chapters.length}
+                  </span>
+                </>
+              ) : (
+                <span className="hidden sm:inline text-xs font-semibold">
+                  Contents
+                </span>
+              )}
             </button>
+
+            {chapters.length > 1 && (
+              <div
+                role="group"
+                aria-label="Chapter step navigation"
+                className="hidden md:inline-flex items-center rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] p-0.5 shrink-0"
+              >
+                <button
+                  type="button"
+                  disabled={!prevChapter}
+                  onClick={() => selectChapter(safeChapterIndex - 1)}
+                  aria-label={
+                    prevChapter
+                      ? `Previous chapter: ${prevChapter.title}`
+                      : 'Previous chapter'
+                  }
+                  className="inline-flex items-center justify-center h-8 w-8 rounded hover:bg-[var(--reader-elevated)] disabled:opacity-35 transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  disabled={!nextChapter}
+                  onClick={() => selectChapter(safeChapterIndex + 1)}
+                  aria-label={
+                    nextChapter
+                      ? `Next chapter: ${nextChapter.title}`
+                      : 'Next chapter'
+                  }
+                  className="inline-flex items-center justify-center h-8 w-8 rounded hover:bg-[var(--reader-elevated)] disabled:opacity-35 transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                </button>
+              </div>
+            )}
 
             <button
               type="button"
@@ -861,7 +1247,7 @@ export function MarkdownViewer({
                 scheduleProgressSave();
               }}
               aria-label={`Switch to ${fontMode === 'sans' ? 'Serif' : 'Sans'} font`}
-              className="inline-flex items-center justify-center h-8 sm:h-9 px-2 sm:px-2.5 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center h-8 sm:h-9 px-2 sm:px-2.5 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
             >
               {fontMode === 'sans' ? 'Sans' : 'Serif'}
             </button>
@@ -960,9 +1346,22 @@ export function MarkdownViewer({
               </button>
             </div>
           </div>
+
+          {/* Hairline GPU-composited reading progress indicator */}
+          {loadingState === 'ready' && chapters.length > 0 && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-transparent overflow-hidden"
+            >
+              <div
+                className="h-full w-full origin-left bg-[var(--reader-accent)] opacity-75 transition-transform duration-150"
+                style={{ transform: `scaleX(${overallProgressRatio})` }}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Slide-Over Menu (Strictly H1 Table of Contents) */}
+        {/* Slide-Over Table of Contents Drawer (Switches Active Chapter 1-by-1) */}
         {tocOpen && (
           <div
             data-nosnippet=""
@@ -970,52 +1369,150 @@ export function MarkdownViewer({
             onClick={() => setTocOpen(false)}
           >
             <aside
-              aria-label="Table of contents"
+              aria-label="Book chapters and table of contents"
               onClick={(e) => e.stopPropagation()}
-              className="w-72 max-w-[85vw] h-full bg-[var(--reader-bg)] border-e border-[var(--reader-border-strong)] flex flex-col"
+              className="w-80 sm:w-96 max-w-[88vw] h-full bg-[var(--reader-bg)] border-e border-[var(--reader-border-strong)] flex flex-col"
             >
               <div
-                className="flex items-center justify-between gap-2 px-3.5 py-2.5 border-b border-[var(--reader-border)]"
+                className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-[var(--reader-border)]"
                 style={{
                   paddingTop: 'calc(0.625rem + var(--safe-area-inset-top))',
                 }}
               >
-                <h2 className="text-sm font-bold truncate">Contents</h2>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-bold text-[var(--reader-ink)] truncate">
+                    Contents
+                  </h2>
+                  {toc.length > 0 && (
+                    <p className="text-xs text-[var(--reader-muted)] tabular-nums">
+                      {toc.length} {toc.length === 1 ? 'chapter' : 'chapters'}
+                    </p>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setTocOpen(false)}
                   aria-label="Close table of contents"
-                  className="inline-flex items-center justify-center h-9 w-9 rounded-md hover:bg-[var(--reader-elevated)]"
+                  className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] -me-2 rounded-md hover:bg-[var(--reader-elevated)] transition-colors shrink-0"
                 >
                   <X className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {showTocSearch && (
+                <div className="px-3 py-2.5 border-b border-[var(--reader-border)]">
+                  <div className="relative flex items-center">
+                    <Search
+                      className="pointer-events-none absolute start-3 w-4 h-4 text-[var(--reader-muted)]"
+                      aria-hidden="true"
+                    />
+                    <input
+                      type="search"
+                      value={tocQuery}
+                      onChange={(e) => setTocQuery(e.target.value)}
+                      placeholder="Filter chapters or topics..."
+                      aria-label="Filter chapters or topics"
+                      className="w-full h-10 ps-9 pe-9 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] text-base sm:text-sm text-[var(--reader-ink)] placeholder:text-[var(--reader-muted)] focus:outline-none focus:border-[var(--reader-border-strong)]"
+                    />
+                    {tocQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setTocQuery('')}
+                        aria-label="Clear chapter filter"
+                        className="absolute end-1 inline-flex items-center justify-center h-8 w-8 rounded text-[var(--reader-muted)] hover:text-[var(--reader-ink)]"
+                      >
+                        <X className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div
+                ref={tocListRef}
+                className="flex-1 overflow-y-auto p-2.5 space-y-1"
+                style={{
+                  paddingBottom: 'calc(1rem + var(--safe-area-inset-bottom))',
+                }}
+              >
                 {toc.length === 0 ? (
                   <p className="text-xs text-[var(--reader-muted)] p-3">
                     No chapters found in this document.
                   </p>
+                ) : filteredToc.length === 0 ? (
+                  <p className="text-xs text-[var(--reader-muted)] p-3">
+                    No chapters match &ldquo;{tocQuery.trim()}&rdquo;.
+                  </p>
                 ) : (
-                  toc.map((entry) => {
-                    const isActive = entry.id === activeHeadingId;
+                  filteredToc.map(({ entry, matchingSubs }) => {
+                    const isActive = entry.chapterIndex === safeChapterIndex;
+                    const showSubs =
+                      matchingSubs.length > 0 &&
+                      (isActive || Boolean(normalizedTocQuery));
+                    const chapterNumLabel = String(entry.chapterIndex + 1).padStart(
+                      2,
+                      '0'
+                    );
+
                     return (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        onClick={() => {
-                          setTocOpen(false);
-                          jumpToHeading(entry.id);
-                        }}
-                        className={cn(
-                          'w-full text-start min-h-[44px] px-3 py-2 rounded-md text-xs sm:text-sm transition-colors flex items-center',
-                          isActive
-                            ? 'bg-[var(--reader-elevated)] font-bold text-[var(--reader-ink)]'
-                            : 'font-medium text-[var(--reader-muted)] hover:bg-[var(--reader-surface)] hover:text-[var(--reader-ink)]'
+                      <div key={entry.chapterId} className="space-y-0.5">
+                        <button
+                          type="button"
+                          data-toc-active={isActive ? 'true' : undefined}
+                          aria-current={isActive ? 'true' : undefined}
+                          onClick={() =>
+                            selectChapter(entry.chapterIndex, { closeToc: true })
+                          }
+                          className={cn(
+                            'w-full text-start min-h-[44px] px-3 py-2 rounded-md text-xs sm:text-sm transition-colors flex items-baseline justify-between gap-2.5',
+                            isActive
+                              ? 'bg-[var(--reader-elevated)] font-bold text-[var(--reader-ink)]'
+                              : 'font-medium text-[var(--reader-muted)] hover:bg-[var(--reader-surface)] hover:text-[var(--reader-ink)]'
+                          )}
+                        >
+                          <span className="flex items-baseline gap-2 min-w-0 flex-1">
+                            {toc.length > 1 && (
+                              <span className="text-[11px] tabular-nums text-[var(--reader-muted)] shrink-0">
+                                {chapterNumLabel}.
+                              </span>
+                            )}
+                            <span className="line-clamp-2">{entry.text}</span>
+                          </span>
+                          <span className="text-[11px] tabular-nums text-[var(--reader-muted)] shrink-0">
+                            {entry.estimatedReadMinutes}m
+                          </span>
+                        </button>
+
+                        {showSubs && (
+                          <div className="ps-6 pe-1 py-0.5 space-y-0.5">
+                            {matchingSubs.map((sub) => {
+                              const isSubActive =
+                                isActive && activeSubheadingId === sub.id;
+                              return (
+                                <button
+                                  key={sub.id}
+                                  type="button"
+                                  onClick={() =>
+                                    selectChapter(entry.chapterIndex, {
+                                      anchorId: sub.id,
+                                      closeToc: true,
+                                    })
+                                  }
+                                  className={cn(
+                                    'w-full text-start min-h-[38px] px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center',
+                                    sub.level >= 4 && 'ps-5',
+                                    isSubActive
+                                      ? 'bg-[var(--reader-surface)] font-semibold text-[var(--reader-ink)]'
+                                      : 'text-[var(--reader-muted)] hover:bg-[var(--reader-surface)] hover:text-[var(--reader-ink)]'
+                                  )}
+                                >
+                                  <span className="line-clamp-1">{sub.text}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
                         )}
-                      >
-                        <span className="line-clamp-2">{entry.text}</span>
-                      </button>
+                      </div>
                     );
                   })
                 )}
@@ -1024,13 +1521,13 @@ export function MarkdownViewer({
           </div>
         )}
 
-        {/* Full-Width Scrollable Prose Stage with Minimal Mobile Margins */}
+        {/* Scrollable Single-Chapter Prose Stage */}
         <div
           ref={scrollerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto overscroll-contain px-2.5 sm:px-6 lg:px-10 py-3 sm:py-5"
+          className="flex-1 overflow-y-auto overscroll-contain px-3 sm:px-6 lg:px-10 py-4 sm:py-6"
           style={{
-            paddingBottom: 'calc(1.5rem + var(--safe-area-inset-bottom))',
+            paddingBottom: 'calc(2rem + var(--safe-area-inset-bottom))',
           }}
         >
           {loadingState === 'loading' && (
@@ -1068,8 +1565,33 @@ export function MarkdownViewer({
             </div>
           )}
 
-          {loadingState === 'ready' && (
+          {loadingState === 'ready' && activeChapter && (
             <>
+              {/* Quiet Unboxed Chapter Position Kicker */}
+              {chapters.length > 1 && (
+                <div
+                  data-nosnippet=""
+                  className="mx-auto mb-3 flex items-center justify-between gap-3 text-xs text-[var(--reader-muted)] tabular-nums"
+                  style={{ maxWidth: proseColumnMaxWidth }}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span>
+                      Chapter {safeChapterIndex + 1} of {chapters.length}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>{activeChapter.estimatedReadMinutes} min read</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTocOpen(true)}
+                    className="text-xs font-medium text-[var(--reader-muted)] hover:text-[var(--reader-ink)] underline underline-offset-4 transition-colors whitespace-nowrap shrink-0"
+                  >
+                    All chapters
+                  </button>
+                </div>
+              )}
+
+              {/* Active Chapter Only — Keeps DOM Lean on Long Purchased Books */}
               <article
                 ref={proseRef}
                 onClick={handleProseClick}
@@ -1085,19 +1607,74 @@ export function MarkdownViewer({
                   } as React.CSSProperties
                 }
               >
-                {sections.map((sec) => (
-                  <section
-                    key={sec.sectionId}
-                    data-sec-id={sec.sectionId}
-                    aria-label={sec.headingTitle}
-                    className="ed-md-section"
-                    dangerouslySetInnerHTML={{ __html: sec.safeHtml }}
-                  />
-                ))}
+                <section
+                  key={activeChapter.chapterId}
+                  data-sec-id={activeChapter.chapterId}
+                  aria-label={activeChapter.title}
+                  className="ed-md-section"
+                  dangerouslySetInnerHTML={{ __html: activeChapterSafeHtml }}
+                />
               </article>
 
+              {/* End-of-Chapter Previous / Next Chapter Pagination */}
+              {chapters.length > 1 && (
+                <nav
+                  data-nosnippet=""
+                  aria-label="Chapter pagination"
+                  className="mx-auto mt-10 pt-6 border-t border-[var(--reader-border)] grid grid-cols-1 sm:grid-cols-2 gap-3"
+                  style={{ maxWidth: proseColumnMaxWidth }}
+                >
+                  {prevChapter ? (
+                    <button
+                      type="button"
+                      onClick={() => selectChapter(safeChapterIndex - 1)}
+                      className="group flex flex-col justify-center min-h-[56px] px-4 py-3 rounded-lg border border-[var(--reader-border)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] text-start transition-colors"
+                    >
+                      <span className="inline-flex items-center gap-1 text-xs text-[var(--reader-muted)] tabular-nums">
+                        <ChevronLeft
+                          className="w-3.5 h-3.5 shrink-0 transition-transform duration-150 group-hover:-translate-x-0.5"
+                          aria-hidden="true"
+                        />
+                        <span>
+                          Previous · Chapter {prevChapter.chapterIndex + 1}
+                        </span>
+                      </span>
+                      <span className="mt-1 text-sm font-semibold text-[var(--reader-ink)] truncate w-full">
+                        {prevChapter.title}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="hidden sm:block" aria-hidden="true" />
+                  )}
+
+                  {nextChapter && (
+                    <button
+                      type="button"
+                      onClick={() => selectChapter(safeChapterIndex + 1)}
+                      className="group flex flex-col justify-center sm:items-end min-h-[56px] px-4 py-3 rounded-lg border border-[var(--reader-border-strong)] bg-[var(--reader-surface)] hover:bg-[var(--reader-elevated)] text-start sm:text-end transition-colors"
+                    >
+                      <span className="inline-flex items-center gap-1 text-xs text-[var(--reader-muted)] tabular-nums">
+                        <span>
+                          Next · Chapter {nextChapter.chapterIndex + 1}
+                        </span>
+                        <ChevronRight
+                          className="w-3.5 h-3.5 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5"
+                          aria-hidden="true"
+                        />
+                      </span>
+                      <span className="mt-1 text-sm font-semibold text-[var(--reader-ink)] truncate w-full">
+                        {nextChapter.title}
+                      </span>
+                    </button>
+                  )}
+                </nav>
+              )}
+
               {isSample && (
-                <div className="mt-6">
+                <div
+                  className="mx-auto mt-6"
+                  style={{ maxWidth: proseColumnMaxWidth }}
+                >
                   <SampleUnlockCard
                     book={book}
                     formatLabel="Markdown"

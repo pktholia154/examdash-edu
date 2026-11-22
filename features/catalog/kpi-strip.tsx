@@ -3,10 +3,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/auth-provider';
 import { formatPrice } from '../../lib/registry/content-type-registry';
-import {
-  EXAM_ATTEMPTS_UPDATED_EVENT,
-  getCompletedAttemptsSync,
-} from '../../lib/exam/storage';
 
 export interface KpiStripProps {
   totalCatalogBooks: number;
@@ -14,6 +10,23 @@ export interface KpiStripProps {
   totalCatalogMocks: number;
   catalogPotentialSavings: number;
   primaryCurrency: string;
+}
+
+const ATTEMPT_HISTORY_KEY_PREFIX = 'ed_cbt_attempt_history_';
+
+function hasStoredAttemptHistory(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(ATTEMPT_HISTORY_KEY_PREFIX)) {
+        return true;
+      }
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+  return false;
 }
 
 export function KpiStrip({
@@ -24,18 +37,46 @@ export function KpiStrip({
   primaryCurrency,
 }: KpiStripProps) {
   const { user, purchases, isSigningIn, signInWithGoogle } = useAuth();
-  const [completedCount, setCompletedCount] = useState(0);
+  const activeUid = user?.uid ?? null;
+  const [attemptState, setAttemptState] = useState<{
+    uid: string | null;
+    count: number;
+  }>({ uid: null, count: 0 });
 
   useEffect(() => {
-    const refresh = () => setCompletedCount(getCompletedAttemptsSync().length);
-    refresh();
-    window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
-    window.addEventListener('storage', refresh);
+    if (!activeUid && !hasStoredAttemptHistory()) {
+      return;
+    }
+
+    let disposed = false;
+    let cleanup: (() => void) | null = null;
+
+    void import('../../lib/exam/storage').then(
+      ({ EXAM_ATTEMPTS_UPDATED_EVENT, getCompletedAttemptsSync }) => {
+        if (disposed) return;
+        const refresh = () =>
+          setAttemptState({
+            uid: activeUid,
+            count: getCompletedAttemptsSync(activeUid ?? undefined).length,
+          });
+        refresh();
+        window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
+        window.addEventListener('storage', refresh);
+        cleanup = () => {
+          window.removeEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
+          window.removeEventListener('storage', refresh);
+        };
+      }
+    );
+
     return () => {
-      window.removeEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
-      window.removeEventListener('storage', refresh);
+      disposed = true;
+      cleanup?.();
     };
-  }, []);
+  }, [activeUid]);
+
+  const completedCount =
+    attemptState.uid === activeUid ? attemptState.count : 0;
 
   const metrics = useMemo(() => {
     const ownedBooks = purchases.filter((p) => p.collectionName === 'books').length;

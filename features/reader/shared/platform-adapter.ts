@@ -19,6 +19,8 @@ export interface PdfReadingProgress {
 }
 
 export interface MarkdownReadingProgress {
+  chapterIndex?: number;
+  chapterHeadingId?: string;
   blockId: string;
   blockProgressRatio: number; // 0..1
   mdScale: number; // 0.80..2.00

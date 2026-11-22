@@ -66,7 +66,6 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-  manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -74,12 +73,44 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+      {
+        url: '/app-icons/favicon-32.png?v=ef0c6c39',
+        sizes: '32x32',
+        type: 'image/png',
+      },
+      {
+        url: '/app-icons/icon-192.png?v=ef0c6c39',
+        sizes: '192x192',
+        type: 'image/png',
+      },
+      {
+        url: '/app-icons/icon-512.png?v=ef0c6c39',
+        sizes: '512x512',
+        type: 'image/png',
+      },
     ],
-    shortcut: '/favicon-32x32.png',
-    apple: '/apple-touch-icon.png',
+    shortcut: [
+      {
+        url: '/app-icons/icon-192.png?v=ef0c6c39',
+        sizes: '192x192',
+        type: 'image/png',
+      },
+    ],
+    apple: [
+      {
+        url: '/app-icons/apple-touch-icon.png?v=ef0c6c39',
+        sizes: '180x180',
+        type: 'image/png',
+      },
+    ],
+    other: [
+      {
+        rel: 'apple-touch-icon-precomposed',
+        url: '/app-icons/apple-touch-icon.png?v=ef0c6c39',
+        sizes: '180x180',
+        type: 'image/png',
+      },
+    ],
   },
   openGraph: {
     title: SITE_TITLE,
@@ -89,7 +120,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: `${getCanonicalOrigin()}/pwa-512x512.png`,
+        url: `${getCanonicalOrigin()}/app-icons/icon-512.png?v=ef0c6c39`,
         width: 512,
         height: 512,
         alt: 'ExamDash',
@@ -100,7 +131,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: SITE_TITLE,
     description: SITE_DESC,
-    images: [`${getCanonicalOrigin()}/pwa-512x512.png`],
+    images: [`${getCanonicalOrigin()}/app-icons/icon-512.png?v=ef0c6c39`],
   },
 };
 
@@ -141,6 +172,13 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${plusJakarta.variable} ${sourceSerif.variable} ${jetbrainsMono.variable}`}
     >
+      <head>
+        <link
+          rel="manifest"
+          href="/manifest.webmanifest?v=ef0c6c39"
+          crossOrigin="use-credentials"
+        />
+      </head>
       <body suppressHydrationWarning className="font-sans antialiased">
         <script
           key="ed-theme-init"

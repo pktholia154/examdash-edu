@@ -4,6 +4,7 @@ import {
   buildBookDetailJsonLd,
   buildExamDetailJsonLd,
   buildThumbUrls,
+  normalizeSchemaLanguageTag,
   serializeSafeJsonLd,
 } from './schema';
 import { prepareEditorialMarkdown } from '../../components/editorial/description-markdown';
@@ -87,12 +88,15 @@ test('buildBookDetailJsonLd emits ["Product", "Book"] with Brand @type, complete
   assert.ok(product.image[0].includes('/thumbs/sq/books/'));
   assert.ok(product.image[1].includes('/thumbs/og/books/'));
   assert.deepEqual(product.brand, { '@type': 'Brand', name: 'ExamDash' });
+  assert.equal(product.inLanguage, 'en');
   assert.equal(product.publisher['@type'], 'Organization');
 
   assert.equal(product.offers['@type'], 'Offer');
   assert.equal(product.offers.price, '199.00');
   assert.equal(product.offers.priceCurrency, 'INR');
   assert.equal(product.offers.availability, 'https://schema.org/InStock');
+  assert.equal(product.offers.itemCondition, 'https://schema.org/NewCondition');
+  assert.deepEqual(product.offers.seller, { '@id': 'https://exam-dash.com/#organization' });
   assert.equal(product.offers.shippingDetails['@type'], 'OfferShippingDetails');
   assert.equal(product.offers.shippingDetails.shippingRate.value, '0.00');
   assert.equal(product.offers.hasMerchantReturnPolicy['@type'], 'MerchantReturnPolicy');
@@ -214,4 +218,12 @@ test('toCatalogCardDTO omits fullDescription, seoDescription, and MocktestTitles
 test('apiUrl prefixes relative API paths and preserves absolute URLs', () => {
   assert.equal(apiUrl('/api/v1/library'), '/api/v1/library');
   assert.equal(apiUrl('https://exam-dash.com/api/v1/library'), 'https://exam-dash.com/api/v1/library');
+});
+
+test('normalizeSchemaLanguageTag normalizes prose language labels to standard BCP-47 tags', () => {
+  assert.equal(normalizeSchemaLanguageTag('English'), 'en');
+  assert.equal(normalizeSchemaLanguageTag('Hindi'), 'hi');
+  assert.equal(normalizeSchemaLanguageTag('Bilingual'), 'en-IN');
+  assert.equal(normalizeSchemaLanguageTag('en-IN'), 'en-IN');
+  assert.equal(normalizeSchemaLanguageTag(''), 'en');
 });

@@ -330,10 +330,10 @@ select,
 
 .ed-md-prose {
   --md-scale: 1;
-  --md-line-height: 1.65;
+  --md-line-height: 1.68;
   width: 100%;
-  max-width: 100%;
-  margin-inline: 0;
+  max-width: min(100%, calc(48rem * var(--md-scale)));
+  margin-inline: auto;
   color: var(--reader-ink);
   font-size: calc(1rem * var(--md-scale));
   line-height: var(--md-line-height);
@@ -370,8 +370,13 @@ select,
 }
 
 .ed-md-section {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 600px;
+  display: block;
+}
+
+.ed-md-section > h1:first-child,
+.ed-md-section > h2:first-child,
+.ed-md-section > h3:first-child {
+  margin-block-start: 0.25rem;
 }
 
 .ed-md-prose h1,
@@ -506,6 +511,11 @@ select,
 .ed-md-callout-warning {
   background-color: rgba(217, 119, 6, 0.09);
   border-color: rgba(217, 119, 6, 0.32);
+}
+
+.ed-md-callout-caution {
+  background-color: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.3);
 }
 
 /* Mobile Overflow Guardrail (.md-scroll-x) */

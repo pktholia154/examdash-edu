@@ -17,12 +17,6 @@ import {
   subscribeLazyAuthState,
   type AppAuthUser,
 } from '../../lib/auth/auth-adapter';
-import { purgeUserExamLocalState } from '../../lib/exam/storage';
-import {
-  purgeOfflineVaultForUser,
-  readCachedUserEntitlements,
-  writeCachedUserEntitlements,
-} from '../../lib/offline/offline-vault';
 import { apiUrl } from '../../lib/platform/api-base';
 import {
   readPersistedAuthHint,
@@ -36,6 +30,7 @@ import { useToast } from '../toast/toast-context';
 interface AuthContextValue {
   user: AppAuthUser | null;
   isAuthReady: boolean;
+  isRestoringSession: boolean;
   isEntitlementsReady: boolean;
   isSigningIn: boolean;
   purchases: UserPurchaseRecord[];
@@ -52,6 +47,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   isAuthReady: false,
+  isRestoringSession: false,
   isEntitlementsReady: false,
   isSigningIn: false,
   purchases: [],
@@ -68,6 +64,7 @@ const AuthContext = createContext<AuthContextValue>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AppAuthUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(false);
   const [isEntitlementsReady, setIsEntitlementsReady] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [purchases, setPurchases] = useState<UserPurchaseRecord[]>([]);
@@ -79,6 +76,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchOneShotLibraryEntitlements = useCallback(
     async (activeUser: AppAuthUser, syncProfile: boolean = false) => {
       try {
+        const { readCachedUserEntitlements, writeCachedUserEntitlements } =
+          await import('../../lib/offline/offline-vault');
+
         // 1. Hydrate local cached entitlements immediately for instant offline / zero-CLS UX
         const cached = await readCachedUserEntitlements(activeUser.uid);
         if (cached.length > 0) {
@@ -134,6 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsub = await subscribeLazyAuthState((current) => {
       setUser(current);
       setIsAuthReady(true);
+      setIsRestoringSession(false);
 
       if (current) {
         void writePersistedAuthHint(true);
@@ -164,15 +165,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Anonymous visitors & Googlebot: zero Firebase Auth/Firestore chunks, iframes, or XHRs!
       if (!previouslyAuthed) {
         setIsAuthReady(true);
+        setIsRestoringSession(false);
         setIsEntitlementsReady(true);
         return;
       }
 
+      setIsRestoringSession(true);
       try {
         await attachLazyAuthSubscription();
       } catch {
         if (!cancelled) {
           setIsAuthReady(true);
+          setIsRestoringSession(false);
           setIsEntitlementsReady(true);
         }
       }
@@ -224,6 +228,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchedUidRef.current = null;
     await writePersistedAuthHint(false);
     if (activeUid) {
+      const [{ purgeOfflineVaultForUser }, { purgeUserExamLocalState }] =
+        await Promise.all([
+          import('../../lib/offline/offline-vault'),
+          import('../../lib/exam/storage'),
+        ]);
       await purgeOfflineVaultForUser(activeUid).catch(() => {});
       purgeUserExamLocalState(activeUid);
     }
@@ -245,6 +254,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => {});
       }
+      const [{ purgeOfflineVaultForUser }, { purgeUserExamLocalState }] =
+        await Promise.all([
+          import('../../lib/offline/offline-vault'),
+          import('../../lib/exam/storage'),
+        ]);
       await purgeOfflineVaultForUser(uid).catch(() => {});
       purgeUserExamLocalState(uid);
       await writePersistedAuthHint(false);
@@ -280,7 +294,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             new Date(a.createdAtIso).getTime()
         );
         if (targetUid) {
-          void writeCachedUserEntitlements(targetUid, merged);
+          void import('../../lib/offline/offline-vault').then(
+            ({ writeCachedUserEntitlements }) =>
+              writeCachedUserEntitlements(targetUid, merged)
+          );
         }
         return merged;
       });
@@ -329,6 +346,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         isAuthReady,
+        isRestoringSession,
         isEntitlementsReady,
         isSigningIn,
         purchases: activePurchases,

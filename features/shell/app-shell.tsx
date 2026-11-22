@@ -56,8 +56,14 @@ const COPYRIGHT_YEAR = BUSINESS_INFO.effectiveDateIso.slice(0, 4) || '2026';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '/';
-  const { user, isAuthReady, isSigningIn, signInWithGoogle, signOutUser, deleteAccount } =
-    useAuth();
+  const {
+    user,
+    isRestoringSession,
+    isSigningIn,
+    signInWithGoogle,
+    signOutUser,
+    deleteAccount,
+  } = useAuth();
   const { summary, isOpen: isCartOpen, openCart } = useCart();
   const { openSearch } = useSearchModal();
   const { toggleTheme } = useTheme();
@@ -166,7 +172,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span>{summary.itemCount}</span>
             </button>
 
-            {!isAuthReady ? (
+            {isRestoringSession ? (
               <div className="w-20 h-12 max-md:w-14 max-md:h-11 rounded-lg ed-skeleton shrink-0" />
             ) : user ? (
               <div className="relative min-w-0" data-nosnippet="">

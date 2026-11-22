@@ -9,13 +9,13 @@ export default function robots(): MetadataRoute.Robots {
       // Search Indexers
       {
         userAgent: ['Googlebot', 'Bingbot', 'Applebot'],
-        allow: ['/', '/_next/static/', '/books', '/exams', '/thumbs/'],
+        allow: ['/', '/_next/static/', '/books', '/exams', '/thumbs/', '/app-icons/'],
         disallow: ['/api/', '/purchased', '/read/', '/attempt/'],
       },
       // AI Citation & User-Triggered Fetchers
       {
         userAgent: ['OAI-SearchBot', 'ChatGPT-User', 'PerplexityBot'],
-        allow: ['/', '/_next/static/', '/books', '/exams', '/thumbs/'],
+        allow: ['/', '/_next/static/', '/books', '/exams', '/thumbs/', '/app-icons/'],
         disallow: ['/api/', '/purchased', '/read/', '/attempt/'],
       },
       // AI Bulk Training Crawlers Governed Independently
@@ -26,7 +26,7 @@ export default function robots(): MetadataRoute.Robots {
       // Default Rule
       {
         userAgent: '*',
-        allow: ['/', '/_next/static/', '/thumbs/'],
+        allow: ['/', '/_next/static/', '/thumbs/', '/app-icons/'],
         disallow: ['/api/', '/purchased', '/read/', '/attempt/'],
       },
     ],

@@ -174,8 +174,22 @@ function mapRawReviewDoc(
   };
 }
 
+function getPublicReviewQueryPaths(): string[] {
+  const { projectId, databaseId, restBase, apiKey } = getProvisionedFirestoreRoot();
+  const keySuffix = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';
+  const primaryPath = `${restBase}:runQuery${keySuffix}`;
+  if (databaseId === '(default)') {
+    return [primaryPath];
+  }
+  const defaultPath = `/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/(default)/documents:runQuery${keySuffix}`;
+  return [primaryPath, defaultPath];
+}
+
 /**
  * Fetches real published learner reviews for a single catalog item on the server (SSR + API).
+ * Queries provisioned Firestore and `(default)` fallback in parallel, deduplicating by `reviewId`.
  * NEVER returns demo, fake, or sample reviews. Returns reviewCount: 0 when none exist.
  */
 export async function getItemReviewsSummary(
@@ -188,64 +202,77 @@ export async function getItemReviewsSummary(
   }
 
   const targetKey = buildReviewTargetKey(collectionName, safeItemId);
-  const { restBase, apiKey } = getProvisionedFirestoreRoot();
-  const queryPath = `${restBase}:runQuery${
-    apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''
-  }`;
-
-  try {
-    const res = await firestoreRestCall<
-      Array<{
-        document?: { name?: string; fields?: FirestoreRestFieldMap };
-      }>
-    >({
-      method: 'POST',
-      path: queryPath,
-      body: {
-        structuredQuery: {
-          from: [{ collectionId: 'reviews' }],
-          where: {
-            compositeFilter: {
-              op: 'AND',
-              filters: [
-                {
-                  fieldFilter: {
-                    field: { fieldPath: 'status' },
-                    op: 'EQUAL',
-                    value: { stringValue: 'published' },
-                  },
-                },
-                {
-                  fieldFilter: {
-                    field: { fieldPath: 'targetKey' },
-                    op: 'EQUAL',
-                    value: { stringValue: targetKey },
-                  },
-                },
-              ],
+  const queryPaths = getPublicReviewQueryPaths();
+  const queryBody = {
+    structuredQuery: {
+      from: [{ collectionId: 'reviews' }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: [
+            {
+              fieldFilter: {
+                field: { fieldPath: 'status' },
+                op: 'EQUAL',
+                value: { stringValue: 'published' },
+              },
             },
-          },
-          limit: 100,
+            {
+              fieldFilter: {
+                field: { fieldPath: 'targetKey' },
+                op: 'EQUAL',
+                value: { stringValue: targetKey },
+              },
+            },
+          ],
         },
       },
-    });
+      limit: 100,
+    },
+  };
 
-    if (res.statusCode < 200 || res.statusCode >= 300 || !Array.isArray(res.data)) {
-      return createEmptyReviewSummary(collectionName, safeItemId);
-    }
+  try {
+    const responses = await Promise.all(
+      queryPaths.map((path) =>
+        firestoreRestCall<
+          Array<{
+            document?: { name?: string; fields?: FirestoreRestFieldMap };
+          }>
+        >({
+          method: 'POST',
+          path,
+          body: queryBody,
+        }).catch(() => ({ statusCode: 500, data: null, rawText: '' }))
+      )
+    );
 
-    const reviews: ItemReviewDTO[] = [];
-    for (const row of res.data) {
-      if (!row?.document?.name) continue;
-      const segments = row.document.name.split('/');
-      const docId = segments[segments.length - 1] || '';
-      const mapped = mapRawReviewDoc(docId, row.document.fields);
-      if (mapped) {
-        reviews.push(mapped);
+    const byId = new Map<string, ItemReviewDTO>();
+    for (const res of responses) {
+      if (res.statusCode < 200 || res.statusCode >= 300 || !Array.isArray(res.data)) {
+        continue;
+      }
+      for (const row of res.data) {
+        if (!row?.document?.name) continue;
+        const segments = row.document.name.split('/');
+        const docId = segments[segments.length - 1] || '';
+        const mapped = mapRawReviewDoc(docId, row.document.fields);
+        if (!mapped) continue;
+        const existing = byId.get(mapped.reviewId);
+        if (
+          !existing ||
+          new Date(mapped.updatedAtIso).getTime() >=
+            new Date(existing.updatedAtIso).getTime()
+        ) {
+          byId.set(mapped.reviewId, mapped);
+        }
       }
     }
 
-    return computeItemReviewSummary(collectionName, safeItemId, reviews);
+    return computeItemReviewSummary(
+      collectionName,
+      safeItemId,
+      Array.from(byId.values())
+    );
   } catch {
     return createEmptyReviewSummary(collectionName, safeItemId);
   }
@@ -258,59 +285,68 @@ export async function getItemReviewsSummary(
 export async function getPublishedReviewAggregates(): Promise<
   Map<string, ReviewAggregateBadge>
 > {
-  const { restBase, apiKey } = getProvisionedFirestoreRoot();
-  const queryPath = `${restBase}:runQuery${
-    apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''
-  }`;
-
-  try {
-    const res = await firestoreRestCall<
-      Array<{
-        document?: { name?: string; fields?: FirestoreRestFieldMap };
-      }>
-    >({
-      method: 'POST',
-      path: queryPath,
-      body: {
-        structuredQuery: {
-          from: [{ collectionId: 'reviews' }],
-          select: {
-            fields: [
-              { fieldPath: 'targetKey' },
-              { fieldPath: 'rating' },
-              { fieldPath: 'status' },
-            ],
-          },
-          where: {
-            fieldFilter: {
-              field: { fieldPath: 'status' },
-              op: 'EQUAL',
-              value: { stringValue: 'published' },
-            },
-          },
-          limit: 1000,
+  const queryPaths = getPublicReviewQueryPaths();
+  const queryBody = {
+    structuredQuery: {
+      from: [{ collectionId: 'reviews' }],
+      select: {
+        fields: [
+          { fieldPath: 'targetKey' },
+          { fieldPath: 'rating' },
+          { fieldPath: 'status' },
+        ],
+      },
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'status' },
+          op: 'EQUAL',
+          value: { stringValue: 'published' },
         },
       },
-    });
+      limit: 1000,
+    },
+  };
 
-    if (res.statusCode < 200 || res.statusCode >= 300 || !Array.isArray(res.data)) {
-      return new Map();
-    }
+  try {
+    const responses = await Promise.all(
+      queryPaths.map((path) =>
+        firestoreRestCall<
+          Array<{
+            document?: { name?: string; fields?: FirestoreRestFieldMap };
+          }>
+        >({
+          method: 'POST',
+          path,
+          body: queryBody,
+        }).catch(() => ({ statusCode: 500, data: null, rawText: '' }))
+      )
+    );
 
-    const rows: Array<{ targetKey: string; rating: number }> = [];
-    for (const row of res.data) {
-      if (!row?.document?.fields) continue;
-      const parsed = parseRestFields(row.document.fields);
-      if (parsed.status !== 'published') continue;
-      if (typeof parsed.targetKey === 'string' && typeof parsed.rating === 'number') {
-        rows.push({
-          targetKey: parsed.targetKey,
-          rating: parsed.rating,
-        });
+    const byDocId = new Map<string, { targetKey: string; rating: number }>();
+    for (const res of responses) {
+      if (res.statusCode < 200 || res.statusCode >= 300 || !Array.isArray(res.data)) {
+        continue;
+      }
+      for (const row of res.data) {
+        if (!row?.document?.name || !row?.document?.fields) continue;
+        const segments = row.document.name.split('/');
+        const docId = segments[segments.length - 1] || row.document.name;
+        const parsed = parseRestFields(row.document.fields);
+        if (parsed.status !== 'published') continue;
+        if (
+          typeof parsed.targetKey === 'string' &&
+          typeof parsed.rating === 'number' &&
+          !byDocId.has(docId)
+        ) {
+          byDocId.set(docId, {
+            targetKey: parsed.targetKey,
+            rating: parsed.rating,
+          });
+        }
       }
     }
 
-    return computeReviewAggregateMap(rows);
+    return computeReviewAggregateMap(Array.from(byDocId.values()));
   } catch {
     return new Map();
   }

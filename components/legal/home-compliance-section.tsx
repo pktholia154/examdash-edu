@@ -21,11 +21,6 @@ export function HomeComplianceSection() {
             >
               Policies, Licensing &amp; Support
             </h2>
-            <p className="mt-1.5 text-sm text-[var(--text-muted)] leading-relaxed">
-              Transparent digital delivery terms, PCI-DSS compliant Razorpay
-              checkout disclosures, refund eligibility timelines, and direct
-              merchant contact details for {BUSINESS_INFO.brandName}.
-            </p>
           </div>
           <p className="text-xs text-[var(--text-muted)]">
             Operated by <span className="font-semibold text-[var(--text-main)]">{BUSINESS_INFO.legalName}</span> · Brand:{' '}
@@ -36,35 +31,20 @@ export function HomeComplianceSection() {
         {/* 5 Required Razorpay Verification Compliance Pages */}
         <nav
           aria-label="Legal and compliance policies"
-          className="mt-6 max-md:mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 max-md:gap-2.5"
+          className="mt-5 max-md:mt-3.5 flex flex-wrap items-center gap-2.5 max-md:gap-2"
         >
-          {LEGAL_PAGES.map((page, index) => (
+          {LEGAL_PAGES.map((page) => (
             <Link
               key={page.href}
               href={page.href}
               prefetch={false}
-              className="group flex flex-col justify-between rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 max-md:p-3.5 hover:border-[var(--border-strong)] transition-colors"
+              className="group inline-flex items-center gap-1.5 min-h-[44px] px-3.5 py-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
             >
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs font-medium text-[var(--text-muted)] tabular-nums">
-                    {String(index + 1).padStart(2, '0')}
-                  </span>
-                  <ArrowUpRight
-                    className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--text-main)] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0"
-                    aria-hidden="true"
-                  />
-                </div>
-                <h3 className="mt-3 text-sm font-bold text-[var(--text-main)] group-hover:underline underline-offset-4">
-                  {page.title}
-                </h3>
-                <p className="mt-1.5 text-xs text-[var(--text-muted)] leading-relaxed">
-                  {page.summary}
-                </p>
-              </div>
-              <span className="mt-4 text-xs font-semibold text-[var(--text-main)]">
-                Read policy
-              </span>
+              <span>{page.title}</span>
+              <ArrowUpRight
+                className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:text-[var(--text-main)] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0"
+                aria-hidden="true"
+              />
             </Link>
           ))}
         </nav>

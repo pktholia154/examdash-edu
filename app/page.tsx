@@ -119,7 +119,6 @@ export default async function HomePage() {
           <CatalogSection
             id="books-catalog"
             heading="Books & Question Banks"
-            subheading="Structured ebooks, chapter wise question banks, and free sample extracts."
             storageKey="home-books"
             items={slimBooks}
             viewAllHref="/books"
@@ -140,7 +139,6 @@ export default async function HomePage() {
           <CatalogSection
             id="exams-catalog"
             heading="Exam Packs & Mock Test Series"
-            subheading="Full-length timed test series with complete paper-wise syllabus breakdowns."
             storageKey="home-exams"
             items={slimExams}
             viewAllHref="/exams"

@@ -59,6 +59,12 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingIncludes: {
     '/thumbs/[variant]/[collection]/[slug]': ['./assets/fonts/**/*'],
+    '/app-icons/[file]': [
+      './public/apple-touch-icon.png',
+      './public/pwa-*.png',
+      './public/favicon-32x32.png',
+    ],
+    '/manifest.webmanifest': ['./public/pwa-*.png'],
   },
   devIndicators: false,
   poweredByHeader: false,
@@ -96,7 +102,21 @@ const nextConfig: NextConfig = {
               headers: [
                 {
                   key: 'Cache-Control',
+                  value: 'public, max-age=31536000, s-maxage=31536000, immutable',
+                },
+                {
+                  key: 'CDN-Cache-Control',
                   value: 'public, max-age=31536000, immutable',
+                },
+              ],
+            },
+            {
+              source: '/_next/image',
+              headers: [
+                {
+                  key: 'Cache-Control',
+                  value:
+                    'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
                 },
               ],
             },
@@ -116,7 +136,10 @@ const nextConfig: NextConfig = {
         source: '/wasm/:path*',
         headers: [
           { key: 'Content-Type', value: 'application/wasm' },
-          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, s-maxage=31536000, immutable',
+          },
         ],
       },
     ];
@@ -145,6 +168,34 @@ const nextConfig: NextConfig = {
         module: false,
         crypto: false,
       };
+
+      // Consolidate tiny shared client chunks in production so Googlebot WRS never hits
+      // 20+ concurrent chunk fetches while keeping every uncompressed asset < 500 KB (Pillar 1).
+      if (
+        !dev &&
+        config.optimization?.splitChunks &&
+        typeof config.optimization.splitChunks === 'object'
+      ) {
+        const existingCacheGroups =
+          typeof config.optimization.splitChunks.cacheGroups === 'object' &&
+          config.optimization.splitChunks.cacheGroups !== null
+            ? (config.optimization.splitChunks.cacheGroups as Record<
+                string,
+                unknown
+              >)
+            : {};
+
+        config.optimization.splitChunks = {
+          ...config.optimization.splitChunks,
+          minSize: 65000,
+          maxInitialRequests: 8,
+          maxAsyncRequests: 10,
+          cacheGroups: {
+            ...existingCacheGroups,
+            shared: false,
+          },
+        };
+      }
     }
 
     return config;

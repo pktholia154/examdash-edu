@@ -1,5 +1,5 @@
+/* eslint-disable @next/next/no-html-link-for-pages -- Intentional native <a> elements in root NotFound boundary to keep public detail RSC payloads free of extra client Link chunks */
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import React from 'react';
 
 export const metadata: Metadata = {
@@ -24,27 +24,24 @@ export default function NotFound() {
           The book or exam pack slug may have changed, been unpublished, or does not exist in the live catalog.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-          <Link
+          <a
             href="/"
-            prefetch={false}
             className="inline-flex items-center justify-center min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 transition-opacity"
           >
             Explore Home
-          </Link>
-          <Link
+          </a>
+          <a
             href="/books"
-            prefetch={false}
             className="inline-flex items-center justify-center min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
           >
             Browse Books
-          </Link>
-          <Link
+          </a>
+          <a
             href="/exams"
-            prefetch={false}
             className="inline-flex items-center justify-center min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
           >
             Browse Exams
-          </Link>
+          </a>
         </div>
       </div>
     </div>

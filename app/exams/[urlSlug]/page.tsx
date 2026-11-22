@@ -235,7 +235,7 @@ export default async function ExamDetailPage({
             )}
             <span aria-hidden="true">·</span>
             <span>Updated {formatReadableDate(exam.updatedAtIso)}</span>
-            {reviewSummary.reviewCount > 0 && (
+            {reviewSummary.reviewCount > 0 ? (
               <>
                 <span aria-hidden="true">·</span>
                 <a
@@ -251,6 +251,16 @@ export default async function ExamDetailPage({
                     ({reviewSummary.reviewCount}{' '}
                     {reviewSummary.reviewCount === 1 ? 'review' : 'reviews'})
                   </span>
+                </a>
+              </>
+            ) : (
+              <>
+                <span aria-hidden="true">·</span>
+                <a
+                  href="#learner-reviews"
+                  className="font-medium text-[var(--text-main)] hover:underline underline-offset-4"
+                >
+                  Write the first review
                 </a>
               </>
             )}

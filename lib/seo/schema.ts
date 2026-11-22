@@ -50,6 +50,25 @@ function formatSchemaPrice(buyPrice: number): string {
   return safe.toFixed(2);
 }
 
+export function normalizeSchemaLanguageTag(rawLanguage?: string): string {
+  const cleaned = (rawLanguage || '').trim();
+  if (!cleaned) return 'en';
+  const lower = cleaned.toLowerCase();
+  if (lower === 'english' || lower === 'eng') return 'en';
+  if (lower === 'hindi' || lower === 'hin') return 'hi';
+  if (
+    lower === 'bilingual' ||
+    lower === 'hinglish' ||
+    (lower.includes('english') && lower.includes('hindi'))
+  ) {
+    return 'en-IN';
+  }
+  if (/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(cleaned)) {
+    return cleaned;
+  }
+  return 'en';
+}
+
 function buildDigitalProductOffer(params: {
   origin: string;
   pageUrl: string;
@@ -66,6 +85,10 @@ function buildDigitalProductOffer(params: {
     priceCurrency: currency,
     price: formatSchemaPrice(params.buyPrice),
     availability: 'https://schema.org/InStock',
+    itemCondition: 'https://schema.org/NewCondition',
+    seller: {
+      '@id': `${params.origin}/#organization`,
+    },
     shippingDetails: {
       '@type': 'OfferShippingDetails',
       shippingRate: {
@@ -115,7 +138,7 @@ export function buildSiteGraphJsonLd() {
         alternateName: ['ExamDash', 'ExamDash (ed)', 'Exam Kart'],
         url: origin,
         email: BUSINESS_INFO.supportEmail,
-        logo: `${origin}/pwa-512x512.png`,
+        logo: `${origin}/app-icons/icon-512.png?v=ef0c6c39`,
         address: {
           '@type': 'PostalAddress',
           streetAddress: BUSINESS_INFO.addressParts.streetAddress,
@@ -255,7 +278,7 @@ export function buildBookDetailJsonLd(
           '@type': 'Brand',
           name: 'ExamDash',
         },
-        inLanguage: book.language || 'en',
+        inLanguage: normalizeSchemaLanguageTag(book.language),
         bookFormat: 'https://schema.org/EBook',
         author: {
           '@type': 'Person',
@@ -318,6 +341,7 @@ export function buildExamDetailJsonLd(
           '@type': 'Brand',
           name: 'ExamDash',
         },
+        inLanguage: normalizeSchemaLanguageTag(exam.language),
         category: exam.type || 'Mock Exam Series',
         offers: buildDigitalProductOffer({
           origin,
