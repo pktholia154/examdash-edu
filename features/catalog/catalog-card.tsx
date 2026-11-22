@@ -84,9 +84,9 @@ export function CatalogCard({ item }: CatalogCardProps) {
   };
 
   return (
-    <article className="flex flex-row items-center gap-3.5 sm:gap-4 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:p-4 hover:border-[var(--border-strong)] transition-colors">
+    <article className="flex flex-row items-center gap-3.5 sm:gap-4 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:p-4 hover:border-[var(--border-strong)] transition-colors max-md:items-start max-md:gap-3 max-md:p-2.5">
       {/* Left Thumbnail with Bottom-Left Wishlist & Bottom-Right Cart Circular Icons */}
-      <div className="relative w-24 h-24 sm:w-28 sm:h-28 shrink-0">
+      <div className="relative w-24 h-24 sm:w-28 sm:h-28 shrink-0 max-md:w-[88px] max-md:h-[88px]">
         <a
           href={detailHref}
           aria-label={`View ${item.title}`}
@@ -191,7 +191,7 @@ export function CatalogCard({ item }: CatalogCardProps) {
 
           {/* Unboxed Clean Metadata (Zero-Pill Discipline) */}
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--text-muted)]">
-            <span className="truncate max-w-[160px]">{item.authorName}</span>
+            <span className="truncate max-w-[160px] max-md:max-w-[125px]">{item.authorName}</span>
             <span aria-hidden="true">·</span>
             <span>{item.language}</span>
             <span aria-hidden="true">·</span>
@@ -251,7 +251,7 @@ export function CatalogCard({ item }: CatalogCardProps) {
             {isOwned && (
               <a
                 href={openSlotHref}
-                className="text-xs font-semibold text-[var(--status-success)] hover:underline underline-offset-4 whitespace-nowrap"
+                className="text-xs font-semibold text-[var(--status-success)] hover:underline underline-offset-4 whitespace-nowrap max-md:min-h-[44px] max-md:inline-flex max-md:items-center"
               >
                 Open →
               </a>

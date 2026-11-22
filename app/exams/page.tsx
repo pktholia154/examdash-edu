@@ -76,13 +76,13 @@ export default async function ExamsCatalogPage({
     );
 
   return (
-    <div className="pt-8">
+    <div className="pt-8 max-md:pt-4">
       <div className="ed-container">
         <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Exams' }]} />
         <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)]">
           Exam Packs & Mock Test Series
         </h1>
-        <p className="mt-2 text-base text-[var(--text-muted)] max-w-2xl">
+        <p className="mt-2 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] max-w-2xl">
           Practice with exam-grade test packs featuring structured paper durations, transparent mark distributions, and free sample sets.
         </p>
       </div>

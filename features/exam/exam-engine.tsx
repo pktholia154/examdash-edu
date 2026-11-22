@@ -748,7 +748,7 @@ export function QuestionResponseBlock({
           </div>
         )}
         <div className="flex flex-wrap items-end gap-3 tabular-nums">
-          <div>
+          <div className="max-md:w-full">
             <label
               htmlFor={natInputId}
               className="mb-1.5 block text-xs font-semibold text-[var(--text-muted)]"
@@ -764,7 +764,7 @@ export function QuestionResponseBlock({
               value={valStr}
               onChange={(e) => handleNumericInput(e.target.value)}
               placeholder={isReview ? 'Unattempted' : 'Enter numerical value'}
-              className="min-h-12 w-64 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-base font-semibold text-[var(--text-main)] tabular-nums focus:border-[var(--brand-primary)] focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] disabled:opacity-70"
+              className="min-h-12 w-64 max-md:w-full max-md:max-w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-base font-semibold text-[var(--text-main)] tabular-nums focus:border-[var(--brand-primary)] focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] disabled:opacity-70"
             />
           </div>
           {isReview && (
@@ -780,7 +780,7 @@ export function QuestionResponseBlock({
         {!isReview && showVirtualKeypad && !isLocked && (
           <div
             aria-label="Virtual numerical keypad"
-            className="inline-grid grid-cols-4 gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 tabular-nums chrome-no-select"
+            className="inline-grid max-md:grid max-md:w-full grid-cols-4 gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 tabular-nums chrome-no-select"
           >
             {[
               '7',
@@ -1021,7 +1021,7 @@ export const ExamQuestionWorkspace = memo(function ExamQuestionWorkspace({
             type="button"
             onClick={() => setMobileCaseletQuestionId(question.id)}
             className={cn(
-              'flex-1 inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
+              'flex-1 inline-flex items-center justify-center gap-1.5 min-h-[42px] max-md:min-h-[44px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
               mobilePane === 'caselet'
                 ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -1034,7 +1034,7 @@ export const ExamQuestionWorkspace = memo(function ExamQuestionWorkspace({
             type="button"
             onClick={() => setMobileCaseletQuestionId(null)}
             className={cn(
-              'flex-1 inline-flex items-center justify-center gap-1.5 min-h-[42px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
+              'flex-1 inline-flex items-center justify-center gap-1.5 min-h-[42px] max-md:min-h-[44px] px-3 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
               mobilePane === 'question'
                 ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'

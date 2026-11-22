@@ -140,7 +140,7 @@ export default async function ExamDetailPage({
     : undefined;
 
   return (
-    <div className="ed-container pt-8 sm:pt-10 pb-24 lg:pb-10">
+    <div className="ed-container pt-8 sm:pt-10 max-md:pt-4 pb-24 max-md:pb-4 lg:pb-10">
       <script
         key={`exam-jsonld-${exam.id}`}
         type="application/ld+json"
@@ -156,27 +156,27 @@ export default async function ExamDetailPage({
         ]}
       />
 
-      <article className="w-full">
+      <article className="w-full min-w-0">
         {/* Header Block: Side-by-Side Thumbnail (Left) + Metadata (Right) on All Screens */}
-        <div className="flex flex-row items-start gap-4 sm:gap-6 pb-6 border-b border-[var(--border-subtle)]">
+        <div className="flex flex-row items-start gap-4 sm:gap-6 max-md:gap-3.5 pb-6 max-md:pb-4 border-b border-[var(--border-subtle)]">
           <MonogramThumbnail
             title={exam.title}
             type={exam.type}
             collectionName="ExamPackDocument"
             size="lg"
-            className="w-24 h-24 sm:w-32 sm:h-32 md:w-36 md:h-36 shrink-0"
+            className="w-24 h-24 max-md:w-20 max-md:h-20 sm:w-32 sm:h-32 md:w-36 md:h-36 shrink-0"
           />
 
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-[var(--text-muted)]">
+            <p className="text-xs font-medium text-[var(--text-muted)] break-words">
               {exam.type} · {exam.language} · Published by {exam.publisher}
             </p>
-            <h1 className="mt-1.5 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance">
+            <h1 className="mt-1.5 max-md:mt-1 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
               {exam.title}
             </h1>
 
             {exam.seoDescription && (
-              <p className="mt-2.5 text-base text-[var(--text-muted)] leading-relaxed">
+              <p className="mt-2.5 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
                 {exam.seoDescription}
               </p>
             )}
@@ -262,10 +262,10 @@ export default async function ExamDetailPage({
         />
 
         {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
-        <section aria-labelledby="exam-description-heading" className="mt-10">
+        <section aria-labelledby="exam-description-heading" className="mt-10 max-md:mt-7">
           <h2
             id="exam-description-heading"
-            className="text-lg font-bold text-[var(--text-main)] mb-3"
+            className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5"
           >
             Exam Series Overview & Instructions
           </h2>

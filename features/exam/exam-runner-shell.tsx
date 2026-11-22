@@ -1356,10 +1356,10 @@ export function ExamRunnerShell({
 
           {/* Set Switcher when multiple sets exist in owned pack */}
           {(isOwned && exam.MocktestTitles.length > 1) || loadedSets.length > 1 ? (
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 max-md:w-full min-w-0">
               <label
                 htmlFor="cbt-set-selector"
-                className="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap"
+                className="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap shrink-0"
               >
                 Exam Set:
               </label>
@@ -1367,7 +1367,7 @@ export function ExamRunnerShell({
                 id="cbt-set-selector"
                 value={activeSet.id}
                 onChange={(e) => handleSelectSetId(e.target.value)}
-                className="min-h-12 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 text-xs sm:text-sm font-semibold text-[var(--text-main)]"
+                className="min-h-12 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 text-xs sm:text-sm max-md:text-base max-md:flex-1 max-md:min-w-0 max-md:max-w-full font-semibold text-[var(--text-main)]"
               >
                 {(isOwned && exam.MocktestTitles.length > 1
                   ? exam.MocktestTitles.map((m) => ({ id: m.id, title: m.title }))

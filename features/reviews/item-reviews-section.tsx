@@ -300,7 +300,7 @@ export function ItemReviewsSection({
     <section
       id="learner-reviews"
       aria-labelledby="learner-reviews-heading"
-      className="mt-10 pt-8 border-t border-[var(--border-subtle)] scroll-mt-24"
+      className="mt-10 pt-8 max-md:mt-7 max-md:pt-6 border-t border-[var(--border-subtle)] scroll-mt-24"
     >
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
@@ -334,9 +334,9 @@ export function ItemReviewsSection({
       </div>
 
       {/* Aggregate Breakdown + Review List Grid */}
-      <div className="mt-6 grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-8 items-start">
+      <div className="mt-6 max-md:mt-4 grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-8 max-md:gap-5 items-start">
         {/* Left Column: Rating Summary & Star Distribution */}
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
+        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 max-md:p-4">
           {summary.reviewCount > 0 ? (
             <>
               <div className="flex items-baseline gap-3 tabular-nums">
@@ -380,7 +380,7 @@ export function ItemReviewsSection({
                         )
                       }
                       className={cn(
-                        'w-full flex items-center gap-2.5 min-h-[36px] px-2 rounded-md text-xs transition-colors tabular-nums',
+                        'w-full flex items-center gap-2.5 min-h-[36px] max-md:min-h-[44px] px-2 rounded-md text-xs transition-colors tabular-nums',
                         isSelected
                           ? 'bg-[var(--bg-elevated)] font-semibold text-[var(--text-main)]'
                           : count > 0
@@ -405,7 +405,7 @@ export function ItemReviewsSection({
                 <button
                   type="button"
                   onClick={() => setSelectedStarFilter(null)}
-                  className="mt-3 text-xs font-semibold text-[var(--text-main)] underline underline-offset-4 hover:opacity-80"
+                  className="mt-3 text-xs font-semibold text-[var(--text-main)] underline underline-offset-4 hover:opacity-80 max-md:min-h-[44px] max-md:inline-flex max-md:items-center"
                 >
                   Show all {summary.reviewCount} reviews
                 </button>
@@ -487,7 +487,7 @@ export function ItemReviewsSection({
             <form
               onSubmit={(e) => void handleSubmitReview(e)}
               noValidate
-              className="rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 sm:p-6 space-y-5"
+              className="rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 sm:p-6 max-md:p-4 space-y-5 max-md:space-y-4"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -629,7 +629,7 @@ export function ItemReviewsSection({
                 <button
                   type="submit"
                   disabled={isSubmitting || isSigningIn}
-                  className="inline-flex items-center justify-center min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
+                  className="inline-flex items-center justify-center min-h-[48px] px-5 max-md:w-full rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
                 >
                   {isSubmitting
                     ? 'Saving Review...'

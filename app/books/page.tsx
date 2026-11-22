@@ -73,13 +73,13 @@ export default async function BooksCatalogPage({
     );
 
   return (
-    <div className="pt-8">
+    <div className="pt-8 max-md:pt-4">
       <div className="ed-container">
         <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Books' }]} />
         <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)]">
           Books & Question Banks
         </h1>
-        <p className="mt-2 text-base text-[var(--text-muted)] max-w-2xl">
+        <p className="mt-2 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] max-w-2xl">
           Verified digital textbooks and MCQ banks published directly from the ExamDash curriculum repository, with instant chapter previews before purchase.
         </p>
       </div>

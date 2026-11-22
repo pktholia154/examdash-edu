@@ -16,7 +16,7 @@ const capacitorConfig = {
   plugins: {
     SplashScreen: {
       launchAutoHide: false,
-      backgroundColor: '#F8FAFC',
+      backgroundColor: '#F5F5F5',
       darkBackgroundColor: '#090D16',
     },
   },

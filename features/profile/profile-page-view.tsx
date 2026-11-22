@@ -1,6 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -36,6 +42,8 @@ import { useAuth } from '../auth/auth-provider';
 import { CatalogCard } from '../catalog/catalog-card';
 import { useToast } from '../toast/toast-context';
 import { useWishlist } from '../wishlist/wishlist-provider';
+
+const subscribeOriginNoop = () => () => {};
 
 export interface ProfileBookRef {
   id: string;
@@ -379,10 +387,11 @@ export function ProfilePageView({
     return source.slice(0, 2).toUpperCase();
   }, [user?.displayName, user?.email]);
 
-  const appShareUrl =
-    typeof window !== 'undefined'
-      ? window.location.origin
-      : 'https://exam-dash.com';
+  const appShareUrl = useSyncExternalStore(
+    subscribeOriginNoop,
+    () => window.location.origin,
+    () => 'https://exam-dash.com'
+  );
   const appShareText =
     'Study with ExamDash — curated ebooks, question banks, and full-length CBT mock exam series.';
 
@@ -426,11 +435,11 @@ export function ProfilePageView({
   )}&body=${encodeURIComponent(`${appShareText}\n\n${appShareUrl}`)}`;
 
   return (
-    <div className="ed-container py-6 sm:py-8 space-y-8">
+    <div className="ed-container py-6 sm:py-8 space-y-8 max-md:py-4 max-md:space-y-6">
       {/* 1. User Profile Identity Card */}
       <section
         aria-labelledby="profile-heading"
-        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 sm:p-6"
+        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 sm:p-6 max-md:p-4"
       >
         {!isAuthReady ? (
           <div className="flex items-center gap-4">
@@ -483,7 +492,7 @@ export function ProfilePageView({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0 max-md:w-full max-md:grid max-md:grid-cols-2 max-md:gap-2">
               <Link
                 href="/purchased"
                 prefetch={false}
@@ -526,7 +535,7 @@ export function ProfilePageView({
               type="button"
               disabled={isSigningIn}
               onClick={() => void signInWithGoogle()}
-              className="inline-flex items-center justify-center min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap shrink-0 self-start sm:self-auto"
+              className="inline-flex items-center justify-center min-h-[48px] px-5 max-md:w-full rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap shrink-0 self-start sm:self-auto"
             >
               {isSigningIn ? 'Signing in...' : 'Continue with Google'}
             </button>
@@ -551,13 +560,13 @@ export function ProfilePageView({
         </div>
 
         {/* 4 Primary Metric Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 tabular-nums">
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 max-md:gap-2.5 tabular-nums">
+          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
             <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
               <span>Books Read</span>
               <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
             </div>
-            <p className="mt-2.5 text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-main)]">
+            <p className="mt-2.5 max-md:mt-2 text-2xl sm:text-3xl max-md:text-xl font-extrabold tracking-tight text-[var(--text-main)]">
               {analytics.booksReadCount}
             </p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
@@ -565,12 +574,12 @@ export function ProfilePageView({
             </p>
           </div>
 
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
             <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
               <span>Exams Attempted</span>
               <ClipboardCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
             </div>
-            <p className="mt-2.5 text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-main)]">
+            <p className="mt-2.5 max-md:mt-2 text-2xl sm:text-3xl max-md:text-xl font-extrabold tracking-tight text-[var(--text-main)]">
               {analytics.totalExamsAttempted}
             </p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
@@ -580,12 +589,12 @@ export function ProfilePageView({
             </p>
           </div>
 
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
             <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
               <span>Overall Accuracy</span>
               <Target className="w-4 h-4 shrink-0" aria-hidden="true" />
             </div>
-            <p className="mt-2.5 text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-main)]">
+            <p className="mt-2.5 max-md:mt-2 text-2xl sm:text-3xl max-md:text-xl font-extrabold tracking-tight text-[var(--text-main)]">
               {analytics.weightedAccuracyPct !== null
                 ? `${analytics.weightedAccuracyPct.toFixed(1)}%`
                 : '—'}
@@ -597,12 +606,12 @@ export function ProfilePageView({
             </p>
           </div>
 
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
             <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
               <span>Last Active &amp; Gap</span>
               <CalendarClock className="w-4 h-4 shrink-0" aria-hidden="true" />
             </div>
-            <p className="mt-2.5 text-lg sm:text-xl font-extrabold tracking-tight text-[var(--text-main)] leading-snug">
+            <p className="mt-2.5 max-md:mt-2 text-lg sm:text-xl max-md:text-base font-extrabold tracking-tight text-[var(--text-main)] leading-snug">
               {analytics.lastActive.headline}
             </p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
@@ -612,7 +621,7 @@ export function ProfilePageView({
         </div>
 
         {/* Secondary Engagement Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--border-subtle)] rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] tabular-nums">
+        <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--border-subtle)] max-sm:divide-y-0 max-sm:[&>*:nth-child(n+3)]:border-t max-sm:[&>*:nth-child(even)]:border-s max-sm:[&>*]:border-[var(--border-subtle)] rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] tabular-nums">
           <div className="p-3.5 sm:p-4 flex items-center gap-3">
             <Clock
               className="w-4 h-4 text-[var(--text-muted)] shrink-0"
@@ -688,7 +697,7 @@ export function ProfilePageView({
               <Link
                 href="/purchased"
                 prefetch={false}
-                className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:underline underline-offset-4"
+                className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:underline underline-offset-4 max-md:min-h-[44px] max-md:inline-flex max-md:items-center"
               >
                 Open Library →
               </Link>
@@ -716,7 +725,7 @@ export function ProfilePageView({
                     att.attemptId
                   )}`}
                   prefetch={false}
-                  className="text-xs font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0"
+                  className="text-xs font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0 max-md:min-h-[44px] max-md:inline-flex max-md:items-center"
                 >
                   Review →
                 </Link>
@@ -746,7 +755,7 @@ export function ProfilePageView({
                   <Link
                     href={href}
                     prefetch={false}
-                    className="text-xs font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0"
+                    className="text-xs font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0 max-md:min-h-[44px] max-md:inline-flex max-md:items-center"
                   >
                     Continue →
                   </Link>
@@ -783,7 +792,7 @@ export function ProfilePageView({
             <button
               type="button"
               onClick={clearWishlist}
-              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:border-[var(--status-danger)] transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[40px] max-md:min-h-[44px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:border-[var(--status-danger)] transition-colors whitespace-nowrap shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Clear Wishlist</span>
@@ -814,9 +823,9 @@ export function ProfilePageView({
       {/* 4. Share App Section */}
       <section
         aria-labelledby="share-app-heading"
-        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 sm:p-6"
+        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 sm:p-6 max-md:p-4"
       >
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 max-md:gap-4">
           <div className="min-w-0">
             <h2
               id="share-app-heading"
@@ -830,11 +839,11 @@ export function ProfilePageView({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0 max-md:w-full max-md:grid max-md:grid-cols-2 max-md:gap-2">
             <button
               type="button"
               onClick={() => void handleShareApp()}
-              className="inline-flex items-center justify-center gap-2 min-h-[46px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[46px] px-4 max-md:col-span-2 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
             >
               <Share2 className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>Share App</span>

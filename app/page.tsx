@@ -57,9 +57,9 @@ export default async function HomePage() {
         ExamDash — Verified Books, Question Banks &amp; Full-Length Mock Exam Packs
       </h1>
 
-      <div className="ed-container pt-6 sm:pt-7">
+      <div className="ed-container pt-6 sm:pt-7 max-md:pt-3.5">
         <HomeSearchBar bookCount={books.length} examCount={exams.length} />
-        <InstallAppCallout variant="home" className="mt-3.5" />
+        <InstallAppCallout variant="home" className="mt-3.5 max-md:mt-3" />
       </div>
 
       <KpiStrip

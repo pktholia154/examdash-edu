@@ -97,13 +97,13 @@ export async function writePersistedAuthHint(authed: boolean): Promise<void> {
 }
 
 /**
- * Mirrors `#0B1120` (dark) / `#F8FAFC` (light) theme colors to `@capacitor/status-bar`
+ * Mirrors `#0B1120` (dark) / `#F5F5F5` (light) theme colors to `@capacitor/status-bar`
  * and `SystemBars` on Capacitor Native boot and theme switches.
  */
 export async function syncNativeSystemBars(theme: 'light' | 'dark'): Promise<void> {
   if (!isCapacitorNative()) return;
   const plugins = getCapacitorGlobal()?.Plugins;
-  const hexColor = theme === 'dark' ? '#0B1120' : '#F8FAFC';
+  const hexColor = theme === 'dark' ? '#0B1120' : '#F5F5F5';
   // In Capacitor StatusBar, 'DARK' renders light text/icons for dark backgrounds,
   // and 'LIGHT' renders dark text/icons for light backgrounds.
   const barStyle = theme === 'dark' ? 'DARK' : 'LIGHT';

@@ -23,7 +23,7 @@ export function ToastViewport({
       data-nosnippet=""
       aria-live="polite"
       aria-atomic="false"
-      className="fixed bottom-20 md:bottom-6 left-4 z-50 flex flex-col gap-2 max-w-sm w-[calc(100vw-2rem)] pointer-events-none"
+      className="fixed bottom-20 md:bottom-6 left-4 z-50 flex flex-col gap-2 max-w-sm w-[calc(100vw-2rem)] pointer-events-none max-md:bottom-[calc(4.5rem+var(--safe-area-inset-bottom))] max-md:inset-x-3 max-md:w-auto max-md:max-w-none"
     >
       {toasts.map((toast) => (
         <div
@@ -56,7 +56,7 @@ export function ToastViewport({
             type="button"
             aria-label="Dismiss notification"
             onClick={() => onDismiss(toast.id)}
-            className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
+            className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors max-md:min-h-[44px] max-md:min-w-[44px] max-md:inline-flex max-md:items-center max-md:justify-center max-md:-mr-1.5"
           >
             <X className="w-4 h-4" aria-hidden="true" />
           </button>

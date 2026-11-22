@@ -8,10 +8,10 @@ export function HomeComplianceSection() {
     <section
       id="legal-and-compliance"
       aria-labelledby="legal-compliance-heading"
-      className="py-12"
+      className="py-12 max-md:py-6"
     >
       <div className="ed-container">
-        <hr className="border-[var(--border-subtle)] mb-10" />
+        <hr className="border-[var(--border-subtle)] mb-10 max-md:mb-6" />
 
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           <div className="max-w-2xl">
@@ -36,14 +36,14 @@ export function HomeComplianceSection() {
         {/* 5 Required Razorpay Verification Compliance Pages */}
         <nav
           aria-label="Legal and compliance policies"
-          className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4"
+          className="mt-6 max-md:mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 max-md:gap-2.5"
         >
           {LEGAL_PAGES.map((page, index) => (
             <Link
               key={page.href}
               href={page.href}
               prefetch={false}
-              className="group flex flex-col justify-between rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 hover:border-[var(--border-strong)] transition-colors"
+              className="group flex flex-col justify-between rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 max-md:p-3.5 hover:border-[var(--border-strong)] transition-colors"
             >
               <div>
                 <div className="flex items-center justify-between gap-2">
@@ -82,7 +82,7 @@ export function HomeComplianceSection() {
             <dd className="mt-1 font-semibold text-[var(--text-main)]">
               <a
                 href={BUSINESS_INFO.officialWebsite}
-                className="underline underline-offset-4 hover:opacity-80"
+                className="underline underline-offset-4 hover:opacity-80 break-all"
               >
                 {BUSINESS_INFO.officialWebsite}
               </a>
@@ -93,7 +93,7 @@ export function HomeComplianceSection() {
             <dd className="mt-1 font-semibold text-[var(--text-main)]">
               <a
                 href={`mailto:${BUSINESS_INFO.supportEmail}`}
-                className="underline underline-offset-4 hover:opacity-80"
+                className="underline underline-offset-4 hover:opacity-80 break-all"
               >
                 {BUSINESS_INFO.supportEmail}
               </a>

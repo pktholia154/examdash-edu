@@ -110,11 +110,11 @@ export function InstallAppCallout({
   return (
     <div
       data-nosnippet=""
-      className={`relative overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 ${
-        isDetail ? 'py-3' : 'py-3.5'
+      className={`relative overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 max-md:px-3.5 ${
+        isDetail ? 'py-3' : 'py-3.5 max-md:py-3'
       } transition-colors ${className}`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 max-md:gap-2.5">
         <div className="flex items-center gap-3 min-w-0">
           <Image
             src="/assets/aistudio/exam-dash_logo_ef0c6c39.png"
@@ -134,16 +134,16 @@ export function InstallAppCallout({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 max-md:w-full max-md:justify-between">
           {status === 'installing' && (
             <button
               type="button"
               disabled
               aria-live="polite"
-              className="inline-flex items-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap shrink-0 cursor-wait"
+              className="inline-flex items-center gap-2 min-h-[44px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap shrink-0 cursor-wait max-md:flex-1 max-md:justify-center min-w-0"
             >
               <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
-              <span>{progressLabel || 'Building app package...'}</span>
+              <span className="truncate">{progressLabel || 'Building app package...'}</span>
             </button>
           )}
 
@@ -151,10 +151,10 @@ export function InstallAppCallout({
             <div
               role="status"
               aria-live="polite"
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
             >
               <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Successfully Installed</span>
+              <span className="truncate">Successfully Installed</span>
             </div>
           )}
 
@@ -164,7 +164,7 @@ export function InstallAppCallout({
               href={openInAppHref}
               target="_blank"
               rel="noopener"
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
             >
               <span>Open in App</span>
               <ArrowUpRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -178,7 +178,7 @@ export function InstallAppCallout({
               id="btn-install"
               type="button"
               onClick={() => void triggerPrimaryAction()}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
             >
               <Download className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
               <span>{defaultInstallCta}</span>
@@ -190,7 +190,7 @@ export function InstallAppCallout({
               id="btn-install"
               type="button"
               onClick={() => void triggerPrimaryAction()}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
             >
               <LayoutGrid className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
               <span>Add to Dock</span>
@@ -201,10 +201,10 @@ export function InstallAppCallout({
             <button
               type="button"
               onClick={() => void triggerPrimaryAction()}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 max-md:flex-1 max-md:justify-center min-w-0"
             >
               <ExternalLink className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span>Open in Browser to Install</span>
+              <span className="truncate">Open in Browser to Install</span>
             </button>
           )}
 
@@ -382,7 +382,7 @@ export function MobileOpenInAppBanner() {
             href={openInAppHref}
             target="_blank"
             rel="noopener"
-            className="inline-flex items-center gap-1 min-h-[36px] px-3 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 min-h-[36px] max-md:min-h-[44px] px-3 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold whitespace-nowrap shrink-0"
           >
             <span>Open in App</span>
             <ArrowUpRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />

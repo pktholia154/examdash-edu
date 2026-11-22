@@ -182,7 +182,7 @@ export function ContactSupportComposer() {
       <form
         onSubmit={handleOpenEmailClient}
         noValidate
-        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6 space-y-5"
+        className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6 max-md:p-4 space-y-5 max-md:space-y-4"
       >
         <div>
           <h3 className="text-base font-bold text-[var(--text-main)]">
@@ -309,10 +309,10 @@ export function ContactSupportComposer() {
           </p>
         )}
 
-        <div className="flex flex-wrap items-center gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-3 max-md:gap-2.5 pt-1">
           <button
             type="submit"
-            className="inline-flex items-center justify-center gap-2 min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-2 min-h-[48px] px-5 max-md:w-full rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
           >
             <Send className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>Open in Email App</span>
@@ -321,7 +321,7 @@ export function ContactSupportComposer() {
           <button
             type="button"
             onClick={handleCopyDraft}
-            className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] transition-colors whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 max-md:w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] transition-colors whitespace-nowrap"
           >
             {copiedKey === 'draft' ? (
               <>

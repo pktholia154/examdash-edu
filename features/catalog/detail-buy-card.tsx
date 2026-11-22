@@ -200,14 +200,17 @@ export function DetailBuyCard({
       <div
         role="toolbar"
         aria-label="Quick item actions"
-        className="py-3 border-b border-[var(--border-subtle)] flex flex-wrap items-center gap-2"
+        className={cn(
+          'py-3 border-b border-[var(--border-subtle)] flex flex-wrap items-center gap-2 max-md:grid max-md:gap-2',
+          !isOwned ? 'max-md:grid-cols-2' : 'max-md:grid-cols-3'
+        )}
       >
         <button
           type="button"
           aria-pressed={wishlisted}
           onClick={() => toggleWishlist(itemPayload)}
           className={cn(
-            'inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
+            'inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 min-w-0',
             wishlisted
               ? 'border-[var(--status-wishlist)] bg-[var(--status-wishlist-bg)] text-[var(--status-wishlist)]'
               : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]'
@@ -217,7 +220,7 @@ export function DetailBuyCard({
             className={cn('w-4 h-4 shrink-0', wishlisted && 'fill-current')}
             aria-hidden="true"
           />
-          <span>{wishlisted ? 'Wishlisted' : 'Wishlist'}</span>
+          <span className="truncate">{wishlisted ? 'Wishlisted' : 'Wishlist'}</span>
         </button>
 
         {!isOwned && (
@@ -226,7 +229,7 @@ export function DetailBuyCard({
             aria-pressed={inCart}
             onClick={handleAddToCartAction}
             className={cn(
-              'inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
+              'inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 min-w-0',
               inCart
                 ? 'border-[var(--status-success)] bg-[var(--status-success-bg)] text-[var(--status-success)]'
                 : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]'
@@ -235,12 +238,12 @@ export function DetailBuyCard({
             {inCart ? (
               <>
                 <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>In Cart</span>
+                <span className="truncate">In Cart</span>
               </>
             ) : (
               <>
                 <ShoppingCart className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>Add to Cart</span>
+                <span className="truncate">Add to Cart</span>
               </>
             )}
           </button>
@@ -249,16 +252,16 @@ export function DetailBuyCard({
         <button
           type="button"
           onClick={() => void handleShare()}
-          className="inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0"
+          className="inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0 min-w-0"
         >
           <Share2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-          <span>Share</span>
+          <span className="truncate">Share</span>
         </button>
 
         <button
           type="button"
           onClick={() => void handleCopyLink()}
-          className="inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0"
+          className="inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0 min-w-0"
         >
           {copiedLink ? (
             <>
@@ -266,12 +269,12 @@ export function DetailBuyCard({
                 className="w-4 h-4 text-[var(--status-success)] shrink-0"
                 aria-hidden="true"
               />
-              <span>Copied</span>
+              <span className="truncate">Copied</span>
             </>
           ) : (
             <>
               <Link2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Copy Link</span>
+              <span className="truncate">Copy Link</span>
             </>
           )}
         </button>
@@ -280,7 +283,7 @@ export function DetailBuyCard({
       {/* Price & Buy Now / Sample Bar */}
       <div
         aria-label="Purchase and sample options"
-        className="py-5 border-b border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        className="py-5 max-md:py-4 border-b border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 max-md:gap-3.5"
       >
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 tabular-nums">
           <span className="text-2xl font-extrabold text-[var(--text-main)] leading-none">
@@ -298,27 +301,34 @@ export function DetailBuyCard({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div
+          className={cn(
+            'flex flex-wrap items-center gap-2.5 max-md:w-full max-md:grid max-md:gap-2.5',
+            hasBookSample || (hasExamSample && Boolean(sampleJsonUrl))
+              ? 'max-md:grid-cols-2'
+              : 'max-md:grid-cols-1'
+          )}
+        >
           {isOwned ? (
             <a
               href="/purchased"
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-5 max-md:px-3.5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap min-w-0"
             >
-              <span>Open in Purchased Library →</span>
+              <span className="truncate">Open in Purchased Library →</span>
             </a>
           ) : (
             <button
               type="button"
               disabled={isCheckingOut}
               onClick={() => void handlePrimaryAction()}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-6 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-6 max-md:px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap min-w-0"
             >
               {isFree ? (
                 <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />
               ) : (
                 <Zap className="w-4 h-4 shrink-0" aria-hidden="true" />
               )}
-              <span>{primaryLabel}</span>
+              <span className="truncate">{primaryLabel}</span>
             </button>
           )}
 
@@ -326,20 +336,20 @@ export function DetailBuyCard({
             <button
               type="button"
               onClick={() => openSampleReader(defaultBookSampleFormat)}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-4 max-md:px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap min-w-0"
             >
               <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Sample</span>
+              <span className="truncate">Sample</span>
             </button>
           )}
 
           {hasExamSample && sampleJsonUrl && (
             <a
               href={sampleJsonUrl}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-4 max-md:px-3 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-sm font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap min-w-0"
             >
               <Play className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Try Sample Mock</span>
+              <span className="truncate">Try Sample Mock</span>
             </a>
           )}
         </div>
@@ -349,71 +359,8 @@ export function DetailBuyCard({
       <InstallAppCallout
         variant="detail"
         itemKind={collectionName === 'books' ? 'book' : 'exam'}
-        className="mt-4"
+        className="mt-4 max-md:mt-3.5"
       />
-
-      {/* Mobile Sticky Bottom Bar (Solid Matte, Zero Blur, <= 60px height) */}
-      <div
-        data-nosnippet=""
-        className="md:hidden fixed bottom-0 inset-x-0 z-30 h-15 border-t border-[var(--border-strong)] bg-[var(--bg-surface)] px-4 pb-[var(--safe-area-inset-bottom)] flex items-center justify-between gap-2.5"
-      >
-        <div className="min-w-0 tabular-nums">
-          <p className="text-base font-extrabold text-[var(--text-main)] leading-tight">
-            {isFree ? 'Free' : formatPrice(buyPrice, currency)}
-          </p>
-          {discountPct > 0 && (
-            <p className="text-[11px] font-semibold text-[var(--status-success)] leading-tight">
-              {discountPct}% OFF
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {hasBookSample && (
-            <button
-              type="button"
-              onClick={() => openSampleReader(defaultBookSampleFormat)}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
-            >
-              <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Sample</span>
-            </button>
-          )}
-
-          {hasExamSample && sampleJsonUrl && (
-            <a
-              href={sampleJsonUrl}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] whitespace-nowrap"
-            >
-              <Play className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Try Sample Mock</span>
-            </a>
-          )}
-
-          {isOwned ? (
-            <a
-              href="/purchased"
-              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-4 rounded-lg bg-[var(--status-success)] text-white text-xs font-semibold whitespace-nowrap"
-            >
-              <span>Open in Purchased Library →</span>
-            </a>
-          ) : (
-            <button
-              type="button"
-              disabled={isCheckingOut}
-              onClick={() => void handlePrimaryAction()}
-              className="inline-flex items-center justify-center gap-1.5 min-h-[48px] px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
-            >
-              {isFree ? (
-                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-              ) : (
-                <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-              )}
-              <span>{primaryLabel}</span>
-            </button>
-          )}
-        </div>
-      </div>
 
       {collectionName === 'books' && inlineSampleState?.open && (
         <LazyBookInlineReaderModal

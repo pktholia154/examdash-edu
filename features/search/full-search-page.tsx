@@ -116,7 +116,7 @@ export function FullSearchPage({
   };
 
   return (
-    <div className="ed-container py-6 sm:py-8 space-y-6">
+    <div className="ed-container py-6 sm:py-8 space-y-6 max-md:py-4 max-md:space-y-4">
       {/* Top Bar: Back + Heading + Result Counter */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
@@ -143,7 +143,7 @@ export function FullSearchPage({
       {/* Full-Width Aesthetic Search Input with Active Border */}
       <div
         className={cn(
-          'relative w-full flex items-center gap-3 min-h-[58px] px-4 rounded-[var(--radius-card)] bg-[var(--bg-surface)] border-2 transition-all duration-150',
+          'relative w-full flex items-center gap-3 min-h-[58px] px-4 rounded-[var(--radius-card)] bg-[var(--bg-surface)] border-2 transition-all duration-150 max-md:min-h-[52px] max-md:px-3.5 max-md:gap-2.5',
           isFocused
             ? 'border-[var(--accent-active)] ring-4 ring-[var(--accent-active)]/12'
             : 'border-[var(--border-strong)] hover:border-[var(--text-muted)]'
@@ -206,7 +206,7 @@ export function FullSearchPage({
               setQuery('');
               inputRef.current?.focus();
             }}
-            className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors shrink-0"
+            className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] max-md:min-h-[44px] max-md:min-w-[44px] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors shrink-0"
           >
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -218,7 +218,7 @@ export function FullSearchPage({
         <div
           role="tablist"
           aria-label="Filter search results by type"
-          className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 self-start tabular-nums"
+          className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 self-start tabular-nums max-md:flex max-md:w-full"
         >
           {(
             [
@@ -234,7 +234,7 @@ export function FullSearchPage({
               aria-selected={scope === tab.id}
               onClick={() => setScope(tab.id)}
               className={cn(
-                'min-h-[40px] px-3.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
+                'min-h-[40px] max-md:min-h-[44px] px-3.5 max-md:px-2 max-md:flex-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap',
                 scope === tab.id
                   ? 'bg-[var(--bg-surface)] text-[var(--text-main)] border border-[var(--border-subtle)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
@@ -246,8 +246,8 @@ export function FullSearchPage({
         </div>
 
         {popularTags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-[var(--text-muted)] mr-1">
+          <div className="flex flex-wrap items-center gap-1.5 max-md:flex-nowrap ed-mobile-scroll-strip max-md:w-full max-md:pb-1">
+            <span className="text-xs text-[var(--text-muted)] mr-1 shrink-0">
               Topics:
             </span>
             {popularTags.map((tag) => {
@@ -258,7 +258,7 @@ export function FullSearchPage({
                   type="button"
                   onClick={() => setQuery(active ? '' : tag)}
                   className={cn(
-                    'min-h-[36px] px-2.5 rounded-md border text-xs font-medium transition-colors whitespace-nowrap',
+                    'min-h-[36px] max-md:min-h-[44px] px-2.5 max-md:px-3 rounded-md border text-xs font-medium transition-colors whitespace-nowrap max-md:shrink-0',
                     active
                       ? 'border-[var(--brand-primary)] bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
                       : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[var(--border-strong)]'

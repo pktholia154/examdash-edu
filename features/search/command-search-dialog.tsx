@@ -142,7 +142,7 @@ export function CommandSearchDialog({
       role="dialog"
       aria-modal="true"
       aria-label="Global catalog search"
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[8svh] px-4"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[8svh] px-4 max-md:pt-[max(0.75rem,var(--safe-area-inset-top))] max-md:px-2.5"
     >
       <button
         type="button"
@@ -152,7 +152,7 @@ export function CommandSearchDialog({
       />
 
       <div className="relative z-10 w-full max-w-2xl rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-2xl overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[var(--border-subtle)]">
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[var(--border-subtle)] max-md:gap-2 max-md:px-3 max-md:py-2.5">
           <Search
             className="w-5 h-5 text-[var(--text-muted)] shrink-0"
             aria-hidden="true"
@@ -171,7 +171,7 @@ export function CommandSearchDialog({
             }}
             onKeyDown={handleInputKeyDown}
             placeholder="Search books, mock exams, authors, or syllabus tags..."
-            className="flex-1 bg-transparent text-base text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
+            className="flex-1 min-w-0 bg-transparent text-base text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
           />
           {queryText && (
             <button
@@ -181,7 +181,7 @@ export function CommandSearchDialog({
                 setIsLoading(true);
                 setQueryText('');
               }}
-              className="min-h-[48px] min-w-[48px] inline-flex items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--text-main)]"
+              className="min-h-[48px] min-w-[48px] max-md:min-h-[44px] max-md:min-w-[44px] inline-flex items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--text-main)] shrink-0"
             >
               <X className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -189,13 +189,13 @@ export function CommandSearchDialog({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-[48px] px-3.5 rounded-lg border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            className="min-h-[48px] max-md:min-h-[44px] px-3.5 max-md:px-2.5 rounded-lg border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] shrink-0"
           >
             Esc
           </button>
         </div>
 
-        <div className="max-h-[62svh] overflow-y-auto p-3 space-y-4">
+        <div className="max-h-[62svh] max-md:max-h-[72dvh] overflow-y-auto p-3 max-md:p-2 space-y-4">
           {isLoading && flatResults.length === 0 ? (
             <div className="py-10 text-center text-sm text-[var(--text-muted)]">
               Searching catalog...
@@ -322,7 +322,7 @@ export function CommandSearchDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between px-4 py-2.5 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs text-[var(--text-muted)]">
+        <div className="max-md:hidden flex items-center justify-between px-4 py-2.5 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs text-[var(--text-muted)]">
           <span>Navigate with ↑ ↓ · Enter to open</span>
           <span>Catalog Search</span>
         </div>

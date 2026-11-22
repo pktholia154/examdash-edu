@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     start_url: '/?source=pwa',
     scope: '/',
     display: 'standalone',
-    background_color: '#F8FAFC',
+    background_color: '#F5F5F5',
     theme_color: '#0F172A',
     handle_links: 'preferred',
     launch_handler: {

@@ -20,6 +20,10 @@ import {
 } from 'lucide-react';
 import { ClientErrorBoundary } from '../../components/ui/state-blocks';
 import { BUSINESS_INFO, LEGAL_PAGES } from '../../lib/legal/business-info';
+import {
+  resolveMobileTabState,
+  shouldShowMobileBottomNav,
+} from '../../lib/navigation/mobile-nav';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
@@ -61,28 +65,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  // On detail pages (/books/[slug] or /exams/[slug]), DetailBuyCard renders the mobile sticky bar
-  // so we suppress the mobile bottom tab bar there to keep aggregate mobile sticky chrome <= 15%.
   const isDetailRoute =
     (pathname.startsWith('/books/') && pathname !== '/books') ||
     (pathname.startsWith('/exams/') && pathname !== '/exams');
   const isAttemptRoute = pathname.startsWith('/attempt/');
   const isReaderRoute = pathname.startsWith('/read/');
+  const showMobileBottomNav = shouldShowMobileBottomNav(pathname);
 
   if (isReaderRoute) {
     return <ClientErrorBoundary>{children}</ClientErrorBoundary>;
   }
 
   return (
-    <div className="min-h-[100svh] flex flex-col bg-[var(--bg-canvas)] text-[var(--text-main)]">
-      {/* Sticky Top Navigation Bar (Solid Matte, Zero Blur, 48px touch targets) */}
-      <header className="sticky top-0 z-40 h-15 md:h-16 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-        <div className="ed-container h-full flex items-center justify-between gap-4 sm:gap-8">
+    <div className="min-h-[100svh] max-md:min-h-[100dvh] max-md:w-full max-md:max-w-full max-md:overflow-x-clip flex flex-col bg-[var(--bg-canvas)] text-[var(--text-main)]">
+      {/* Sticky Top Navigation Bar (Solid Matte, Zero Blur, 48px desktop / 44px mobile touch targets) */}
+      <header className="sticky top-0 z-40 h-15 md:h-16 max-md:h-[calc(3.375rem+var(--safe-area-inset-top))] max-md:pt-[var(--safe-area-inset-top)] border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+        <div className="ed-container h-full flex items-center justify-between gap-4 sm:gap-8 max-md:gap-2">
           {/* Zone 1: Single-line Brand Logo & Wordmark */}
           <Link
             href="/"
             prefetch={false}
-            className="inline-flex items-center gap-2.5 min-h-[48px] text-lg font-extrabold tracking-tight text-[var(--text-main)] whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2.5 max-md:gap-2 min-h-[48px] max-md:min-h-[44px] text-lg max-md:text-base font-extrabold tracking-tight text-[var(--text-main)] whitespace-nowrap shrink-0 min-w-0"
           >
             <Image
               src="/assets/aistudio/exam-dash_logo_ef0c6c39.png"
@@ -91,9 +94,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               height={36}
               priority
               referrerPolicy="no-referrer"
-              className="w-9 h-9 rounded-lg object-cover shrink-0"
+              className="w-9 h-9 max-md:w-8 max-md:h-8 rounded-lg object-cover shrink-0"
             />
-            <span>ExamDash</span>
+            <span className="max-[359px]:sr-only">ExamDash</span>
           </Link>
 
           {/* Zone 2: Concise Single-Line Navigation Links (aria-current="page" strictly on exact pathname match) */}
@@ -126,19 +129,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          {/* Zone 3: Compact 48px Action Controls */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Zone 3: Compact Action Controls (48px desktop, 44px zero-overflow mobile) */}
+          <div className="flex items-center gap-2 max-md:gap-1.5 shrink-0 min-w-0">
             <HeaderPwaAction />
 
             <button
               type="button"
               aria-label="Search catalog (Command K)"
               onClick={() => openSearch()}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] min-w-[48px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[var(--border-strong)] transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] min-w-[48px] max-md:min-h-[44px] max-md:min-w-[44px] px-3 max-md:px-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[var(--border-strong)] transition-colors whitespace-nowrap shrink-0"
             >
               <Search className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span className="hidden lg:inline">Search</span>
-              <kbd className="hidden sm:inline font-mono text-[11px] text-[var(--text-muted)]">
+              <kbd className="hidden md:inline font-mono text-[11px] text-[var(--text-muted)]">
                 ⌘K
               </kbd>
             </button>
@@ -147,7 +150,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               aria-label="Toggle color theme"
               onClick={toggleTheme}
-              className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors shrink-0"
+              className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] max-md:min-h-[44px] max-md:min-w-[44px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors shrink-0"
             >
               <Sun className="hidden dark:block w-4 h-4" aria-hidden="true" />
               <Moon className="block dark:hidden w-4 h-4" aria-hidden="true" />
@@ -157,25 +160,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               aria-label={`Open shopping cart (${summary.itemCount} items)`}
               onClick={openCart}
-              className="relative inline-flex items-center justify-center gap-1.5 min-h-[48px] min-w-[48px] px-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] transition-colors tabular-nums whitespace-nowrap shrink-0"
+              className="relative inline-flex items-center justify-center gap-1.5 max-md:gap-1 min-h-[48px] min-w-[48px] max-md:min-h-[44px] max-md:min-w-[44px] px-3 max-md:px-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] transition-colors tabular-nums whitespace-nowrap shrink-0"
             >
               <ShoppingBag className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{summary.itemCount}</span>
             </button>
 
             {!isAuthReady ? (
-              <div className="w-20 h-12 rounded-lg ed-skeleton shrink-0" />
+              <div className="w-20 h-12 max-md:w-14 max-md:h-11 rounded-lg ed-skeleton shrink-0" />
             ) : user ? (
-              <div className="relative" data-nosnippet="">
+              <div className="relative min-w-0" data-nosnippet="">
                 <button
                   type="button"
                   aria-label="Account menu"
                   aria-expanded={menuOpen}
                   onClick={() => setMenuOpen((prev) => !prev)}
-                  className="inline-flex items-center justify-center gap-2 min-h-[48px] px-3.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+                  className="inline-flex items-center justify-center gap-2 max-md:gap-1.5 min-h-[48px] max-md:min-h-[44px] px-3.5 max-md:px-2.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
                 >
                   <UserIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-[100px] truncate">
+                  <span className="max-w-[100px] max-md:max-w-[60px] truncate">
                     {user.displayName?.split(' ')[0] || 'Account'}
                   </span>
                 </button>
@@ -190,7 +193,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     />
                     <div
                       role="menu"
-                      className="absolute right-0 mt-2 z-40 w-60 rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2"
+                      className="absolute right-0 mt-2 z-40 w-60 max-md:w-[min(15rem,calc(100vw-1.5rem))] rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2"
                     >
                       <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
                         <p className="text-sm font-semibold text-[var(--text-main)] truncate">
@@ -257,7 +260,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 disabled={isSigningIn}
                 onClick={() => void signInWithGoogle()}
-                className="inline-flex items-center justify-center min-h-[48px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap shrink-0"
+                className="inline-flex items-center justify-center min-h-[48px] max-md:min-h-[44px] px-4 max-md:px-3 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap shrink-0"
               >
                 {isSigningIn ? 'Signing in...' : 'Sign In'}
               </button>
@@ -272,22 +275,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main Content Area */}
       <main
         id="main-content"
-        className={cn('flex-1', isAttemptRoute ? 'pb-6' : 'pb-20 md:pb-12')}
+        className={cn(
+          'flex-1 min-w-0',
+          isAttemptRoute ? 'pb-6' : 'pb-20 max-md:pb-8 md:pb-12'
+        )}
       >
         <ClientErrorBoundary>{children}</ClientErrorBoundary>
       </main>
 
       {/* Quiet Editorial Footer (suppressed on /attempt/* CBT workstation routes) */}
       {!isAttemptRoute && (
-        <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] py-8 pb-24 md:pb-8">
-          <div className="ed-container space-y-5 text-xs text-[var(--text-muted)]">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div>
+        <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] py-8 pb-24 max-md:py-6 max-md:pb-[calc(4.75rem+var(--safe-area-inset-bottom))] md:pb-8">
+          <div className="ed-container space-y-5 max-md:space-y-4 text-xs text-[var(--text-muted)]">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 max-md:gap-3">
+              <div className="min-w-0">
                 <p className="font-semibold text-[var(--text-main)]">
                   © {COPYRIGHT_YEAR} {BUSINESS_INFO.brandName} — Operated by{' '}
                   {BUSINESS_INFO.legalName}
                 </p>
-                <p className="mt-1">
+                <p className="mt-1 break-words">
                   {BUSINESS_INFO.officeAddress} ·{' '}
                   <a
                     href={`mailto:${BUSINESS_INFO.supportEmail}`}
@@ -297,17 +303,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </a>
                 </p>
               </div>
-              <nav aria-label="Catalog navigation" className="flex flex-wrap items-center gap-5">
-                <Link href="/books" prefetch={false} className="hover:text-[var(--text-main)] transition-colors">
+              <nav
+                aria-label="Catalog navigation"
+                className="flex flex-wrap items-center gap-5 max-md:gap-x-4 max-md:gap-y-0"
+              >
+                <Link
+                  href="/books"
+                  prefetch={false}
+                  className="max-md:min-h-[44px] max-md:inline-flex max-md:items-center hover:text-[var(--text-main)] transition-colors"
+                >
                   Books Catalog
                 </Link>
-                <Link href="/exams" prefetch={false} className="hover:text-[var(--text-main)] transition-colors">
+                <Link
+                  href="/exams"
+                  prefetch={false}
+                  className="max-md:min-h-[44px] max-md:inline-flex max-md:items-center hover:text-[var(--text-main)] transition-colors"
+                >
                   Exam Packs
                 </Link>
-                <Link href="/purchased" prefetch={false} className="hover:text-[var(--text-main)] transition-colors">
+                <Link
+                  href="/purchased"
+                  prefetch={false}
+                  className="max-md:min-h-[44px] max-md:inline-flex max-md:items-center hover:text-[var(--text-main)] transition-colors"
+                >
                   Study Library
                 </Link>
-                <a href="/sitemap.xml" className="hover:text-[var(--text-main)] transition-colors">
+                <a
+                  href="/sitemap.xml"
+                  className="max-md:min-h-[44px] max-md:inline-flex max-md:items-center hover:text-[var(--text-main)] transition-colors"
+                >
                   Sitemap
                 </a>
               </nav>
@@ -315,14 +339,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <nav
               aria-label="Legal and compliance policies"
-              className="pt-4 border-t border-[var(--border-subtle)] flex flex-wrap items-center gap-x-5 gap-y-2"
+              className="pt-4 max-md:pt-3 border-t border-[var(--border-subtle)] flex flex-wrap items-center gap-x-5 gap-y-2 max-md:gap-x-4 max-md:gap-y-0"
             >
               {LEGAL_PAGES.map((page) => (
                 <Link
                   key={page.href}
                   href={page.href}
                   prefetch={false}
-                  className="hover:text-[var(--text-main)] hover:underline underline-offset-4 transition-colors whitespace-nowrap"
+                  className="max-md:min-h-[44px] max-md:inline-flex max-md:items-center hover:text-[var(--text-main)] hover:underline underline-offset-4 transition-colors whitespace-nowrap"
                 >
                   {page.title}
                 </Link>
@@ -332,21 +356,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </footer>
       )}
 
-      {/* Mobile Safe-Area Bottom Tab Bar (Solid Matte, 5 tabs) */}
-      {!isDetailRoute && !isAttemptRoute && (
+      {/* Award-Winning Mobile Safe-Area Bottom Navigation Bar (All Major & Product Detail Pages) */}
+      {showMobileBottomNav && (
         <nav
           data-nosnippet=""
           aria-label="Mobile navigation"
-          className="md:hidden fixed bottom-0 inset-x-0 z-30 h-15 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] pb-[var(--safe-area-inset-bottom)]"
+          className="md:hidden fixed bottom-0 inset-x-0 z-30 ed-mobile-tabbar border-t border-[var(--border-subtle)]"
         >
-          <div className="grid grid-cols-5 h-full">
+          <div className="grid grid-cols-5 h-[3.75rem] items-center">
             {MOBILE_TABS.map((tab) => {
               const Icon = tab.icon;
-              const isExactPage = pathname === tab.href;
-              const isSectionMatch =
-                tab.href === '/'
-                  ? pathname === '/'
-                  : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              const { isExactPage, isActiveSection } = resolveMobileTabState(
+                pathname,
+                tab.href
+              );
               return (
                 <Link
                   key={tab.href}
@@ -354,14 +377,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   prefetch={false}
                   aria-current={isExactPage ? 'page' : undefined}
                   className={cn(
-                    'flex flex-col items-center justify-center gap-0.5 min-h-[48px] text-[11px] font-medium transition-colors chrome-no-select',
-                    isSectionMatch
-                      ? 'text-[var(--text-main)] font-semibold'
-                      : 'text-[var(--text-muted)]'
+                    'relative flex flex-col items-center justify-center gap-1 min-h-[48px] h-full min-w-0 px-1 rounded-xl transition-transform duration-150 active:scale-[0.95] chrome-no-select',
+                    isActiveSection
+                      ? 'text-[var(--text-main)]'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
                   )}
                 >
-                  <Icon className="w-4 h-4" aria-hidden="true" />
-                  <span>{tab.label}</span>
+                  <span
+                    className={cn(
+                      'w-12 h-7 rounded-full inline-flex items-center justify-center transition-colors duration-150',
+                      isActiveSection
+                        ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
+                        : 'bg-transparent text-current'
+                    )}
+                  >
+                    <Icon
+                      className={cn(
+                        'w-[18px] h-[18px] shrink-0',
+                        isActiveSection && 'stroke-[2.25]'
+                      )}
+                      aria-hidden="true"
+                    />
+                  </span>
+                  <span
+                    className={cn(
+                      'text-[10.5px] leading-none tracking-tight whitespace-nowrap truncate max-w-full',
+                      isActiveSection ? 'font-bold' : 'font-medium'
+                    )}
+                  >
+                    {tab.label}
+                  </span>
                 </Link>
               );
             })}

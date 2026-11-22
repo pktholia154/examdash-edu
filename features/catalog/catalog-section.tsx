@@ -101,9 +101,9 @@ export function CatalogSection({
   };
 
   return (
-    <section id={id} className="ed-container py-8 sm:py-10">
+    <section id={id} className="ed-container py-8 sm:py-10 max-md:py-5">
       {/* Section Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 border-b border-[var(--border-subtle)]">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 border-b border-[var(--border-subtle)] max-md:gap-2 max-md:pb-3.5">
         <div>
           <h2 className="text-[length:var(--text-h2)] font-extrabold tracking-tight text-[var(--text-main)]">
             {heading}{' '}
@@ -118,7 +118,7 @@ export function CatalogSection({
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <a
               href={viewAllHref}
-              className="text-sm font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0"
+              className="text-sm font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0 max-md:min-h-[44px] max-sm:-my-2 max-md:inline-flex max-md:items-center"
             >
               {viewAllLabel} →
             </a>
@@ -128,14 +128,14 @@ export function CatalogSection({
 
       {/* Button-Driven Filter & Sort Controls (Zero Crawlable Filter Query Links) */}
       {showFilters && items.length > 0 && (
-        <div className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-6">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-6 max-md:mt-3 max-md:pb-4 max-md:gap-2.5">
+          <div className="flex flex-wrap items-center gap-2 max-md:flex-nowrap ed-mobile-scroll-strip max-md:w-full max-md:pb-1">
             <button
               type="button"
               onClick={resetFilters}
               aria-pressed={!hasActiveFilters}
               className={cn(
-                'min-h-[48px] px-3.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
+                'min-h-[48px] max-md:min-h-[44px] px-3.5 max-md:px-3 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0',
                 !hasActiveFilters
                   ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
                   : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -153,7 +153,7 @@ export function CatalogSection({
                   setSelectedType((prev) => (prev === t ? 'ALL' : t))
                 }
                 className={cn(
-                  'min-h-[48px] px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[48px] max-md:min-h-[44px] px-3.5 max-md:px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   selectedType === t
                     ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] font-semibold'
                     : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -172,7 +172,7 @@ export function CatalogSection({
                   setSelectedLanguage((prev) => (prev === lang ? 'ALL' : lang))
                 }
                 className={cn(
-                  'min-h-[48px] px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[48px] max-md:min-h-[44px] px-3.5 max-md:px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   selectedLanguage === lang
                     ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] font-semibold'
                     : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -191,7 +191,7 @@ export function CatalogSection({
                   setSelectedTag((prev) => (prev === tag ? 'ALL' : tag))
                 }
                 className={cn(
-                  'min-h-[48px] px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[48px] max-md:min-h-[44px] px-3.5 max-md:px-3 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   selectedTag === tag
                     ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] font-semibold'
                     : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
@@ -205,7 +205,7 @@ export function CatalogSection({
               <button
                 type="button"
                 onClick={resetFilters}
-                className="inline-flex items-center gap-1 min-h-[48px] px-3 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1 min-h-[48px] max-md:min-h-[44px] px-3 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] whitespace-nowrap shrink-0"
               >
                 <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Reset</span>
@@ -217,10 +217,10 @@ export function CatalogSection({
           <div
             role="group"
             aria-label={`Sort ${heading}`}
-            className="inline-flex items-center gap-1 min-h-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 self-start lg:self-auto shrink-0"
+            className="inline-flex items-center gap-1 min-h-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-1 self-start lg:self-auto shrink-0 max-md:flex max-md:w-full max-md:max-w-full max-md:justify-between max-md:gap-1"
           >
             <ArrowUpDown
-              className="w-3.5 h-3.5 text-[var(--text-muted)] ml-2 mr-1 shrink-0"
+              className="w-3.5 h-3.5 text-[var(--text-muted)] ml-2 mr-1 shrink-0 max-md:hidden"
               aria-hidden="true"
             />
             {SORT_OPTIONS.map((opt) => (
@@ -230,7 +230,7 @@ export function CatalogSection({
                 aria-pressed={sortBy === opt.value}
                 onClick={() => setSortBy(opt.value)}
                 className={cn(
-                  'min-h-[40px] px-3 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                  'min-h-[40px] px-3 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 max-md:flex-auto max-md:min-w-0 max-md:min-h-[44px] max-md:px-2 max-md:text-[11.5px] max-md:text-center',
                   sortBy === opt.value
                     ? 'bg-[var(--bg-surface)] text-[var(--text-main)] font-semibold border border-[var(--border-subtle)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'

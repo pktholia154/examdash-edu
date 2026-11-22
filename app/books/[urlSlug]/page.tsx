@@ -126,7 +126,7 @@ export default async function BookDetailPage({
   const relatedExams = allExams.slice(0, 2);
 
   return (
-    <div className="ed-container pt-8 sm:pt-10 pb-24 lg:pb-10">
+    <div className="ed-container pt-8 sm:pt-10 max-md:pt-4 pb-24 max-md:pb-4 lg:pb-10">
       <script
         key={`book-jsonld-${book.id}`}
         type="application/ld+json"
@@ -142,27 +142,27 @@ export default async function BookDetailPage({
         ]}
       />
 
-      <article className="w-full">
+      <article className="w-full min-w-0">
         {/* Header Block: Side-by-Side Thumbnail (Left) + Metadata (Right) on All Screens */}
-        <div className="flex flex-row items-start gap-4 sm:gap-6 pb-6 border-b border-[var(--border-subtle)]">
+        <div className="flex flex-row items-start gap-4 sm:gap-6 max-md:gap-3.5 pb-6 max-md:pb-4 border-b border-[var(--border-subtle)]">
           <MonogramThumbnail
             title={book.title}
             type={book.type}
             collectionName="books"
             size="lg"
-            className="w-24 h-24 sm:w-32 sm:h-32 md:w-36 md:h-36 shrink-0"
+            className="w-24 h-24 max-md:w-20 max-md:h-20 sm:w-32 sm:h-32 md:w-36 md:h-36 shrink-0"
           />
 
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-[var(--text-muted)]">
+            <p className="text-xs font-medium text-[var(--text-muted)] break-words">
               {book.type} · {book.language} · Published by {book.publisher}
             </p>
-            <h1 className="mt-1.5 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance">
+            <h1 className="mt-1.5 max-md:mt-1 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
               {book.title}
             </h1>
 
             {book.seoDescription && (
-              <p className="mt-2.5 text-base text-[var(--text-muted)] leading-relaxed">
+              <p className="mt-2.5 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
                 {book.seoDescription}
               </p>
             )}
@@ -224,10 +224,10 @@ export default async function BookDetailPage({
         />
 
         {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
-        <section aria-labelledby="book-description-heading" className="mt-8">
+        <section aria-labelledby="book-description-heading" className="mt-8 max-md:mt-6">
           <h2
             id="book-description-heading"
-            className="text-lg font-bold text-[var(--text-main)] mb-3"
+            className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5"
           >
             About This Book & Coverage
           </h2>

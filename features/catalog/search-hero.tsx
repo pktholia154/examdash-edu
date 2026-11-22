@@ -36,7 +36,7 @@ export function HomeSearchBar({
       type="button"
       onClick={() => router.push('/search')}
       aria-label="Search books, question banks, and mock exam packs"
-      className="group w-full flex items-center justify-between gap-3 min-h-[56px] px-4 rounded-[var(--radius-card)] border-2 border-[var(--border-strong)] bg-[var(--bg-surface)] text-left text-sm text-[var(--text-muted)] hover:border-[var(--brand-primary)] focus-visible:border-[var(--brand-primary)] transition-colors"
+      className="group w-full flex items-center justify-between gap-3 min-h-[56px] px-4 rounded-[var(--radius-card)] border-2 border-[var(--border-strong)] bg-[var(--bg-surface)] text-left text-sm text-[var(--text-muted)] hover:border-[var(--brand-primary)] focus-visible:border-[var(--brand-primary)] transition-colors max-md:min-h-[50px] max-md:px-3.5"
     >
       <span className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
         <Search
@@ -72,7 +72,7 @@ export function HomeSearchBar({
             {examCount === 1 ? 'exam' : 'exams'}
           </span>
         )}
-        <kbd className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] font-mono text-xs text-[var(--text-muted)] shrink-0">
+        <kbd className="max-md:hidden px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] font-mono text-xs text-[var(--text-muted)] shrink-0">
           ⌘K
         </kbd>
       </span>

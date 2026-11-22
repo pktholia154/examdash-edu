@@ -57,19 +57,19 @@ export function CartDrawer() {
 
       {/* Slide-over Panel */}
       <aside className="relative z-10 flex flex-col w-full max-w-md h-[100dvh] bg-[var(--bg-surface)] border-l border-[var(--border-strong)]">
-        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--border-subtle)]">
-          <div className="flex items-center gap-2.5">
-            <ShoppingBag className="w-5 h-5 text-[var(--text-main)]" aria-hidden="true" />
-            <h2 className="text-base font-bold text-[var(--text-main)]">
+        <div className="flex items-center justify-between gap-4 px-6 py-4 max-md:px-4 max-md:pt-[max(0.875rem,var(--safe-area-inset-top))] max-md:pb-3.5 border-b border-[var(--border-subtle)]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <ShoppingBag className="w-5 h-5 text-[var(--text-main)] shrink-0" aria-hidden="true" />
+            <h2 className="text-base font-bold text-[var(--text-main)] truncate">
               Your Cart ({summary.itemCount})
             </h2>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {items.length > 0 && (
               <button
                 type="button"
                 onClick={clearCart}
-                className="min-h-[40px] px-2.5 rounded-md text-xs font-medium text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0"
+                className="min-h-[40px] max-md:min-h-[44px] px-2.5 rounded-md text-xs font-medium text-[var(--text-muted)] hover:text-[var(--status-danger)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0"
               >
                 Clear all
               </button>
@@ -86,7 +86,7 @@ export function CartDrawer() {
         </div>
 
         {/* Cart Items Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 py-5 max-md:px-4 max-md:py-4 space-y-4">
           {items.length === 0 ? (
             <div className="flex flex-col items-center justify-center text-center py-16">
               <div className="w-12 h-12 rounded-xl bg-[var(--bg-elevated)] flex items-center justify-center text-[var(--text-muted)] mb-4">
@@ -170,7 +170,7 @@ export function CartDrawer() {
 
         {/* Sticky Checkout Footer */}
         {items.length > 0 && (
-          <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-6 py-5 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] space-y-3">
+          <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-6 py-5 max-md:px-4 max-md:py-4 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] space-y-3">
             <div className="space-y-1.5 text-sm tabular-nums">
               <div className="flex items-center justify-between text-[var(--text-muted)]">
                 <span>List Total ({activeCurrency})</span>
