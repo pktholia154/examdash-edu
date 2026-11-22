@@ -54,6 +54,7 @@ export function middleware(req: NextRequest) {
   // 2. Private / Authenticated Routes: strict no-store + noindex
   if (
     pathname.startsWith('/purchased') ||
+    pathname.startsWith('/profile') ||
     pathname.startsWith('/read/') ||
     pathname.startsWith('/attempt/') ||
     pathname.startsWith('/api/')

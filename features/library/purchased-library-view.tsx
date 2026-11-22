@@ -983,8 +983,8 @@ export function PurchasedLibraryView({
                 className={cn(
                   'min-h-[44px] px-3 sm:px-3.5 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0',
                   filterTab === tab.id
-                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] shadow-xs'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] border border-[var(--border-subtle)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
                 )}
               >
                 {tab.label}

@@ -214,7 +214,7 @@ export async function commitVerifiedPurchasesToFirestore(
           'ExamDash Learner'
         ),
       },
-      preferredView: { stringValue: 'grid' },
+      preferredView: { stringValue: 'list' },
     };
     const safePhoto = sanitizeBoundedString(input.userPhotoUrl, 1024, '');
     if (safePhoto) {
@@ -640,7 +640,7 @@ export async function syncUserProfileInFirestore(params: {
     const profileFields: Record<string, unknown> = {
       uid: { stringValue: uid },
       displayName: { stringValue: displayName },
-      preferredView: { stringValue: 'grid' },
+      preferredView: { stringValue: 'list' },
     };
     if (safePhoto) {
       profileFields.photoURL = { stringValue: safePhoto };
@@ -698,7 +698,7 @@ export async function deleteUserProfileFromFirestore(
 ): Promise<void> {
   const { docPrefix, restBase } = getFirestoreDbResourceRoot();
 
-  const [reviewQueryRes, attemptsQueryRes] = await Promise.all([
+  const [reviewQueryRes, attemptsQueryRes, wishlistQueryRes] = await Promise.all([
     firestoreRestRequest<Array<{ document?: { name?: string } }>>({
       method: 'POST',
       path: `${restBase}:runQuery`,
@@ -749,6 +749,24 @@ export async function deleteUserProfileFromFirestore(
         },
       },
     }).catch(() => null),
+    firestoreRestRequest<Array<{ document?: { name?: string } }>>({
+      method: 'POST',
+      path: `${restBase}/users/${encodeURIComponent(userId)}:runQuery`,
+      bearerIdToken,
+      body: {
+        structuredQuery: {
+          from: [{ collectionId: 'wishlist' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'userId' },
+              op: 'EQUAL',
+              value: { stringValue: userId },
+            },
+          },
+          limit: 200,
+        },
+      },
+    }).catch(() => null),
   ]);
 
   const childDeletes: Array<{ delete: string }> = [];
@@ -761,6 +779,13 @@ export async function deleteUserProfileFromFirestore(
   }
   if (attemptsQueryRes && Array.isArray(attemptsQueryRes.data)) {
     for (const row of attemptsQueryRes.data) {
+      if (row?.document?.name) {
+        childDeletes.push({ delete: row.document.name });
+      }
+    }
+  }
+  if (wishlistQueryRes && Array.isArray(wishlistQueryRes.data)) {
+    for (const row of wishlistQueryRes.data) {
       if (row?.document?.name) {
         childDeletes.push({ delete: row.document.name });
       }

@@ -146,7 +146,7 @@ export function CalculatorPopover({
         });
       }}
       onPointerUp={() => setDragging(null)}
-      className="fixed right-4 top-16 z-50 w-[312px] sm:w-[340px] rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-2xl chrome-no-select"
+      className="fixed right-4 top-16 z-50 w-[312px] sm:w-[340px] rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] chrome-no-select"
     >
       {/* Draggable Header */}
       <div

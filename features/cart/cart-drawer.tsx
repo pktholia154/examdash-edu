@@ -52,11 +52,11 @@ export function CartDrawer() {
         type="button"
         aria-label="Close cart drawer"
         onClick={closeCart}
-        className="fixed inset-0 h-[100lvh] bg-slate-950/45 backdrop-blur-[2px] transition-opacity"
+        className="fixed inset-0 h-[100lvh] bg-black/45 transition-opacity"
       />
 
       {/* Slide-over Panel */}
-      <aside className="relative z-10 flex flex-col w-full max-w-md h-[100dvh] bg-[var(--bg-surface)] border-l border-[var(--border-subtle)] shadow-[var(--shadow-drawer)]">
+      <aside className="relative z-10 flex flex-col w-full max-w-md h-[100dvh] bg-[var(--bg-surface)] border-l border-[var(--border-strong)]">
         <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-2.5">
             <ShoppingBag className="w-5 h-5 text-[var(--text-main)]" aria-hidden="true" />

@@ -72,3 +72,11 @@ test('Dirty Dozen: UserExamAttempt rules enforce owner isolation, bounded teleme
     /affectedKeys\(\)\.hasOnly\(\[\s*'perceivedDifficulty',\s*'pacingFeedback',\s*'reflectionNote',\s*'updatedAt'\s*\]\)/
   );
 });
+
+test('Dirty Dozen: UserWishlistItem rules enforce owner isolation, strict key allowlist, server timestamps, and immutable create/delete lifecycle', () => {
+  const rules = readRules();
+  assert.match(rules, /match\s+\/wishlist\/\{wishlistKey\}/);
+  assert.match(rules, /isValidUserWishlistItem\(incoming\(\),\s*wishlistKey\)/);
+  assert.match(rules, /data\.wishlistKey\s*==\s*wishlistKey/);
+  assert.match(rules, /allow\s+update:\s*if\s+false;/);
+});

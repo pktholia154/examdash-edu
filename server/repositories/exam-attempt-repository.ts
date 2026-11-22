@@ -897,7 +897,7 @@ export async function commitExamAttemptToFirestore(params: {
           'ExamDash Learner'
         ),
       },
-      preferredView: { stringValue: 'grid' },
+      preferredView: { stringValue: 'list' },
     };
     const safePhoto = sanitizeBoundedString(params.userPhotoUrl, 1024, '');
     if (safePhoto) {

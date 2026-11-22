@@ -232,8 +232,8 @@ export function CatalogSection({
                 className={cn(
                   'min-h-[40px] px-3 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                   sortBy === opt.value
-                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] font-semibold shadow-xs'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                    ? 'bg-[var(--bg-surface)] text-[var(--text-main)] font-semibold border border-[var(--border-subtle)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
                 )}
               >
                 {opt.label}
@@ -243,7 +243,7 @@ export function CatalogSection({
         </div>
       )}
 
-      {/* Catalog Items or Empty State (Grid View Default) */}
+      {/* Catalog Items or Empty State (List View Default) */}
       {items.length === 0 ? (
         <div className="mt-6">
           <EmptyState
@@ -259,12 +259,12 @@ export function CatalogSection({
           onAction={resetFilters}
         />
       ) : (
-        <div className={cn('ed-catalog-grid', !showFilters && 'mt-6')}>
+        <div className={cn('flex flex-col gap-3', !showFilters && 'mt-6')}>
           {filteredAndSorted.map((item) => (
             <CatalogCard
               key={`${item.collectionName}:${item.id}`}
               item={item}
-              viewMode="grid"
+              viewMode="list"
             />
           ))}
         </div>

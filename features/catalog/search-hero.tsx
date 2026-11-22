@@ -1,8 +1,16 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Search } from 'lucide-react';
-import { useSearchModal } from '../search/command-search-modal';
+
+const ANIMATED_SEARCH_PROMPTS = [
+  'Search ebooks, chapter notes, or study guides...',
+  'Search full-length mock exam series & CBT packs...',
+  'Search by subject, author, language, or #tag...',
+  'Search question banks & solved practice sets...',
+];
 
 export function HomeSearchBar({
   bookCount,
@@ -11,22 +19,49 @@ export function HomeSearchBar({
   bookCount: number;
   examCount: number;
 }) {
-  const { openSearch } = useSearchModal();
+  const router = useRouter();
+  const shouldReduceMotion = useReducedMotion();
+  const [promptIdx, setPromptIdx] = useState(0);
+
+  useEffect(() => {
+    if (shouldReduceMotion) return;
+    const timer = window.setInterval(() => {
+      setPromptIdx((prev) => (prev + 1) % ANIMATED_SEARCH_PROMPTS.length);
+    }, 3200);
+    return () => window.clearInterval(timer);
+  }, [shouldReduceMotion]);
 
   return (
     <button
       type="button"
-      onClick={() => openSearch()}
+      onClick={() => router.push('/search')}
       aria-label="Search books, question banks, and mock exam packs"
-      className="w-full flex items-center justify-between gap-3 min-h-[52px] px-4 rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] text-left text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)] hover:border-[var(--brand-primary)] transition-colors"
+      className="group w-full flex items-center justify-between gap-3 min-h-[56px] px-4 rounded-[var(--radius-card)] border-2 border-[var(--border-strong)] bg-[var(--bg-surface)] text-left text-sm text-[var(--text-muted)] hover:border-[var(--brand-primary)] focus-visible:border-[var(--brand-primary)] transition-colors"
     >
-      <span className="flex items-center gap-3 min-w-0">
+      <span className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
         <Search
           className="w-4 h-4 text-[var(--text-main)] shrink-0"
           aria-hidden="true"
         />
-        <span className="truncate">
-          Search books, question banks, mock exam packs, or authors...
+        <span className="relative flex-1 h-5 overflow-hidden">
+          {shouldReduceMotion ? (
+            <span className="block truncate text-[var(--text-muted)]">
+              {ANIMATED_SEARCH_PROMPTS[0]}
+            </span>
+          ) : (
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={promptIdx}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                className="block truncate text-[var(--text-muted)] group-hover:text-[var(--text-main)] transition-colors"
+              >
+                {ANIMATED_SEARCH_PROMPTS[promptIdx]}
+              </motion.span>
+            </AnimatePresence>
+          )}
         </span>
       </span>
 

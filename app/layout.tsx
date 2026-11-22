@@ -37,8 +37,8 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
   interactiveWidget: 'resizes-content',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F8FAFC' },
-    { media: '(prefers-color-scheme: dark)', color: '#0B1120' },
+    { media: '(prefers-color-scheme: light)', color: '#F3F3EF' },
+    { media: '(prefers-color-scheme: dark)', color: '#141514' },
   ],
 };
 
@@ -116,6 +116,8 @@ const SPECULATION_RULES_JSON = JSON.stringify({
           { href_matches: '/*' },
           { not: { href_matches: '/api/*' } },
           { not: { href_matches: '/purchased*' } },
+          { not: { href_matches: '/profile*' } },
+          { not: { href_matches: '/search*' } },
           { not: { href_matches: '/read/*' } },
           { not: { href_matches: '/attempt/*' } },
           { not: { selector_matches: '[target="_blank"]' } },

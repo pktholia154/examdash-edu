@@ -11,8 +11,8 @@ import { syncNativeSystemBars } from '../../lib/platform/capacitor-bridge';
 
 export type ThemeMode = 'light' | 'dark';
 
-export const DARK_THEME_HEX = '#0B1120';
-export const LIGHT_THEME_HEX = '#F8FAFC';
+export const DARK_THEME_HEX = '#141514';
+export const LIGHT_THEME_HEX = '#F3F3EF';
 
 interface ThemeContextValue {
   theme: ThemeMode;

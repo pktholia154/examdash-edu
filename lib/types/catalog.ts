@@ -206,3 +206,20 @@ export interface UserPurchaseRecord {
   status: 'completed';
   createdAtIso: string;
 }
+
+export interface WishlistItem {
+  compositeKey: string; // `${collectionName}:${id}`
+  wishlistKey: string; // `${collectionName}__${id}`
+  id: string;
+  collectionName: CollectionName;
+  urlSlug: string;
+  title: string;
+  authorName: string;
+  language: string;
+  type: string;
+  currency: string;
+  listPrice: number;
+  buyPrice: number;
+  totalMocktest?: number;
+  createdAtIso: string;
+}

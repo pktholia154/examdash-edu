@@ -157,14 +157,14 @@ export default async function ExamDetailPage({
       />
 
       <article className="w-full">
-        {/* Header Block (UI stays 100% zero-KB CSS/SVG MonogramThumbnail) */}
-        <div className="flex flex-col sm:flex-row items-start gap-5 pb-6 border-b border-[var(--border-subtle)]">
+        {/* Header Block: Side-by-Side Thumbnail (Left) + Metadata (Right) on All Screens */}
+        <div className="flex flex-row items-start gap-4 sm:gap-6 pb-6 border-b border-[var(--border-subtle)]">
           <MonogramThumbnail
             title={exam.title}
             type={exam.type}
             collectionName="ExamPackDocument"
             size="lg"
-            className="w-28 h-28 sm:w-32 sm:h-32 shrink-0"
+            className="w-24 h-24 sm:w-32 sm:h-32 md:w-36 md:h-36 shrink-0"
           />
 
           <div className="min-w-0 flex-1">
@@ -217,7 +217,7 @@ export default async function ExamDetailPage({
                     className="inline-flex items-center gap-1 font-semibold text-[var(--text-main)] hover:underline underline-offset-4"
                   >
                     <Star
-                      className="w-3.5 h-3.5 fill-amber-400 text-amber-500 shrink-0"
+                      className="w-3.5 h-3.5 fill-[var(--status-warning)] text-[var(--status-warning)] shrink-0"
                       aria-hidden="true"
                     />
                     <span>{reviewSummary.averageRating.toFixed(1)}</span>
@@ -244,6 +244,10 @@ export default async function ExamDetailPage({
           collectionName="ExamPackDocument"
           title={exam.title}
           urlSlug={exam.urlSlug}
+          type={exam.type}
+          authorName={exam.authorName}
+          language={exam.language}
+          totalMocktest={exam.totalMocktest}
           currency={exam.currency}
           buyPrice={exam.buyPrice}
           listPrice={exam.listPrice}
@@ -298,12 +302,12 @@ export default async function ExamDetailPage({
             >
               Companion Study Books & Related Series
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col gap-2.5">
               {companionBooks.map((b) => (
                 <a
                   key={`comp-book-${b.id}`}
                   href={`/books/${b.urlSlug}`}
-                  className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-transparent p-3.5 hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]/50 transition-colors"
+                  className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
                 >
                   <MonogramThumbnail
                     title={b.title}
@@ -331,7 +335,7 @@ export default async function ExamDetailPage({
                 <a
                   key={`sib-exam-${ex.id}`}
                   href={`/exams/${ex.urlSlug}`}
-                  className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-transparent p-3.5 hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]/50 transition-colors"
+                  className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
                 >
                   <MonogramThumbnail
                     title={ex.title}

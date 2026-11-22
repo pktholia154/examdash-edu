@@ -37,6 +37,7 @@ const NAV_LINKS = [
   { label: 'Books', href: '/books' },
   { label: 'Exams', href: '/exams' },
   { label: 'Purchased', href: '/purchased' },
+  { label: 'Profile', href: '/profile' },
 ];
 
 const MOBILE_TABS = [
@@ -44,6 +45,7 @@ const MOBILE_TABS = [
   { label: 'Books', href: '/books', icon: BookOpen },
   { label: 'Exams', href: '/exams', icon: ClipboardCheck },
   { label: 'Library', href: '/purchased', icon: Library },
+  { label: 'Profile', href: '/profile', icon: UserIcon },
 ];
 
 const COPYRIGHT_YEAR = BUSINESS_INFO.effectiveDateIso.slice(0, 4) || '2026';
@@ -73,8 +75,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-[100svh] flex flex-col bg-[var(--bg-canvas)] text-[var(--text-main)]">
-      {/* Sticky Top Navigation Bar (60px mobile / 64px desktop; 48px touch targets) */}
-      <header className="sticky top-0 z-40 h-15 md:h-16 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-md">
+      {/* Sticky Top Navigation Bar (Solid Matte, Zero Blur, 48px touch targets) */}
+      <header className="sticky top-0 z-40 h-15 md:h-16 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]">
         <div className="ed-container h-full flex items-center justify-between gap-4 sm:gap-8">
           {/* Zone 1: Single-line Brand Logo & Wordmark */}
           <Link
@@ -188,7 +190,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     />
                     <div
                       role="menu"
-                      className="absolute right-0 mt-2 z-40 w-60 rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2 shadow-lg"
+                      className="absolute right-0 mt-2 z-40 w-60 rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2"
                     >
                       <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
                         <p className="text-sm font-semibold text-[var(--text-main)] truncate">
@@ -200,11 +202,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       </div>
 
                       <Link
-                        href="/purchased"
+                        href="/profile"
                         prefetch={false}
                         role="menuitem"
                         onClick={() => setMenuOpen(false)}
                         className="mt-1 flex items-center gap-2.5 min-h-[48px] px-3 rounded-lg text-sm text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
+                      >
+                        <UserIcon className="w-4 h-4 text-[var(--text-muted)]" aria-hidden="true" />
+                        <span>Profile &amp; Wishlist</span>
+                      </Link>
+
+                      <Link
+                        href="/purchased"
+                        prefetch={false}
+                        role="menuitem"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2.5 min-h-[48px] px-3 rounded-lg text-sm text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
                       >
                         <Library className="w-4 h-4 text-[var(--text-muted)]" aria-hidden="true" />
                         <span>Purchased Library</span>
@@ -319,14 +332,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </footer>
       )}
 
-      {/* Mobile Safe-Area Bottom Tab Bar (60px, suppressed on detail and CBT routes) */}
+      {/* Mobile Safe-Area Bottom Tab Bar (Solid Matte, 5 tabs) */}
       {!isDetailRoute && !isAttemptRoute && (
         <nav
           data-nosnippet=""
           aria-label="Mobile navigation"
-          className="md:hidden fixed bottom-0 inset-x-0 z-30 h-15 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-md pb-[var(--safe-area-inset-bottom)]"
+          className="md:hidden fixed bottom-0 inset-x-0 z-30 h-15 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] pb-[var(--safe-area-inset-bottom)]"
         >
-          <div className="grid grid-cols-4 h-full">
+          <div className="grid grid-cols-5 h-full">
             {MOBILE_TABS.map((tab) => {
               const Icon = tab.icon;
               const isExactPage = pathname === tab.href;
@@ -372,9 +385,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             aria-label="Cancel account deletion"
             onClick={() => setConfirmDeleteOpen(false)}
-            className="fixed inset-0 h-[100lvh] bg-slate-950/50 backdrop-blur-[2px]"
+            className="fixed inset-0 h-[100lvh] bg-black/50"
           />
-          <div className="relative z-10 w-full max-w-md rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-6 shadow-xl">
+          <div className="relative z-10 w-full max-w-md rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-6">
             <h2 className="text-base font-bold text-[var(--text-main)]">
               Delete your ExamDash account?
             </h2>

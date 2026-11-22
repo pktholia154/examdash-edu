@@ -1919,7 +1919,7 @@ export function ExamRunnerShell({
             onClick={() => setMobilePaletteOpen(false)}
             className="fixed inset-0 bg-slate-950/55"
           />
-          <div className="relative z-10 w-[310px] max-w-[88vw] h-[100dvh] flex flex-col bg-[var(--bg-surface)] border-s border-[var(--border-strong)] shadow-2xl">
+          <div className="relative z-10 w-[310px] max-w-[88vw] h-[100dvh] flex flex-col bg-[var(--bg-surface)] border-s border-[var(--border-strong)]">
             <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-[var(--border-subtle)]">
               <span className="text-xs font-bold text-[var(--text-main)]">
                 Question Palette
@@ -1977,7 +1977,7 @@ export function ExamRunnerShell({
             onClick={() => setShortcutsOpen(false)}
             className="fixed inset-0 bg-slate-950/50"
           />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 shadow-xl space-y-3 text-xs">
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 space-y-3 text-xs">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold text-[var(--text-main)]">
                 CBT Keyboard Shortcuts
@@ -2025,9 +2025,9 @@ export function ExamRunnerShell({
             type="button"
             aria-label="Cancel submission"
             onClick={() => setSubmitModalOpen(false)}
-            className="fixed inset-0 bg-slate-950/60 backdrop-blur-[2px]"
+            className="fixed inset-0 bg-black/55"
           />
-          <div className="relative z-10 w-full max-w-xl rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 sm:p-6 shadow-2xl space-y-5 tabular-nums">
+          <div className="relative z-10 w-full max-w-xl rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 sm:p-6 space-y-5 tabular-nums">
             <div>
               <h2 className="text-lg font-extrabold text-[var(--text-main)]">
                 Submit Exam &amp; View Official Score?

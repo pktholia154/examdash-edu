@@ -966,7 +966,7 @@ export function MarkdownViewer({
         {tocOpen && (
           <div
             data-nosnippet=""
-            className="absolute inset-0 z-30 flex bg-black/45 backdrop-blur-xs"
+            className="absolute inset-0 z-30 flex bg-black/50"
             onClick={() => setTocOpen(false)}
           >
             <aside

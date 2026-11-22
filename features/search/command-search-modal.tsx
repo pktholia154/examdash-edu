@@ -5,14 +5,10 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useState,
 } from 'react';
-import dynamic from 'next/dynamic';
+import { usePathname, useRouter } from 'next/navigation';
 
-const LazyCommandSearchDialog = dynamic(
-  () => import('./command-search-dialog').then((m) => m.CommandSearchDialog),
-  { ssr: false }
-);
+export const FOCUS_SEARCH_EVENT = 'ed-focus-search';
 
 interface SearchModalContextValue {
   isOpen: boolean;
@@ -26,42 +22,55 @@ const SearchModalContext = createContext<SearchModalContextValue>({
   closeSearch: () => {},
 });
 
+/**
+ * Full-width page navigation controller for Search (/search) and global Cmd/Ctrl+K shortcut.
+ */
 export function SearchModalProvider({ children }: { children: React.ReactNode }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [initialQuery, setInitialQuery] = useState('');
+  const router = useRouter();
+  const pathname = usePathname() || '/';
+  const isOnSearchPage = pathname === '/search';
 
-  const openSearch = useCallback((query: string = '') => {
-    setInitialQuery(query);
-    setIsOpen(true);
-  }, []);
+  const openSearch = useCallback(
+    (query: string = '') => {
+      const trimmed = query.trim();
+      const target = trimmed
+        ? `/search?q=${encodeURIComponent(trimmed)}`
+        : '/search';
+
+      if (pathname === '/search' && !trimmed) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event(FOCUS_SEARCH_EVENT));
+        }
+        return;
+      }
+
+      router.push(target);
+    },
+    [pathname, router]
+  );
 
   const closeSearch = useCallback(() => {
-    setIsOpen(false);
-  }, []);
+    if (pathname === '/search') {
+      router.back();
+    }
+  }, [pathname, router]);
 
   useEffect(() => {
     const handleGlobalKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setIsOpen((prev) => !prev);
-      } else if (e.key === 'Escape' && isOpen) {
-        e.preventDefault();
-        setIsOpen(false);
+        openSearch();
       }
     };
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
-  }, [isOpen]);
+  }, [openSearch]);
 
   return (
-    <SearchModalContext.Provider value={{ isOpen, openSearch, closeSearch }}>
+    <SearchModalContext.Provider
+      value={{ isOpen: isOnSearchPage, openSearch, closeSearch }}
+    >
       {children}
-      {isOpen && (
-        <LazyCommandSearchDialog
-          initialQuery={initialQuery}
-          onClose={closeSearch}
-        />
-      )}
     </SearchModalContext.Provider>
   );
 }

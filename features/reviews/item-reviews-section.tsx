@@ -72,7 +72,7 @@ function StarRow({
             className={cn(
               sizeClass,
               filled
-                ? 'fill-amber-400 text-amber-500 dark:fill-amber-400 dark:text-amber-400'
+                ? 'fill-[var(--status-warning)] text-[var(--status-warning)]'
                 : 'fill-transparent text-[var(--border-strong)]'
             )}
           />
@@ -391,7 +391,7 @@ export function ItemReviewsSection({
                       <span className="w-8 text-left shrink-0">{star} star</span>
                       <span className="flex-1 h-2 rounded-sm bg-[var(--bg-elevated)] overflow-hidden">
                         <span
-                          className="block h-full bg-amber-400 transition-transform duration-150 origin-left"
+                          className="block h-full bg-[var(--status-warning)] transition-transform duration-150 origin-left"
                           style={{ transform: `scaleX(${pct / 100})` }}
                         />
                       </span>
@@ -551,7 +551,7 @@ export function ItemReviewsSection({
                           className={cn(
                             'w-6 h-6 transition-transform',
                             active
-                              ? 'fill-amber-400 text-amber-500 dark:fill-amber-400 dark:text-amber-400 scale-105'
+                              ? 'fill-[var(--status-warning)] text-[var(--status-warning)] scale-105'
                               : 'fill-transparent text-[var(--border-strong)]'
                           )}
                         />

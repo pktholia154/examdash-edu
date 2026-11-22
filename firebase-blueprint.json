@@ -182,6 +182,40 @@
         "updatedAt"
       ]
     },
+    "UserWishlistItem": {
+      "title": "UserWishlistItem",
+      "description": "Authenticated user saved wishlist item for a Book or ExamPack.",
+      "type": "object",
+      "properties": {
+        "wishlistKey": { "type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "collectionName": { "type": "string", "enum": ["books", "ExamPackDocument"], "maxLength": 32 },
+        "urlSlug": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "authorName": { "type": "string", "maxLength": 160 },
+        "language": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
+        "listPrice": { "type": "number" },
+        "buyPrice": { "type": "number" },
+        "totalMocktest": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "wishlistKey",
+        "userId",
+        "itemId",
+        "collectionName",
+        "urlSlug",
+        "title",
+        "type",
+        "currency",
+        "listPrice",
+        "buyPrice",
+        "createdAt"
+      ]
+    },
     "ItemReview": {
       "title": "ItemReview",
       "description": "Public non-PII learner rating and review for a published Book or ExamPack.",
@@ -325,6 +359,10 @@
     "/users/{userId}/cart/{cartKey}": {
       "schema": { "$ref": "#/entities/UserCartItem" },
       "description": "Owner-scoped active shopping cart items."
+    },
+    "/users/{userId}/wishlist/{wishlistKey}": {
+      "schema": { "$ref": "#/entities/UserWishlistItem" },
+      "description": "Owner-scoped saved wishlist books and exam packs."
     },
     "/users/{userId}/examAttempts/{attemptId}": {
       "schema": { "$ref": "#/entities/UserExamAttempt" },

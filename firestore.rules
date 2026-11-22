@@ -253,6 +253,76 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidUserWishlistItem(data, wishlistKey) {
+      return data.keys().hasAll([
+          'wishlistKey',
+          'userId',
+          'itemId',
+          'collectionName',
+          'urlSlug',
+          'title',
+          'type',
+          'currency',
+          'listPrice',
+          'buyPrice',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'wishlistKey',
+          'userId',
+          'itemId',
+          'collectionName',
+          'urlSlug',
+          'title',
+          'authorName',
+          'language',
+          'type',
+          'currency',
+          'listPrice',
+          'buyPrice',
+          'totalMocktest',
+          'createdAt'
+        ])
+        && data.wishlistKey is string
+        && data.wishlistKey.size() >= 3
+        && data.wishlistKey.size() <= 128
+        && data.wishlistKey.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.wishlistKey == wishlistKey
+        && data.userId is string
+        && data.userId.size() >= 1
+        && data.userId.size() <= 128
+        && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userId == request.auth.uid
+        && data.itemId is string
+        && data.itemId.size() >= 1
+        && data.itemId.size() <= 128
+        && data.itemId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.collectionName is string
+        && data.collectionName.size() <= 32
+        && (data.collectionName == 'books' || data.collectionName == 'ExamPackDocument')
+        && data.urlSlug is string
+        && data.urlSlug.size() >= 1
+        && data.urlSlug.size() <= 200
+        && data.urlSlug.matches('^[a-z0-9\\-]+$')
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 300
+        && (!('authorName' in data) || (data.authorName is string && data.authorName.size() <= 160))
+        && (!('language' in data) || (data.language is string && data.language.size() <= 64))
+        && data.type is string
+        && data.type.size() >= 1
+        && data.type.size() <= 64
+        && data.currency is string
+        && data.currency.size() == 3
+        && data.currency.matches('^[A-Z]{3}$')
+        && (data.listPrice is int || data.listPrice is float)
+        && data.listPrice >= 0
+        && (data.buyPrice is int || data.buyPrice is float)
+        && data.buyPrice >= 0
+        && (!('totalMocktest' in data) || (data.totalMocktest is int && data.totalMocktest >= 0))
+        && data.createdAt is timestamp;
+    }
+
     function isValidItemReview(data, reviewId) {
       return data.keys().hasAll([
           'reviewId',
@@ -769,6 +839,33 @@ service cloud.firestore {
         allow delete: if isVerifiedOwner(userId)
           && isValidId(userId)
           && isValidId(cartKey);
+      }
+
+      // Saved Wishlist Items Sync
+      match /wishlist/{wishlistKey} {
+        allow get: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(wishlistKey)
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isSignedIn()
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid;
+
+        allow create: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(wishlistKey)
+          && isValidUserWishlistItem(incoming(), wishlistKey)
+          && incoming().createdAt == request.time
+          && hasParentUser(userId);
+
+        allow update: if false;
+
+        allow delete: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(wishlistKey);
       }
 
       // Historical Exam Set Attempts, Telemetry, Solution Review Outcomes & Learner Feedback

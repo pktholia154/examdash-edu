@@ -643,9 +643,9 @@ export function PWAInstallProvider({ children }: { children: React.ReactNode }) 
             type="button"
             aria-label="Close install instructions"
             onClick={() => setActiveSheet(null)}
-            className="fixed inset-0 h-[100lvh] bg-slate-950/55 backdrop-blur-[2px]"
+            className="fixed inset-0 h-[100lvh] bg-black/50"
           />
-          <div className="relative z-10 w-full sm:max-w-md rounded-t-2xl sm:rounded-[var(--radius-card)] border-t sm:border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] sm:p-6 shadow-2xl">
+          <div className="relative z-10 w-full sm:max-w-md rounded-t-2xl sm:rounded-[var(--radius-card)] border-t sm:border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] sm:p-6">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <Image
@@ -756,9 +756,9 @@ export function PWAInstallProvider({ children }: { children: React.ReactNode }) 
             type="button"
             aria-label="Close Dock instructions"
             onClick={() => setActiveSheet(null)}
-            className="fixed inset-0 h-[100lvh] bg-slate-950/55 backdrop-blur-[2px]"
+            className="fixed inset-0 h-[100lvh] bg-black/50"
           />
-          <div className="relative z-10 w-full max-w-md rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-6 shadow-2xl">
+          <div className="relative z-10 w-full max-w-md rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-6">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <Image
@@ -850,9 +850,9 @@ export function PWAInstallProvider({ children }: { children: React.ReactNode }) 
             type="button"
             aria-label="Close browser instructions"
             onClick={() => setActiveSheet(null)}
-            className="fixed inset-0 h-[100lvh] bg-slate-950/55 backdrop-blur-[2px]"
+            className="fixed inset-0 h-[100lvh] bg-black/50"
           />
-          <div className="relative z-10 w-full sm:max-w-md rounded-t-2xl sm:rounded-[var(--radius-card)] border-t sm:border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] sm:p-6 shadow-2xl">
+          <div className="relative z-10 w-full sm:max-w-md rounded-t-2xl sm:rounded-[var(--radius-card)] border-t sm:border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] sm:p-6">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <Image
@@ -954,9 +954,9 @@ export function PWAInstallProvider({ children }: { children: React.ReactNode }) 
             type="button"
             aria-label="Close install dialog"
             onClick={() => setActiveSheet(null)}
-            className="fixed inset-0 h-[100lvh] bg-slate-950/55 backdrop-blur-[2px]"
+            className="fixed inset-0 h-[100lvh] bg-black/50"
           />
-          <div className="relative z-10 w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-6 shadow-2xl">
+          <div className="relative z-10 w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-6">
             <div className="flex items-center gap-3">
               <Image
                 src="/assets/aistudio/exam-dash_logo_ef0c6c39.png"
