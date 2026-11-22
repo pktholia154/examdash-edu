@@ -28,8 +28,10 @@ import {
 } from 'lucide-react';
 import type { PublicExamDTO } from '../../lib/types/catalog';
 import type {
+  AttemptFeedbackPatch,
   ExamSection,
   ExamSet,
+  HistoricalExamAttemptRecord,
   PersistedExamSession,
   QuestionTelemetry,
 } from '../../lib/exam/types';
@@ -42,11 +44,15 @@ import {
 import {
   cacheExamPackOffline,
   clearExamSessionSync,
+  EXAM_ATTEMPTS_UPDATED_EVENT,
+  fetchAndMergeCloudExamAttempts,
   flushOfflineAttemptQueue,
+  getHistoricalAttemptsForSetSync,
   loadExamSessionSync,
   readCachedExamPackOffline,
-  recordCompletedAttemptSync,
+  recordHistoricalAttemptSync,
   saveExamSessionSync,
+  saveHistoricalAttemptFeedback,
 } from '../../lib/exam/storage';
 import { fetchClientStorageBytes } from '../../lib/firebase/storage-client';
 import {
@@ -120,12 +126,16 @@ export function ExamRunnerShell({
   initialMode,
   initialSource = 'online',
   autostart = false,
+  initialView,
+  initialAttemptId,
 }: {
   exam: PublicExamDTO;
   initialSetId?: string;
   initialMode: 'trial' | 'full';
   initialSource?: 'online' | 'offline';
   autostart?: boolean;
+  initialView?: 'review';
+  initialAttemptId?: string;
 }) {
   const {
     user,
@@ -163,9 +173,20 @@ export function ExamRunnerShell({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [offlineReady, setOfflineReady] = useState<boolean>(false);
 
-  const [stage, setStage] = useState<RunnerStage>('lobby');
+  const [stage, setStage] = useState<RunnerStage>(
+    initialView === 'review' ? 'review' : 'lobby'
+  );
   const [session, setSession] = useState<PersistedExamSession | null>(null);
   const [nowEpochMs, setNowEpochMs] = useState<number>(() => Date.now());
+  const [attemptsHistory, setAttemptsHistory] = useState<
+    HistoricalExamAttemptRecord[]
+  >([]);
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(
+    initialAttemptId || null
+  );
+  const [cloudHistoryLoading, setCloudHistoryLoading] = useState<boolean>(
+    initialView === 'review'
+  );
 
   const [calcOpen, setCalcOpen] = useState<boolean>(false);
   const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
@@ -175,6 +196,7 @@ export function ExamRunnerShell({
   const sessionRef = useRef<PersistedExamSession | null>(null);
   const questionEnteredAtRef = useRef<number>(0);
   const autostartConsumedRef = useRef<boolean>(false);
+  const initialReviewConsumedRef = useRef<boolean>(false);
   const selectedSetIdRef = useRef<string>(selectedSetId);
   const mocktestTitlesRef = useRef(exam.MocktestTitles);
 
@@ -190,16 +212,82 @@ export function ExamRunnerShell({
     sessionRef.current = session;
   }, [session]);
 
-  // Flush any queued offline attempt summaries when network is online
+  // Keep local/cloud historical attempts for the active set synchronized
   useEffect(() => {
-    const syncQueue = async () => {
-      const token = user ? await getIdToken() : null;
-      await flushOfflineAttemptQueue(token, user?.uid);
+    const syncLocalAttempts = () => {
+      const list = getHistoricalAttemptsForSetSync({
+        examSlug: exam.urlSlug,
+        setId: selectedSetId,
+        uid: user?.uid,
+        packId: exam.id,
+      });
+      setAttemptsHistory(list);
     };
-    void syncQueue();
-    window.addEventListener('online', syncQueue);
-    return () => window.removeEventListener('online', syncQueue);
-  }, [getIdToken, user]);
+    syncLocalAttempts();
+    window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, syncLocalAttempts);
+    window.addEventListener('storage', syncLocalAttempts);
+    return () => {
+      window.removeEventListener(
+        EXAM_ATTEMPTS_UPDATED_EVENT,
+        syncLocalAttempts
+      );
+      window.removeEventListener('storage', syncLocalAttempts);
+    };
+  }, [exam.id, exam.urlSlug, selectedSetId, user?.uid]);
+
+  // Flush queued offline attempts & hydrate historical attempts from Firebase Firestore
+  useEffect(() => {
+    if (!isAuthReady) return;
+    let cancelled = false;
+
+    const syncCloud = async () => {
+      if (!user?.uid) {
+        await flushOfflineAttemptQueue(null, null);
+        if (!cancelled) setCloudHistoryLoading(false);
+        return;
+      }
+      try {
+        const token = await getIdToken();
+        if (token) {
+          await fetchAndMergeCloudExamAttempts({
+            bearerToken: token,
+            uid: user.uid,
+            packId: exam.id,
+            examSlug: exam.urlSlug,
+          });
+        }
+      } finally {
+        if (!cancelled) setCloudHistoryLoading(false);
+      }
+    };
+
+    void syncCloud();
+    const onOnline = () => void syncCloud();
+    window.addEventListener('online', onOnline);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', onOnline);
+    };
+  }, [exam.id, exam.urlSlug, getIdToken, isAuthReady, user?.uid]);
+
+  const handleSaveAttemptFeedback = useCallback(
+    async (attemptId: string, patch: AttemptFeedbackPatch) => {
+      const token = user ? await getIdToken() : null;
+      await saveHistoricalAttemptFeedback({
+        attemptId,
+        patch,
+        bearerToken: token,
+        uid: user?.uid,
+      });
+      showToast(
+        user
+          ? 'Post-exam feedback saved to Firebase.'
+          : 'Feedback saved on this device.',
+        'success'
+      );
+    },
+    [getIdToken, showToast, user]
+  );
 
   const finalizeAndSubmit = useCallback(
     (baseSession: PersistedExamSession, targetSet: ExamSet, reason?: string) => {
@@ -242,32 +330,15 @@ export function ExamRunnerShell({
       setMobilePaletteOpen(false);
       setStage('review');
 
-      const computed = computeFullExamAnalytics({
-        exam: targetSet,
-        responses: submittedSession.responses,
-        telemetry: submittedSession.telemetry,
-        markedForReview: submittedSession.markedForReview,
-        fallbackTotalTimeMs: submittedSession.totalTimeSpentMs,
+      const savedRecord = recordHistoricalAttemptSync({
+        packId: exam.id,
+        examSlug: exam.urlSlug,
+        examTitle: exam.title,
+        examSet: targetSet,
+        session: submittedSession,
+        uid: user?.uid,
       });
-
-      recordCompletedAttemptSync(
-        {
-          packId: exam.id,
-          examSlug: exam.urlSlug,
-          examTitle: exam.title,
-          setId: targetSet.id,
-          setTitle: targetSet.title,
-          mode: submittedSession.mode,
-          totalScore: computed.evaluation.totalScore,
-          maxScore: computed.evaluation.maxScore,
-          accuracyPct: computed.accuracyPct,
-          totalAttempted: computed.totalAttempted,
-          totalQuestions: computed.totalQuestions,
-          totalTimeSpentMs: computed.totalTimeSpentMs,
-          completedAtIso: new Date(now).toISOString(),
-        },
-        user?.uid
-      );
+      setSelectedAttemptId(savedRecord.attemptId);
 
       void (async () => {
         const token = user ? await getIdToken() : null;
@@ -277,7 +348,12 @@ export function ExamRunnerShell({
       if (reason) {
         showToast(reason, 'neutral');
       } else {
-        showToast('Exam submitted. Detailed analytics unlocked.', 'success');
+        showToast(
+          user
+            ? 'Exam submitted. Telemetry & solutions saved to Firebase.'
+            : 'Exam submitted. Detailed analytics unlocked.',
+          'success'
+        );
       }
     },
     [exam.id, exam.title, exam.urlSlug, getIdToken, showToast, user]
@@ -291,6 +367,18 @@ export function ExamRunnerShell({
         modeForSet,
         user?.uid
       );
+
+      // Deep-link into historical Analysis & Solutions view when requested via ?view=review
+      if (initialView === 'review' && !initialReviewConsumedRef.current) {
+        initialReviewConsumedRef.current = true;
+        if (existing) {
+          setSession(existing);
+        } else {
+          setSession(null);
+        }
+        setStage('review');
+        return;
+      }
 
       if (existing) {
         setSession(existing);
@@ -330,7 +418,7 @@ export function ExamRunnerShell({
 
       setStage('lobby');
     },
-    [autostart, exam, finalizeAndSubmit, user?.uid]
+    [autostart, exam, finalizeAndSubmit, initialView, user?.uid]
   );
 
   // Resolve target ExamSet from Per-Set Offline Shard (< 200 KB in < 10ms) or Verified Signed Endpoint
@@ -1111,9 +1199,48 @@ export function ExamRunnerShell({
   }
 
   // ============================================================================
-  // RENDER 2: LOADING / ERROR STATES
+  // RENDER 2: POST-EXAM ANALYTICS, HISTORICAL TELEMETRY & SOLUTION REVIEW STAGE
+  // (Renders immediately when historical Firebase attempt data is available, even while ExamSet loads)
   // ============================================================================
-  if (loadingPack) {
+  if (
+    stage === 'review' &&
+    (attemptsHistory.length > 0 || (session && activeSet))
+  ) {
+    return (
+      <ExamAnalyticsDashboard
+        examTitle={exam.title}
+        examSlug={exam.urlSlug}
+        examSet={activeSet}
+        loadingExamSet={loadingPack}
+        session={session}
+        attemptsHistory={attemptsHistory}
+        selectedAttemptId={selectedAttemptId}
+        onSelectAttempt={(id) => setSelectedAttemptId(id)}
+        onSaveFeedback={handleSaveAttemptFeedback}
+        isSignedIn={Boolean(user)}
+        isOwned={isOwned}
+        backHref={backHref}
+        onReattempt={() => {
+          if (activeSet) {
+            clearExamSessionSync(
+              exam.urlSlug,
+              activeSet.id,
+              sessionMode,
+              user?.uid
+            );
+            startFreshAttempt();
+          } else {
+            setStage('lobby');
+          }
+        }}
+      />
+    );
+  }
+
+  // ============================================================================
+  // RENDER 3: LOADING / ERROR STATES
+  // ============================================================================
+  if (loadingPack || (stage === 'review' && cloudHistoryLoading)) {
     return (
       <div className="ed-container py-10 space-y-4">
         <div className="h-14 w-72 rounded-lg ed-skeleton" />
@@ -1147,23 +1274,41 @@ export function ExamRunnerShell({
     );
   }
 
-  // ============================================================================
-  // RENDER 3: POST-EXAM ANALYTICS & SOLUTION REVIEW STAGE
-  // ============================================================================
-  if (stage === 'review' && session) {
+  // If deep-linked with ?view=review but zero attempts exist yet, drop gracefully into CBT Lobby
+  if (stage === 'review') {
     return (
-      <ExamAnalyticsDashboard
-        examTitle={exam.title}
-        examSlug={exam.urlSlug}
-        examSet={activeSet}
-        session={session}
-        isOwned={isOwned}
-        backHref={backHref}
-        onReattempt={() => {
-          clearExamSessionSync(exam.urlSlug, activeSet.id, sessionMode, user?.uid);
-          startFreshAttempt();
-        }}
-      />
+      <div className="ed-container py-12">
+        <div className="max-w-lg mx-auto rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6 text-center space-y-4">
+          <Trophy
+            className="w-8 h-8 text-[var(--text-muted)] mx-auto"
+            aria-hidden="true"
+          />
+          <h1 className="text-lg font-bold text-[var(--text-main)]">
+            No Completed Attempts Recorded Yet
+          </h1>
+          <p className="text-sm text-[var(--text-muted)]">
+            Complete an attempt on <strong>{activeSet.title}</strong> to unlock
+            section-wise time telemetry, official solutions, and post-exam
+            analysis.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={startFreshAttempt}
+              className="inline-flex items-center justify-center gap-2 min-h-12 px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold whitespace-nowrap"
+            >
+              <Play className="w-4 h-4" aria-hidden="true" />
+              <span>Start Mock Test</span>
+            </button>
+            <a
+              href={backHref}
+              className="inline-flex items-center justify-center min-h-12 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-sm font-semibold text-[var(--text-main)] whitespace-nowrap"
+            >
+              Back
+            </a>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -1390,25 +1535,46 @@ export function ExamRunnerShell({
               </div>
             </div>
 
-            {previousAnalytics && (
+            {(attemptsHistory.length > 0 || previousAnalytics) && (
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4 space-y-2 tabular-nums">
                 <div className="flex items-center justify-between text-xs font-semibold text-[var(--text-muted)]">
-                  <span>Last Completed Score</span>
-                  <Trophy className="w-4 h-4 text-[var(--status-success)]" aria-hidden="true" />
+                  <span>
+                    {attemptsHistory.length > 1
+                      ? `Attempt History (${attemptsHistory.length} Runs)`
+                      : 'Last Completed Score'}
+                  </span>
+                  <Trophy
+                    className="w-4 h-4 text-[var(--status-success)]"
+                    aria-hidden="true"
+                  />
                 </div>
                 <p className="text-xl font-extrabold text-[var(--text-main)]">
-                  {previousAnalytics.evaluation.totalScore} /{' '}
-                  {previousAnalytics.evaluation.maxScore}{' '}
+                  {attemptsHistory[0]
+                    ? `${attemptsHistory[0].totalScore} / ${attemptsHistory[0].maxScore}`
+                    : `${previousAnalytics?.evaluation.totalScore ?? 0} / ${
+                        previousAnalytics?.evaluation.maxScore ?? 0
+                      }`}{' '}
                   <span className="text-xs font-semibold text-[var(--text-muted)]">
-                    ({previousAnalytics.accuracyPct}% accuracy)
+                    (
+                    {attemptsHistory[0]
+                      ? attemptsHistory[0].accuracyPct
+                      : previousAnalytics?.accuracyPct ?? 0}
+                    % accuracy)
                   </span>
                 </p>
                 <button
                   type="button"
-                  onClick={() => setStage('review')}
-                  className="w-full min-h-11 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors"
+                  onClick={() => {
+                    if (attemptsHistory[0]) {
+                      setSelectedAttemptId(attemptsHistory[0].attemptId);
+                    }
+                    setStage('review');
+                  }}
+                  className="w-full min-h-11 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap"
                 >
-                  Inspect Last Result &amp; Solutions
+                  {attemptsHistory.length > 1
+                    ? `Analysis & Solutions (${attemptsHistory.length})`
+                    : 'Analysis & Solutions'}
                 </button>
               </div>
             )}
@@ -1417,9 +1583,9 @@ export function ExamRunnerShell({
               <button
                 type="button"
                 onClick={startFreshAttempt}
-                className="w-full inline-flex items-center justify-center gap-2 min-h-12 px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-bold hover:opacity-90 transition-opacity"
+                className="w-full inline-flex items-center justify-center gap-2 min-h-12 px-5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-bold hover:opacity-90 transition-opacity whitespace-nowrap"
               >
-                {previousSubmitted ? (
+                {previousSubmitted || attemptsHistory.length > 0 ? (
                   <>
                     <RotateCcw className="w-4 h-4" aria-hidden="true" />
                     <span>Start Fresh Attempt</span>

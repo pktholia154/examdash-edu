@@ -62,7 +62,7 @@ export function KpiStrip({
   }, [primaryCurrency, purchases]);
 
   return (
-    <section aria-label="Study workspace summary" className="ed-container pt-8">
+    <section aria-label="Study workspace summary" className="ed-container pt-4 sm:pt-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 sm:p-5">
           <p className="text-xs font-medium text-[var(--text-muted)]">

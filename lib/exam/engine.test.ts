@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildHistoricalExamAttemptRecord,
   computeFullExamAnalytics,
   computeRemainingMs,
   derivePaletteStatus,
@@ -12,7 +13,7 @@ import {
 } from './grading';
 import { validateExamPack } from './validator';
 import { BENCHMARK_SET_1, buildFallbackExamSetsForPack } from './benchmark-packs';
-import type { ExamSection, ExamSet } from './types';
+import type { ExamSection, ExamSet, PersistedExamSession } from './types';
 
 test('NAT, MCQ, and JEE Advanced MSQ grading with negative & partial marks', () => {
   const natQ = BENCHMARK_SET_1.sections[0].questions[0];
@@ -265,3 +266,67 @@ test('validateExamPack enforces Pillar 1 <-> Pillar 2 Zero-Drift invariants', ()
   assert.ok(brokenRes.errors.some((e) => e.includes('missing_visual')));
   assert.ok(brokenRes.errors.some((e) => e.includes('exam.totalMarks')));
 });
+
+test('buildHistoricalExamAttemptRecord preserves section telemetry, solution snapshots, and deterministic insights', () => {
+  const startedAt = 1_760_000_000_000;
+  const completedAt = startedAt + 120_000;
+  const session: PersistedExamSession = {
+    schemaVersion: 1,
+    packId: 'pack_gate_cs',
+    examSlug: 'gate-cs-benchmark',
+    setId: BENCHMARK_SET_1.id,
+    mode: 'full',
+    status: 'submitted',
+    startedAtEpochMs: startedAt,
+    targetEndEpochMs: startedAt + 3_600_000,
+    submittedAtEpochMs: completedAt,
+    sectionEndEpochMs: {},
+    lockedSectionIds: [],
+    activeSectionId: BENCHMARK_SET_1.sections[0].id,
+    activeQuestionId: BENCHMARK_SET_1.sections[0].questions[0].id,
+    responses: {
+      sec_1_q_1: '129.9',
+      sec_1_q_2: 'A',
+      sec_1_q_4: ['A', 'C'],
+    },
+    markedForReview: {
+      sec_1_q_3: true,
+    },
+    visitedQuestions: {
+      sec_1_q_1: true,
+      sec_1_q_2: true,
+      sec_1_q_3: true,
+      sec_1_q_4: true,
+    },
+    telemetry: {
+      sec_1_q_1: { timeSpentMs: 42_000, visits: 2 },
+      sec_1_q_2: { timeSpentMs: 1_020_000, visits: 3 },
+      sec_1_q_3: { timeSpentMs: 25_000, visits: 1 },
+      sec_1_q_4: { timeSpentMs: 55_000, visits: 1 },
+    },
+    updatedAtEpochMs: completedAt,
+  };
+
+  const record = buildHistoricalExamAttemptRecord({
+    attemptId: '0195f1a0-0000-7000-8000-000000000001',
+    userId: 'user_abc_123',
+    packId: 'pack_gate_cs',
+    examSlug: 'gate-cs-benchmark',
+    examTitle: 'GATE CS Full Pack',
+    examSet: BENCHMARK_SET_1,
+    session,
+    completedAtEpochMs: completedAt,
+  });
+
+  assert.equal(record.attemptId, '0195f1a0-0000-7000-8000-000000000001');
+  assert.equal(record.userId, 'user_abc_123');
+  assert.equal(record.totalScore, 6.5);
+  assert.equal(record.sectionBreakdown.length, BENCHMARK_SET_1.sections.length);
+  assert.equal(record.questionBreakdown.length, BENCHMARK_SET_1.totalQuestions);
+  assert.equal(record.questionBreakdown[0].userAnswerSummary, '129.9');
+  assert.ok(record.questionBreakdown[3].correctAnswerSummary.includes('A'));
+  assert.equal(record.performanceInsights.slowQuestionsCount, 1);
+  assert.equal(record.performanceInsights.markedUnattemptedCount, 1);
+  assert.ok(record.performanceInsights.actionableTakeaways.length >= 1);
+});
+

@@ -1,11 +1,15 @@
 import type {
+  AttemptPerformanceInsights,
   CbtPaletteStatus,
   ExamEvaluationResult,
   ExamQuestion,
   ExamSection,
   ExamSet,
   FullExamAnalytics,
+  HistoricalExamAttemptRecord,
+  PersistedExamSession,
   QuestionAnalyticsItem,
+  QuestionAttemptSnapshotItem,
   QuestionEvaluation,
   QuestionTelemetry,
   SectionAnalyticsItem,
@@ -499,5 +503,366 @@ export function computeFullExamAnalytics(params: {
     avgTimePerAttemptedMs,
     sectionBreakdown,
     questionBreakdown,
+  };
+}
+
+// ============================================================================
+// 5. DETERMINISTIC ANSWER SUMMARIES & POST-EXAM DIAGNOSTIC INSIGHTS (ZERO-AI)
+// ============================================================================
+
+export function formatUserAnswerSummary(
+  question: Pick<ExamQuestion, 'type' | 'options'>,
+  rawAnswer: unknown
+): string {
+  if (!isQuestionAttempted(question, rawAnswer)) {
+    return 'Unattempted';
+  }
+  if (question.type === 'MCQ') {
+    const clean = String(rawAnswer).trim();
+    const idx = (question.options || []).findIndex(
+      (opt) => String(opt.id).trim() === clean
+    );
+    if (idx >= 0) {
+      return `Option ${String.fromCharCode(65 + idx)}`;
+    }
+    return clean.slice(0, 80);
+  }
+  if (question.type === 'MSQ') {
+    const selected = (Array.isArray(rawAnswer) ? rawAnswer : [])
+      .map((v) => String(v).trim())
+      .filter(Boolean);
+    if (selected.length === 0) return 'Unattempted';
+    const labels = selected.map((sel) => {
+      const idx = (question.options || []).findIndex(
+        (opt) => String(opt.id).trim() === sel
+      );
+      return idx >= 0 ? String.fromCharCode(65 + idx) : sel;
+    });
+    return `Option ${labels.join(', ')}`.slice(0, 120);
+  }
+  return String(rawAnswer).trim().slice(0, 80);
+}
+
+export function formatCorrectAnswerSummary(
+  question: Pick<ExamQuestion, 'type' | 'options' | 'answer'>
+): string {
+  const { type, options, answer } = question;
+  if (type === 'MCQ') {
+    const clean = String(answer ?? '').trim();
+    const idx = (options || []).findIndex(
+      (opt) => String(opt.id).trim() === clean
+    );
+    return idx >= 0 ? `Option ${String.fromCharCode(65 + idx)}` : clean.slice(0, 80);
+  }
+  if (type === 'MSQ') {
+    const arr = (Array.isArray(answer) ? answer : [])
+      .map((v) => String(v).trim())
+      .filter(Boolean);
+    const labels = arr.map((sel) => {
+      const idx = (options || []).findIndex(
+        (opt) => String(opt.id).trim() === sel
+      );
+      return idx >= 0 ? String.fromCharCode(65 + idx) : sel;
+    });
+    return labels.length > 0 ? `Option ${labels.join(', ')}`.slice(0, 120) : '—';
+  }
+  if (Array.isArray(answer)) {
+    const min = Number(answer[0]);
+    const max = Number(answer[1] ?? answer[0]);
+    if (Number.isFinite(min) && Number.isFinite(max)) {
+      return Math.abs(min - max) < 1e-6 ? `${min}` : `${min} to ${max}`;
+    }
+  }
+  return String(answer ?? '—').trim().slice(0, 80);
+}
+
+export function computeAttemptPerformanceInsights(params: {
+  exam: ExamSet;
+  analytics: FullExamAnalytics;
+}): AttemptPerformanceInsights {
+  const { exam, analytics } = params;
+  const allocatedExamMs = Math.max(
+    60_000,
+    Number(exam.duration || 60) * 60_000
+  );
+  const idealPerQuestionMs =
+    analytics.totalQuestions > 0
+      ? allocatedExamMs / analytics.totalQuestions
+      : 60_000;
+  const slowThresholdMs = Math.max(90_000, Math.round(idealPerQuestionMs * 1.6));
+
+  const slowQuestionsCount = analytics.questionBreakdown.filter(
+    (q) => q.timeSpentMs > slowThresholdMs
+  ).length;
+
+  const markedUnattemptedCount = analytics.questionBreakdown.filter(
+    (q) => q.markedForReview && q.status === 'UNATTEMPTED'
+  ).length;
+
+  const wrongSlowCount = analytics.questionBreakdown.filter(
+    (q) => q.status === 'WRONG' && q.timeSpentMs > slowThresholdMs
+  ).length;
+
+  const multiVisitCount = analytics.questionBreakdown.filter(
+    (q) => q.visits >= 3
+  ).length;
+
+  const negativeMarkingImpactPct =
+    analytics.positiveMarksEarned > 0
+      ? Math.min(
+          1000,
+          Number(
+            (
+              (analytics.negativeMarksLost / analytics.positiveMarksEarned) *
+              100
+            ).toFixed(1)
+          )
+        )
+      : analytics.negativeMarksLost > 0
+      ? 100
+      : 0;
+
+  const sectionsByStrength = [...analytics.sectionBreakdown].sort((a, b) => {
+    if (b.accuracyPct !== a.accuracyPct) return b.accuracyPct - a.accuracyPct;
+    const ratioA = a.maxMarks > 0 ? a.score / a.maxMarks : 0;
+    const ratioB = b.maxMarks > 0 ? b.score / b.maxMarks : 0;
+    return ratioB - ratioA;
+  });
+
+  const strongestSec = sectionsByStrength[0];
+  const weakestSec =
+    sectionsByStrength.length >= 2
+      ? sectionsByStrength[sectionsByStrength.length - 1]
+      : undefined;
+
+  const clockUtilization = analytics.totalTimeSpentMs / allocatedExamMs;
+  let pacingVerdict = 'Balanced Exam Pacing';
+  if (analytics.totalAttempted === 0) {
+    pacingVerdict = 'Unattempted Run';
+  } else if (clockUtilization > 0.92 && analytics.attemptPct < 65) {
+    pacingVerdict = 'Time-Pressured — High Dwell Per Question';
+  } else if (clockUtilization < 0.45 && analytics.accuracyPct < 65) {
+    pacingVerdict = 'Fast Completion — Underutilized Exam Clock';
+  } else if (
+    slowQuestionsCount >= Math.max(3, Math.ceil(analytics.totalQuestions * 0.2))
+  ) {
+    pacingVerdict = 'Uneven Pacing — Time Sinks Detected';
+  } else if (analytics.accuracyPct >= 80 && analytics.attemptPct >= 70) {
+    pacingVerdict = 'Disciplined High-Accuracy Pacing';
+  }
+
+  const diagnosticSummary =
+    analytics.totalAttempted === 0
+      ? `No questions were attempted in this ${exam.duration}-minute session (${formatDurationCompact(
+          analytics.totalTimeSpentMs
+        )} elapsed). Use Solution Review to study the official step-by-step explanations before retaking this set.`
+      : `Scored ${analytics.evaluation.totalScore} / ${
+          analytics.evaluation.maxScore
+        } (${analytics.scorePct}%) across ${analytics.totalAttempted} of ${
+          analytics.totalQuestions
+        } questions with ${analytics.accuracyPct}% accuracy in ${formatDurationCompact(
+          analytics.totalTimeSpentMs
+        )} (avg ${formatDurationCompact(
+          analytics.avgTimePerAttemptedMs
+        )} per attempted question).`;
+
+  const takeaways: string[] = [];
+
+  if (analytics.negativeMarksLost > 0) {
+    takeaways.push(
+      `Negative marking cost −${analytics.negativeMarksLost} marks across ${analytics.totalWrong} incorrect ${
+        analytics.totalWrong === 1 ? 'response' : 'responses'
+      } (${negativeMarkingImpactPct}% of your +${analytics.positiveMarksEarned} gross positive marks).Eliminating low-certainty guesses would raise your net score immediately.`
+        .replace(').Eliminating', '). Eliminating')
+        .slice(0, 380)
+    );
+  } else if (analytics.totalAttempted > 0) {
+    takeaways.push(
+      `Zero negative marks lost across ${analytics.totalAttempted} attempted questions — strong option-elimination discipline.`
+    );
+  }
+
+  if (slowQuestionsCount > 0) {
+    takeaways.push(
+      `${slowQuestionsCount} ${
+        slowQuestionsCount === 1 ? 'question' : 'questions'
+      } exceeded ${formatDurationCompact(slowThresholdMs)} dwell time${
+        wrongSlowCount > 0
+          ? ` (${wrongSlowCount} still ended incorrect)`
+          : ''
+      }. Cap initial pass time at ${formatDurationCompact(
+        Math.round(idealPerQuestionMs)
+      )} and mark tough items for a second pass.`
+    );
+  }
+
+  if (markedUnattemptedCount > 0) {
+    takeaways.push(
+      `${markedUnattemptedCount} ${
+        markedUnattemptedCount === 1 ? 'question was' : 'questions were'
+      } marked for review without a saved response. Reserve the final 5 minutes to convert marked items.`
+    );
+  }
+
+  if (weakestSec && strongestSec && weakestSec.sectionId !== strongestSec.sectionId) {
+    takeaways.push(
+      `Prioritize "${weakestSec.sectionTitle}" (${weakestSec.score}/${weakestSec.maxMarks} marks, ${weakestSec.accuracyPct}% accuracy) to match your lead in "${strongestSec.sectionTitle}" (${strongestSec.accuracyPct}% accuracy).`
+    );
+  } else if (multiVisitCount > 0) {
+    takeaways.push(
+      `You revisited ${multiVisitCount} ${
+        multiVisitCount === 1 ? 'question' : 'questions'
+      } 3 or more times. Commit decisive first-pass skips to reduce navigation overhead.`
+    );
+  }
+
+  if (takeaways.length === 0) {
+    takeaways.push(
+      `Review all ${analytics.totalUnattempted} unattempted questions in Solution Review to expand coverage on your next attempt.`
+    );
+  }
+
+  return {
+    ...(strongestSec
+      ? {
+          strongestSectionTitle: strongestSec.sectionTitle.slice(0, 200),
+          strongestSectionAccuracyPct: strongestSec.accuracyPct,
+        }
+      : {}),
+    ...(weakestSec
+      ? {
+          focusSectionTitle: weakestSec.sectionTitle.slice(0, 200),
+          focusSectionAccuracyPct: weakestSec.accuracyPct,
+        }
+      : {}),
+    pacingVerdict: pacingVerdict.slice(0, 80),
+    negativeMarkingImpactPct,
+    slowQuestionsCount,
+    markedUnattemptedCount,
+    diagnosticSummary: diagnosticSummary.slice(0, 1500),
+    actionableTakeaways: takeaways.slice(0, 6).map((t) => t.slice(0, 400)),
+  };
+}
+
+export function buildHistoricalExamAttemptRecord(params: {
+  attemptId: string;
+  userId?: string;
+  packId: string;
+  examSlug: string;
+  examTitle: string;
+  examSet: ExamSet;
+  session: PersistedExamSession;
+  completedAtEpochMs?: number;
+}): HistoricalExamAttemptRecord {
+  const {
+    attemptId,
+    userId,
+    packId,
+    examSlug,
+    examTitle,
+    examSet,
+    session,
+    completedAtEpochMs = session.submittedAtEpochMs || Date.now(),
+  } = params;
+
+  const analytics = computeFullExamAnalytics({
+    exam: examSet,
+    responses: session.responses,
+    telemetry: session.telemetry,
+    markedForReview: session.markedForReview,
+    fallbackTotalTimeMs: session.totalTimeSpentMs,
+  });
+
+  const questionsById = new Map<string, ExamQuestion>();
+  for (const sec of examSet.sections || []) {
+    for (const q of sec.questions || []) {
+      questionsById.set(q.id, q);
+    }
+  }
+
+  const questionBreakdown: QuestionAttemptSnapshotItem[] =
+    analytics.questionBreakdown.slice(0, 500).map((item) => {
+      const qDef = questionsById.get(item.questionId);
+      return {
+        ...item,
+        userAnswerSummary: qDef
+          ? formatUserAnswerSummary(qDef, session.responses[item.questionId])
+          : '—',
+        correctAnswerSummary: qDef ? formatCorrectAnswerSummary(qDef) : '—',
+      };
+    });
+
+  const performanceInsights = computeAttemptPerformanceInsights({
+    exam: examSet,
+    analytics,
+  });
+
+  const startedIso = new Date(
+    session.startedAtEpochMs || completedAtEpochMs
+  ).toISOString();
+  const completedIso = new Date(completedAtEpochMs).toISOString();
+
+  const sanitizedResponses: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(session.responses || {}).slice(0, 500)) {
+    if (v !== undefined) {
+      sanitizedResponses[k] = v;
+    }
+  }
+
+  const sanitizedTelemetry: Record<string, QuestionTelemetry> = {};
+  for (const [k, v] of Object.entries(session.telemetry || {}).slice(0, 500)) {
+    if (v && typeof v === 'object') {
+      sanitizedTelemetry[k] = {
+        timeSpentMs: Math.max(0, Math.round(Number(v.timeSpentMs) || 0)),
+        visits: Math.max(0, Math.round(Number(v.visits) || 0)),
+      };
+    }
+  }
+
+  const sanitizedMarked: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(session.markedForReview || {}).slice(
+    0,
+    500
+  )) {
+    if (v) {
+      sanitizedMarked[k] = true;
+    }
+  }
+
+  return {
+    attemptId,
+    idempotencyKey: attemptId,
+    ...(userId ? { userId } : {}),
+    packId,
+    examSlug,
+    examTitle,
+    setId: examSet.id,
+    setTitle: examSet.title,
+    mode: session.mode,
+    totalScore: analytics.evaluation.totalScore,
+    maxScore: analytics.evaluation.maxScore,
+    scorePct: analytics.scorePct,
+    accuracyPct: analytics.accuracyPct,
+    attemptPct: analytics.attemptPct,
+    totalQuestions: analytics.totalQuestions,
+    totalAttempted: analytics.totalAttempted,
+    totalCorrect: analytics.totalCorrect,
+    totalPartial: analytics.totalPartial,
+    totalWrong: analytics.totalWrong,
+    totalUnattempted: analytics.totalUnattempted,
+    positiveMarksEarned: analytics.positiveMarksEarned,
+    negativeMarksLost: analytics.negativeMarksLost,
+    totalTimeSpentMs: Math.round(analytics.totalTimeSpentMs),
+    avgTimePerAttemptedMs: Math.round(analytics.avgTimePerAttemptedMs),
+    responses: sanitizedResponses,
+    telemetry: sanitizedTelemetry,
+    markedForReview: sanitizedMarked,
+    sectionBreakdown: analytics.sectionBreakdown.slice(0, 30),
+    questionBreakdown,
+    performanceInsights,
+    startedAtIso: startedIso,
+    completedAtIso: completedIso,
+    updatedAtIso: completedIso,
+    synced: false,
   };
 }

@@ -187,9 +187,13 @@ export async function GET(req: NextRequest) {
     }
 
     if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+      const storageMsg =
+        upstream.statusCode === 401 || upstream.statusCode === 403
+          ? `Firebase Storage bucket rules denied read access to the full ${format.toUpperCase()} file (HTTP ${upstream.statusCode}).`
+          : `Unable to stream full ${format.toUpperCase()} file from Firebase Storage (HTTP ${upstream.statusCode}).`;
       return NextResponse.json(
         {
-          error: `Unable to stream full ${format.toUpperCase()} file from Firebase Storage (HTTP ${upstream.statusCode}).`,
+          error: storageMsg,
           code: 'UPSTREAM_STORAGE_ERROR',
           upstreamStatus: upstream.statusCode,
         },

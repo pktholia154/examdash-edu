@@ -92,7 +92,7 @@ const OPFS_ROOT_DIR = 'examdash-vault-v3';
 const SQLITE_DB_NAME = 'examdash_offline_vault_v3';
 const MIN_FREE_HEADROOM_BYTES = 8 * 1024 * 1024; // 8 MB minimum safety headroom
 const MAX_SINGLE_ASSET_BYTES = 64 * 1024 * 1024; // 64 MB cap
-const GRANT_CACHE_PREFIX = 'ed_signed_grant_v4:';
+const GRANT_CACHE_PREFIX = 'ed_signed_grant_v5:';
 
 function parseApiErrorText(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== 'object') return fallback;

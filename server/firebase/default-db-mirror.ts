@@ -473,25 +473,44 @@ export async function syncSinglePurchaseToDefaultDb(
       : new Date().toISOString();
 
   if (input.collectionName === 'books') {
-    return commitDefaultPurchaseCandidate({
-      restBase,
-      docPrefix,
-      uid: input.uid,
-      docId: `books_${safeItemId}`.slice(0, 120),
-      safeItemId,
-      contentType: 'books',
-      title,
-      urlSlug,
-      currency,
-      amountPaidInt,
-      razorpayOrderId: input.razorpayOrderId,
-      razorpayPaymentId: input.razorpayPaymentId,
-      purchasedAtIso,
-      bearerIdToken: input.bearerIdToken,
-    });
+    const [canonicalBookOk, rawItemAliasOk] = await Promise.all([
+      commitDefaultPurchaseCandidate({
+        restBase,
+        docPrefix,
+        uid: input.uid,
+        docId: `books_${safeItemId}`.slice(0, 120),
+        safeItemId,
+        contentType: 'books',
+        title,
+        urlSlug,
+        currency,
+        amountPaidInt,
+        razorpayOrderId: input.razorpayOrderId,
+        razorpayPaymentId: input.razorpayPaymentId,
+        purchasedAtIso,
+        bearerIdToken: input.bearerIdToken,
+      }),
+      commitDefaultPurchaseCandidate({
+        restBase,
+        docPrefix,
+        uid: input.uid,
+        docId: safeItemId,
+        safeItemId,
+        contentType: 'books',
+        title,
+        urlSlug,
+        currency,
+        amountPaidInt,
+        razorpayOrderId: input.razorpayOrderId,
+        razorpayPaymentId: input.razorpayPaymentId,
+        purchasedAtIso,
+        bearerIdToken: input.bearerIdToken,
+      }),
+    ]);
+    return Boolean(canonicalBookOk || rawItemAliasOk);
   }
 
-  // For ExamPackDocument, sync both canonical `ExamPackDocument_<id>` and `exams_<id>` alias
+  // For ExamPackDocument, sync canonical `ExamPackDocument_<id>`, `exams_<id>`, and raw `<id>` alias
   const canonicalDocId = `ExamPackDocument_${safeItemId}`.slice(0, 120);
   const aliasDocId = `exams_${safeItemId}`.slice(0, 120);
 
@@ -529,22 +548,40 @@ export async function syncSinglePurchaseToDefaultDb(
       bearerIdToken: input.bearerIdToken,
     }));
 
-  const aliasOk = await commitDefaultPurchaseCandidate({
-    restBase,
-    docPrefix,
-    uid: input.uid,
-    docId: aliasDocId,
-    safeItemId,
-    contentType: 'exams',
-    title,
-    urlSlug,
-    currency,
-    amountPaidInt,
-    razorpayOrderId: input.razorpayOrderId,
-    razorpayPaymentId: input.razorpayPaymentId,
-    purchasedAtIso,
-    bearerIdToken: input.bearerIdToken,
-  });
+  const [aliasOk, rawExamAliasOk] = await Promise.all([
+    commitDefaultPurchaseCandidate({
+      restBase,
+      docPrefix,
+      uid: input.uid,
+      docId: aliasDocId,
+      safeItemId,
+      contentType: 'exams',
+      title,
+      urlSlug,
+      currency,
+      amountPaidInt,
+      razorpayOrderId: input.razorpayOrderId,
+      razorpayPaymentId: input.razorpayPaymentId,
+      purchasedAtIso,
+      bearerIdToken: input.bearerIdToken,
+    }),
+    commitDefaultPurchaseCandidate({
+      restBase,
+      docPrefix,
+      uid: input.uid,
+      docId: safeItemId,
+      safeItemId,
+      contentType: 'ExamPackDocument',
+      title,
+      urlSlug,
+      currency,
+      amountPaidInt,
+      razorpayOrderId: input.razorpayOrderId,
+      razorpayPaymentId: input.razorpayPaymentId,
+      purchasedAtIso,
+      bearerIdToken: input.bearerIdToken,
+    }),
+  ]);
 
-  return Boolean(canonicalOk || aliasOk);
+  return Boolean(canonicalOk || aliasOk || rawExamAliasOk);
 }

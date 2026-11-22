@@ -27,12 +27,16 @@ export function AttemptSlotView({
   initialMode,
   initialSource = 'online',
   autostart = false,
+  initialView,
+  initialAttemptId,
 }: {
   exam: PublicExamDTO;
   initialSetId?: string;
   initialMode: 'trial' | 'full';
   initialSource?: 'online' | 'offline';
   autostart?: boolean;
+  initialView?: 'review';
+  initialAttemptId?: string;
 }) {
   return (
     <LazyExamRunnerShell
@@ -41,6 +45,8 @@ export function AttemptSlotView({
       initialMode={initialMode}
       initialSource={initialSource}
       autostart={autostart}
+      initialView={initialView}
+      initialAttemptId={initialAttemptId}
     />
   );
 }

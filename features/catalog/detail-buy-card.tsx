@@ -16,6 +16,7 @@ import {
 import type { CollectionName } from '../../lib/types/catalog';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
+import { InstallAppCallout } from '../pwa/install-banner';
 
 const LazyBookInlineReaderModal = dynamic(
   () =>
@@ -189,6 +190,13 @@ export function DetailBuyCard({
           )}
         </div>
       </div>
+
+      {/* Contextual Install Now / Open in App Banner right below Buy Now / Sample bar */}
+      <InstallAppCallout
+        variant="detail"
+        itemKind={collectionName === 'books' ? 'book' : 'exam'}
+        className="mt-4"
+      />
 
       {/* Mobile Sticky Bottom Bar (data-nosnippet, Strict 2-Action Contract, <= 60px height) */}
       <div

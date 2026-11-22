@@ -211,9 +211,13 @@ export async function GET(
         const parsed = JSON.parse(upstream.text) as unknown;
         sets = normalizeExamSetsPayload(parsed);
       } else if (mode === 'full') {
+        const storageMsg =
+          upstream.statusCode === 401 || upstream.statusCode === 403
+            ? `Firebase Storage bucket rules denied read access to the full exam JSON file (HTTP ${upstream.statusCode}).`
+            : `Unable to load full exam JSON from Firebase Storage (HTTP ${upstream.statusCode}).`;
         return NextResponse.json(
           {
-            error: `Unable to load full exam JSON from Firebase Storage (HTTP ${upstream.statusCode}).`,
+            error: storageMsg,
             code: 'UPSTREAM_STORAGE_ERROR',
             upstreamStatus: upstream.statusCode,
           },

@@ -6,7 +6,8 @@ import {
 import { getPublishedReviewAggregates } from '../server/repositories/review-repository';
 import { buildReviewTargetKey } from '../lib/reviews/validation';
 import { toCatalogCardDTO, type ReviewAggregateBadge } from '../lib/types/catalog';
-import { SearchHero } from '../features/catalog/search-hero';
+import { HomeSearchBar } from '../features/catalog/search-hero';
+import { InstallAppCallout } from '../features/pwa/install-banner';
 import { KpiStrip } from '../features/catalog/kpi-strip';
 import { CatalogSection } from '../features/catalog/catalog-section';
 import { ErrorState } from '../components/ui/state-blocks';
@@ -52,7 +53,14 @@ export default async function HomePage() {
 
   return (
     <>
-      <SearchHero bookCount={books.length} examCount={exams.length} />
+      <h1 className="sr-only">
+        ExamDash — Verified Books, Question Banks &amp; Full-Length Mock Exam Packs
+      </h1>
+
+      <div className="ed-container pt-6 sm:pt-7">
+        <HomeSearchBar bookCount={books.length} examCount={exams.length} />
+        <InstallAppCallout variant="home" className="mt-3.5" />
+      </div>
 
       <KpiStrip
         totalCatalogBooks={books.length}

@@ -457,11 +457,13 @@ export function MarkdownViewer({
         });
       };
 
+      let primaryError: Error | null = null;
+
       if (resolvedUrl) {
         try {
           let res = await fetchWithToken(resolvedUrl);
           if (
-            (res.status === 401 || res.status === 403) &&
+            res.status === 401 &&
             !isSample &&
             onRefreshSignedUrlRef.current
           ) {
@@ -476,28 +478,33 @@ export function MarkdownViewer({
             return await res.arrayBuffer();
           }
 
+          const errObj = (await res.json().catch(() => null)) as
+            | { error?: string | { message?: string } }
+            | null;
+          const parsedErr =
+            typeof errObj?.error === 'string'
+              ? errObj.error
+              : typeof errObj?.error?.message === 'string'
+              ? errObj.error.message
+              : '';
+          primaryError = new Error(
+            parsedErr || `Failed to load Markdown stream (HTTP ${res.status}).`
+          );
+
           if (isSample || (!activeStoragePath && !activeDirectUrl)) {
-            const errObj = (await res.json().catch(() => null)) as
-              | { error?: string | { message?: string } }
-              | null;
-            const parsedErr =
-              typeof errObj?.error === 'string'
-                ? errObj.error
-                : typeof errObj?.error?.message === 'string'
-                ? errObj.error.message
-                : '';
-            throw new Error(
-              parsedErr ||
-                `Failed to load Markdown stream (HTTP ${res.status}).`
-            );
+            throw primaryError;
           }
         } catch (streamErr) {
-          if (
-            abortController.signal.aborted ||
-            isSample ||
-            (!activeStoragePath && !activeDirectUrl)
-          ) {
+          if (abortController.signal.aborted || isSample) {
             throw streamErr;
+          }
+          primaryError =
+            primaryError ??
+            (streamErr instanceof Error
+              ? streamErr
+              : new Error('Failed to load Markdown stream.'));
+          if (!activeStoragePath && !activeDirectUrl) {
+            throw primaryError;
           }
         }
       }
@@ -509,8 +516,16 @@ export function MarkdownViewer({
             abortController.signal
           );
         } catch (storageErr) {
-          if (abortController.signal.aborted || !activeDirectUrl) {
+          if (abortController.signal.aborted) {
             throw storageErr;
+          }
+          primaryError =
+            primaryError ??
+            (storageErr instanceof Error
+              ? storageErr
+              : new Error('Unable to access Markdown in Firebase Storage.'));
+          if (!activeDirectUrl) {
+            throw primaryError;
           }
         }
       }
@@ -523,6 +538,10 @@ export function MarkdownViewer({
         if (directRes.ok) {
           return directRes.arrayBuffer();
         }
+      }
+
+      if (primaryError) {
+        throw primaryError;
       }
 
       throw new Error('No Markdown stream URL configured for this book.');

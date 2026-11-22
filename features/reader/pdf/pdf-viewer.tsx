@@ -592,12 +592,14 @@ export function PdfViewer({
         });
       };
 
+      let primaryError: Error | null = null;
+
       if (resolvedUrl) {
         try {
           let res = await fetchWithUrl(resolvedUrl);
 
           if (
-            (res.status === 401 || res.status === 403) &&
+            res.status === 401 &&
             !isSample &&
             onRefreshSignedUrlRef.current
           ) {
@@ -618,26 +620,33 @@ export function PdfViewer({
             return await res.arrayBuffer();
           }
 
+          const errPayload = (await res.json().catch(() => null)) as
+            | { error?: string | { message?: string } }
+            | null;
+          const parsedErr =
+            typeof errPayload?.error === 'string'
+              ? errPayload.error
+              : typeof errPayload?.error?.message === 'string'
+              ? errPayload.error.message
+              : '';
+          primaryError = new Error(
+            parsedErr || `Failed to load PDF stream (HTTP ${res.status}).`
+          );
+
           if (isSample || (!activeStoragePath && !activeDirectUrl)) {
-            const errPayload = (await res.json().catch(() => null)) as
-              | { error?: string | { message?: string } }
-              | null;
-            const parsedErr =
-              typeof errPayload?.error === 'string'
-                ? errPayload.error
-                : typeof errPayload?.error?.message === 'string'
-                ? errPayload.error.message
-                : '';
-            throw new Error(
-              parsedErr || `Failed to load PDF stream (HTTP ${res.status}).`
-            );
+            throw primaryError;
           }
         } catch (streamErr) {
           if (abortController.signal.aborted || isSample) {
             throw streamErr;
           }
+          primaryError =
+            primaryError ??
+            (streamErr instanceof Error
+              ? streamErr
+              : new Error('Failed to load PDF stream.'));
           if (!activeStoragePath && !activeDirectUrl) {
-            throw streamErr;
+            throw primaryError;
           }
         }
       }
@@ -649,8 +658,16 @@ export function PdfViewer({
             abortController.signal
           );
         } catch (storageErr) {
-          if (abortController.signal.aborted || !activeDirectUrl) {
+          if (abortController.signal.aborted) {
             throw storageErr;
+          }
+          primaryError =
+            primaryError ??
+            (storageErr instanceof Error
+              ? storageErr
+              : new Error('Unable to access PDF in Firebase Storage.'));
+          if (!activeDirectUrl) {
+            throw primaryError;
           }
         }
       }
@@ -663,6 +680,10 @@ export function PdfViewer({
         if (directRes.ok) {
           return directRes.arrayBuffer();
         }
+      }
+
+      if (primaryError) {
+        throw primaryError;
       }
 
       throw new Error('No PDF stream URL configured for this book.');

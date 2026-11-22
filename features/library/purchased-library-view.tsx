@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
+  BarChart3,
   Check,
   ChevronDown,
   Download,
@@ -27,12 +28,14 @@ import {
 } from 'lucide-react';
 import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
 import { EmptyState } from '../../components/ui/state-blocks';
+import { formatDurationCompact } from '../../lib/exam/grading';
 import {
   EXAM_ATTEMPTS_UPDATED_EVENT,
-  getCompletedAttemptsSync,
+  fetchAndMergeCloudExamAttempts,
+  getHistoricalAttemptsSync,
   loadExamSessionSync,
 } from '../../lib/exam/storage';
-import type { CompletedAttemptSummary } from '../../lib/exam/types';
+import type { HistoricalExamAttemptRecord } from '../../lib/exam/types';
 import {
   clearAllUserOfflineAssets,
   deleteBookAllFormatsOffline,
@@ -166,14 +169,22 @@ export function PurchasedLibraryView({
   const [examOfflineReadyToggle, setExamOfflineReadyToggle] = useState<
     Record<string, boolean>
   >({});
+  const [expandedRemainingSets, setExpandedRemainingSets] = useState<
+    Record<string, boolean>
+  >({});
 
-  // Track resumable in-progress exam set IDs & completed attempt summaries
+  // Track resumable in-progress exam set IDs & full historical attempt records
   const [resumableSets, setResumableSets] = useState<Record<string, boolean>>(
     {}
   );
-  const [completedAttempts, setCompletedAttempts] = useState<
-    CompletedAttemptSummary[]
+  const [historicalAttempts, setHistoricalAttempts] = useState<
+    HistoricalExamAttemptRecord[]
   >([]);
+
+  const getIdTokenRef = useRef(getIdToken);
+  useEffect(() => {
+    getIdTokenRef.current = getIdToken;
+  }, [getIdToken]);
 
   const booksMetaById = useMemo(() => {
     const map = new Map<string, PurchasedBookCatalogMeta>();
@@ -402,9 +413,9 @@ export function PurchasedLibraryView({
     });
   }, [examPurchases, examsMetaById, savedExamPacksMap]);
 
-  // Sync in-progress CBT status & completed attempt scores for paid users
+  // Sync in-progress CBT status & historical attempt records for signed-in users
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!userId) return;
     const syncExamState = () => {
       const nextResumable: Record<string, boolean> = {};
       for (const row of resolvedExamRows) {
@@ -413,7 +424,7 @@ export function PurchasedLibraryView({
             row.record.urlSlug,
             s.id,
             'full',
-            user.uid
+            userId
           );
           if (sess?.status === 'in_progress') {
             nextResumable[`${row.record.urlSlug}::${s.id}`] = true;
@@ -421,7 +432,7 @@ export function PurchasedLibraryView({
         }
       }
       setResumableSets(nextResumable);
-      setCompletedAttempts(getCompletedAttemptsSync(user.uid));
+      setHistoricalAttempts(getHistoricalAttemptsSync(userId));
     };
     syncExamState();
     window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, syncExamState);
@@ -430,18 +441,49 @@ export function PurchasedLibraryView({
       window.removeEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, syncExamState);
       window.removeEventListener('storage', syncExamState);
     };
-  }, [resolvedExamRows, user?.uid]);
+  }, [resolvedExamRows, userId]);
 
-  const latestAttemptBySetMap = useMemo(() => {
-    const map = new Map<string, CompletedAttemptSummary>();
-    for (const att of completedAttempts) {
-      const key = `${att.examSlug}::${att.setId}`;
-      if (!map.has(key)) {
-        map.set(key, att);
+  // Hydrate full historical exam attempts from Firebase Firestore on mount / reconnect
+  useEffect(() => {
+    if (!userId || !isOnline) return;
+    let active = true;
+    void (async () => {
+      try {
+        const token = await getIdTokenRef.current();
+        if (!active || !token) return;
+        const merged = await fetchAndMergeCloudExamAttempts({
+          bearerToken: token,
+          uid: userId,
+        });
+        if (active) {
+          setHistoricalAttempts(merged);
+        }
+      } catch {
+        // Ignore transient network errors; local cache remains active
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [userId, isOnline]);
+
+  const attemptsBySetKeyMap = useMemo(() => {
+    const map = new Map<string, HistoricalExamAttemptRecord[]>();
+    for (const row of resolvedExamRows) {
+      for (const s of row.sets) {
+        const matches = historicalAttempts.filter(
+          (att) =>
+            att.setId === s.id &&
+            (att.examSlug === row.record.urlSlug ||
+              (Boolean(row.record.itemId) && att.packId === row.record.itemId))
+        );
+        if (matches.length > 0) {
+          map.set(`${row.record.itemId}::${s.id}`, matches);
+        }
       }
     }
     return map;
-  }, [completedAttempts]);
+  }, [resolvedExamRows, historicalAttempts]);
 
   const cancelActiveDownload = (taskKey: string) => {
     const ctrl = abortControllersRef.current.get(taskKey);
@@ -714,6 +756,19 @@ export function PurchasedLibraryView({
     }
   };
 
+  const handleOpenSetAttemptHistory = (
+    record: UserPurchaseRecord,
+    setId: string,
+    attemptId: string,
+    source: 'online' | 'offline'
+  ) => {
+    const encodedSetId = encodeURIComponent(setId);
+    const encodedAttemptId = encodeURIComponent(attemptId);
+    router.push(
+      `/attempt/${record.urlSlug}/${encodedSetId}?mode=full&source=${source}&view=review&attemptId=${encodedAttemptId}`
+    );
+  };
+
   const handleSyncEntitlements = async () => {
     if (!isOnline) {
       showToast('Reconnect to sync your latest cloud purchases.', 'danger');
@@ -721,11 +776,24 @@ export function PurchasedLibraryView({
     }
     setIsSyncingEntitlements(true);
     try {
-      await Promise.all([
+      const syncTasks: Promise<unknown>[] = [
         refreshLibraryEntitlements(),
         refreshVaultSnapshot(),
-      ]);
-      showToast('Library entitlements synced.', 'success');
+      ];
+      if (user?.uid) {
+        syncTasks.push(
+          getIdToken().then((token) =>
+            token
+              ? fetchAndMergeCloudExamAttempts({
+                  bearerToken: token,
+                  uid: user.uid,
+                }).then((merged) => setHistoricalAttempts(merged))
+              : undefined
+          )
+        );
+      }
+      await Promise.all(syncTasks);
+      showToast('Library purchases and exam history synced.', 'success');
     } finally {
       setIsSyncingEntitlements(false);
     }
@@ -1335,20 +1403,24 @@ export function PurchasedLibraryView({
             const remainingSets = sets.slice(1);
             const expectedSetIds = sets.map((s) => s.id);
 
-            // Completed stats across sets in this pack
+            // Completed stats & historical attempt counts across sets in this pack
             let completedSetsCount = 0;
+            let totalPackAttemptsCount = 0;
             let bestAccuracyPct: number | null = null;
             for (const s of sets) {
-              const att = latestAttemptBySetMap.get(
-                `${record.urlSlug}::${s.id}`
-              );
-              if (att) {
+              const setAttempts =
+                attemptsBySetKeyMap.get(`${record.itemId}::${s.id}`) || [];
+              if (setAttempts.length > 0) {
                 completedSetsCount += 1;
-                if (
-                  bestAccuracyPct === null ||
-                  att.accuracyPct > bestAccuracyPct
-                ) {
-                  bestAccuracyPct = Math.round(att.accuracyPct);
+                totalPackAttemptsCount += setAttempts.length;
+                for (const att of setAttempts) {
+                  const roundedAcc = Math.round(att.accuracyPct);
+                  if (
+                    bestAccuracyPct === null ||
+                    roundedAcc > bestAccuracyPct
+                  ) {
+                    bestAccuracyPct = roundedAcc;
+                  }
                 }
               }
             }
@@ -1358,7 +1430,7 @@ export function PurchasedLibraryView({
               (s) => resumableSets[`${record.urlSlug}::${s.id}`]
             );
             const nextUnattemptedSet = sets.find(
-              (s) => !latestAttemptBySetMap.has(`${record.urlSlug}::${s.id}`)
+              (s) => !attemptsBySetKeyMap.has(`${record.itemId}::${s.id}`)
             );
             const quickOnlineSetId =
               resumableMatch?.id ||
@@ -1375,6 +1447,15 @@ export function PurchasedLibraryView({
               isPackSavedOffline &&
               (!isOnline || (examOfflineReadyToggle[record.itemId] ?? true));
 
+            const hasActiveOrAttemptedRemainingSet = remainingSets.some(
+              (s) =>
+                Boolean(resumableSets[`${record.urlSlug}::${s.id}`]) ||
+                attemptsBySetKeyMap.has(`${record.itemId}::${s.id}`)
+            );
+            const isRemainingOpen =
+              expandedRemainingSets[record.itemId] ??
+              hasActiveOrAttemptedRemainingSet;
+
             const purchasedDate = formatPurchaseDateShort(record.createdAtIso);
             const displayCategory = catalogMeta?.category || '';
 
@@ -1385,19 +1466,30 @@ export function PurchasedLibraryView({
               const isResumable = Boolean(
                 resumableSets[`${record.urlSlug}::${mockSet.id}`]
               );
-              const latestAttempt = latestAttemptBySetMap.get(
-                `${record.urlSlug}::${mockSet.id}`
-              );
+              const setAttempts =
+                attemptsBySetKeyMap.get(`${record.itemId}::${mockSet.id}`) ||
+                [];
+              const latestAttempt = setAttempts[0] || null;
+              const bestScore =
+                setAttempts.length > 1
+                  ? setAttempts.reduce(
+                      (best, cur) =>
+                        cur.totalScore > best ? cur.totalScore : best,
+                      setAttempts[0].totalScore
+                    )
+                  : null;
               const setLaunchKey = `launch:exam:${record.itemId}:${mockSet.id}`;
               const setSource: 'online' | 'offline' = effectivePackOffline
                 ? 'offline'
                 : 'online';
+              const reviewSource: 'online' | 'offline' =
+                isOnline && !effectivePackOffline ? 'online' : 'offline';
               const canAttemptSet = isOnline || isPackSavedOffline;
 
               return (
                 <div
                   key={mockSet.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 py-2.5 border-t border-[var(--border-subtle)]/70 first:border-t-0"
+                  className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 py-2.5 border-t border-[var(--border-subtle)]/70 first:border-t-0"
                 >
                   <div className="min-w-0 flex items-baseline gap-2">
                     <span
@@ -1406,7 +1498,7 @@ export function PurchasedLibraryView({
                     >
                       {isLastBranch ? '└─' : '├─'}
                     </span>
-                    <div className="min-w-0 text-xs sm:text-sm flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <div className="min-w-0 text-xs sm:text-sm flex flex-wrap items-baseline gap-x-2 gap-y-0.5 tabular-nums">
                       <span className="font-semibold text-[var(--text-main)]">
                         {mockSet.title}
                       </span>
@@ -1416,38 +1508,75 @@ export function PurchasedLibraryView({
                       </span>
                       {latestAttempt && (
                         <span className="text-xs font-medium text-[var(--status-success)] whitespace-nowrap">
-                          · Last Score: {latestAttempt.totalScore}/
+                          · Last: {latestAttempt.totalScore}/
                           {latestAttempt.maxScore} (
-                          {Math.round(latestAttempt.accuracyPct)}%)
+                          {Math.round(latestAttempt.accuracyPct)}%) ·{' '}
+                          {formatDurationCompact(
+                            latestAttempt.totalTimeSpentMs
+                          )}
+                        </span>
+                      )}
+                      {setAttempts.length > 1 && bestScore !== null && (
+                        <span className="text-xs text-[var(--text-muted)] whitespace-nowrap">
+                          · {setAttempts.length} Attempts (Best {bestScore}/
+                          {latestAttempt?.maxScore ?? mockSet.totalMarks})
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={
-                      !canAttemptSet || launchingTaskKey === setLaunchKey
-                    }
-                    onClick={() =>
-                      void handleLaunchExamSet(record, mockSet.id, setSource)
-                    }
-                    className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto"
-                  >
-                    <span>
-                      {launchingTaskKey === setLaunchKey
-                        ? 'Opening...'
-                        : isResumable
-                        ? 'Resume'
-                        : latestAttempt
-                        ? 'Retake Set'
-                        : 'Attempt Now'}
-                    </span>
-                    <ArrowRight
-                      className="w-3.5 h-3.5 shrink-0"
-                      aria-hidden="true"
-                    />
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-start lg:self-auto">
+                    {latestAttempt && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenSetAttemptHistory(
+                            record,
+                            mockSet.id,
+                            latestAttempt.attemptId,
+                            reviewSource
+                          )
+                        }
+                        aria-label={`View full telemetry, solution review, and analysis for ${mockSet.title}`}
+                        className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--brand-primary)]/40 bg-[var(--bg-elevated)] hover:border-[var(--brand-primary)] text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0"
+                      >
+                        <BarChart3
+                          className="w-3.5 h-3.5 text-[var(--brand-primary)] shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span>
+                          {setAttempts.length > 1
+                            ? `Analysis & Solutions (${setAttempts.length})`
+                            : 'Analysis & Solutions'}
+                        </span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={
+                        !canAttemptSet || launchingTaskKey === setLaunchKey
+                      }
+                      onClick={() =>
+                        void handleLaunchExamSet(record, mockSet.id, setSource)
+                      }
+                      className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 text-xs font-semibold text-[var(--text-main)] transition-colors whitespace-nowrap shrink-0"
+                    >
+                      <span>
+                        {launchingTaskKey === setLaunchKey
+                          ? 'Opening...'
+                          : isResumable
+                          ? 'Resume'
+                          : latestAttempt
+                          ? 'Retake Set'
+                          : 'Attempt Now'}
+                      </span>
+                      <ArrowRight
+                        className="w-3.5 h-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </div>
                 </div>
               );
             };
@@ -1494,6 +1623,18 @@ export function PurchasedLibraryView({
                             <span aria-hidden="true">·</span>
                             <span>
                               Completed {completedSetsCount}/{sets.length}
+                            </span>
+                          </>
+                        )}
+                        {totalPackAttemptsCount > 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              {totalPackAttemptsCount}{' '}
+                              {totalPackAttemptsCount === 1
+                                ? 'Attempt'
+                                : 'Attempts'}{' '}
+                              Saved
                             </span>
                           </>
                         )}
@@ -1668,14 +1809,24 @@ export function PurchasedLibraryView({
                   </div>
                 </div>
 
-                {/* Set-1 Always Pinned + Collapsible Sets 2..N */}
+                {/* Set-1 Always Pinned + Expandable Sets 2..N (Auto-expanded when any remaining set has attempts or in-progress state) */}
                 {firstSet && (
                   <div className="ps-2 sm:ps-28 space-y-1">
                     {renderSetRow(firstSet, remainingSets.length === 0)}
 
                     {remainingSets.length > 0 && (
-                      <details className="group">
-                        <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer select-none inline-flex items-center gap-2 min-h-[44px] px-2 -ms-2 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)]/60 transition-colors">
+                      <div>
+                        <button
+                          type="button"
+                          aria-expanded={isRemainingOpen}
+                          onClick={() =>
+                            setExpandedRemainingSets((prev) => ({
+                              ...prev,
+                              [record.itemId]: !isRemainingOpen,
+                            }))
+                          }
+                          className="inline-flex items-center gap-2 min-h-[44px] px-2 -ms-2 rounded-lg text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-elevated)]/60 transition-colors whitespace-nowrap"
+                        >
                           <span
                             aria-hidden="true"
                             className="font-mono text-[var(--text-muted)]"
@@ -1683,21 +1834,31 @@ export function PurchasedLibraryView({
                             └─
                           </span>
                           <ChevronDown
-                            className="w-3.5 h-3.5 transition-transform duration-150 group-open:rotate-180 shrink-0"
+                            className={cn(
+                              'w-3.5 h-3.5 transition-transform duration-150 shrink-0',
+                              isRemainingOpen && 'rotate-180'
+                            )}
                             aria-hidden="true"
                           />
                           <span>
-                            Show {remainingSets.length} More Mock{' '}
-                            {remainingSets.length === 1 ? 'Set' : 'Sets'}
+                            {isRemainingOpen
+                              ? `Hide ${remainingSets.length} Mock ${
+                                  remainingSets.length === 1 ? 'Set' : 'Sets'
+                                }`
+                              : `Show ${remainingSets.length} More Mock ${
+                                  remainingSets.length === 1 ? 'Set' : 'Sets'
+                                }`}
                           </span>
-                        </summary>
+                        </button>
 
-                        <div className="ps-4 sm:ps-6 pt-1 divide-y divide-[var(--border-subtle)]/70">
-                          {remainingSets.map((s, idx) =>
-                            renderSetRow(s, idx === remainingSets.length - 1)
-                          )}
-                        </div>
-                      </details>
+                        {isRemainingOpen && (
+                          <div className="ps-4 sm:ps-6 pt-1 divide-y divide-[var(--border-subtle)]/70">
+                            {remainingSets.map((s, idx) =>
+                              renderSetRow(s, idx === remainingSets.length - 1)
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

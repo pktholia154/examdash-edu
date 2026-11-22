@@ -66,13 +66,19 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
+  manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
     title: 'ExamDash',
   },
   icons: {
-    icon: '/icon.svg',
+    icon: [
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    shortcut: '/favicon-32x32.png',
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
@@ -98,8 +104,8 @@ export const metadata: Metadata = {
   },
 };
 
-// < 400B synchronous pre-paint theme script syncing .dark on <html> without mutating inline styles or <meta name="theme-color"> pre-hydration
-const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme'),d=s?s==='dark':matchMedia('(prefers-color-scheme:dark)').matches;document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
+// < 400B synchronous pre-paint theme + early beforeinstallprompt capture script (zero DOM attribute mutations beyond .dark)
+const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('ed-theme'),d=s?s==='dark':matchMedia('(prefers-color-scheme:dark)').matches;document.documentElement.classList.toggle('dark',d);window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__edBip=e;window.dispatchEvent(new Event('ed-bip-ready'));});}catch(e){}})();`;
 
 // Speculation Rules: pointerdown/click prefetch only (zero background WRS chunk fetches; instant on user tap/click)
 const SPECULATION_RULES_JSON = JSON.stringify({
@@ -112,6 +118,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
           { not: { href_matches: '/purchased*' } },
           { not: { href_matches: '/read/*' } },
           { not: { href_matches: '/attempt/*' } },
+          { not: { selector_matches: '[target="_blank"]' } },
         ],
       },
       eagerness: 'conservative',

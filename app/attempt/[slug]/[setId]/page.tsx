@@ -23,6 +23,8 @@ export default async function AttemptSpecificSetPage({
     mode?: string;
     autostart?: string;
     source?: string;
+    view?: string;
+    attemptId?: string;
   }>;
 }) {
   const { slug, setId } = await params;
@@ -40,6 +42,12 @@ export default async function AttemptSpecificSetPage({
       initialMode={sp.mode === 'trial' ? 'trial' : 'full'}
       initialSource={sp.source === 'offline' ? 'offline' : 'online'}
       autostart={sp.autostart === '1'}
+      initialView={sp.view === 'review' ? 'review' : undefined}
+      initialAttemptId={
+        typeof sp.attemptId === 'string' && sp.attemptId
+          ? sp.attemptId
+          : undefined
+      }
     />
   );
 }

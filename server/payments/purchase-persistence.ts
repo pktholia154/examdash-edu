@@ -698,47 +698,71 @@ export async function deleteUserProfileFromFirestore(
 ): Promise<void> {
   const { docPrefix, restBase } = getFirestoreDbResourceRoot();
 
-  // Discover any published reviews authored by this user so self-serve account deletion cleans them up
-  const reviewQueryRes = await firestoreRestRequest<
-    Array<{ document?: { name?: string } }>
-  >({
-    method: 'POST',
-    path: `${restBase}:runQuery`,
-    bearerIdToken,
-    body: {
-      structuredQuery: {
-        from: [{ collectionId: 'reviews' }],
-        where: {
-          compositeFilter: {
-            op: 'AND',
-            filters: [
-              {
-                fieldFilter: {
-                  field: { fieldPath: 'status' },
-                  op: 'EQUAL',
-                  value: { stringValue: 'published' },
+  const [reviewQueryRes, attemptsQueryRes] = await Promise.all([
+    firestoreRestRequest<Array<{ document?: { name?: string } }>>({
+      method: 'POST',
+      path: `${restBase}:runQuery`,
+      bearerIdToken,
+      body: {
+        structuredQuery: {
+          from: [{ collectionId: 'reviews' }],
+          where: {
+            compositeFilter: {
+              op: 'AND',
+              filters: [
+                {
+                  fieldFilter: {
+                    field: { fieldPath: 'status' },
+                    op: 'EQUAL',
+                    value: { stringValue: 'published' },
+                  },
                 },
-              },
-              {
-                fieldFilter: {
-                  field: { fieldPath: 'userId' },
-                  op: 'EQUAL',
-                  value: { stringValue: userId },
+                {
+                  fieldFilter: {
+                    field: { fieldPath: 'userId' },
+                    op: 'EQUAL',
+                    value: { stringValue: userId },
+                  },
                 },
-              },
-            ],
+              ],
+            },
           },
+          limit: 200,
         },
-        limit: 200,
       },
-    },
-  }).catch(() => null);
+    }).catch(() => null),
+    firestoreRestRequest<Array<{ document?: { name?: string } }>>({
+      method: 'POST',
+      path: `${restBase}/users/${encodeURIComponent(userId)}:runQuery`,
+      bearerIdToken,
+      body: {
+        structuredQuery: {
+          from: [{ collectionId: 'examAttempts' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'userId' },
+              op: 'EQUAL',
+              value: { stringValue: userId },
+            },
+          },
+          limit: 200,
+        },
+      },
+    }).catch(() => null),
+  ]);
 
-  const reviewDeletes: Array<{ delete: string }> = [];
+  const childDeletes: Array<{ delete: string }> = [];
   if (reviewQueryRes && Array.isArray(reviewQueryRes.data)) {
     for (const row of reviewQueryRes.data) {
       if (row?.document?.name) {
-        reviewDeletes.push({ delete: row.document.name });
+        childDeletes.push({ delete: row.document.name });
+      }
+    }
+  }
+  if (attemptsQueryRes && Array.isArray(attemptsQueryRes.data)) {
+    for (const row of attemptsQueryRes.data) {
+      if (row?.document?.name) {
+        childDeletes.push({ delete: row.document.name });
       }
     }
   }
@@ -749,7 +773,7 @@ export async function deleteUserProfileFromFirestore(
     bearerIdToken,
     body: {
       writes: [
-        ...reviewDeletes,
+        ...childDeletes.slice(0, 450),
         { delete: `${docPrefix}/users/${userId}/private/contact` },
         { delete: `${docPrefix}/users/${userId}` },
       ],

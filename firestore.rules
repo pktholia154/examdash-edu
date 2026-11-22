@@ -330,6 +330,246 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidPerformanceInsights(insights) {
+      return insights is map
+        && insights.keys().hasAll([
+          'pacingVerdict',
+          'negativeMarkingImpactPct',
+          'slowQuestionsCount',
+          'markedUnattemptedCount',
+          'diagnosticSummary',
+          'actionableTakeaways'
+        ])
+        && insights.keys().hasOnly([
+          'strongestSectionTitle',
+          'strongestSectionAccuracyPct',
+          'focusSectionTitle',
+          'focusSectionAccuracyPct',
+          'pacingVerdict',
+          'negativeMarkingImpactPct',
+          'slowQuestionsCount',
+          'markedUnattemptedCount',
+          'diagnosticSummary',
+          'actionableTakeaways'
+        ])
+        && (!('strongestSectionTitle' in insights) || (insights.strongestSectionTitle is string && insights.strongestSectionTitle.size() <= 200))
+        && (!('strongestSectionAccuracyPct' in insights) || ((insights.strongestSectionAccuracyPct is int || insights.strongestSectionAccuracyPct is float) && insights.strongestSectionAccuracyPct >= 0 && insights.strongestSectionAccuracyPct <= 100))
+        && (!('focusSectionTitle' in insights) || (insights.focusSectionTitle is string && insights.focusSectionTitle.size() <= 200))
+        && (!('focusSectionAccuracyPct' in insights) || ((insights.focusSectionAccuracyPct is int || insights.focusSectionAccuracyPct is float) && insights.focusSectionAccuracyPct >= 0 && insights.focusSectionAccuracyPct <= 100))
+        && insights.pacingVerdict is string
+        && insights.pacingVerdict.size() >= 1
+        && insights.pacingVerdict.size() <= 80
+        && (insights.negativeMarkingImpactPct is int || insights.negativeMarkingImpactPct is float)
+        && insights.negativeMarkingImpactPct >= 0
+        && insights.negativeMarkingImpactPct <= 1000
+        && insights.slowQuestionsCount is int
+        && insights.slowQuestionsCount >= 0
+        && insights.slowQuestionsCount <= 500
+        && insights.markedUnattemptedCount is int
+        && insights.markedUnattemptedCount >= 0
+        && insights.markedUnattemptedCount <= 500
+        && insights.diagnosticSummary is string
+        && insights.diagnosticSummary.size() >= 1
+        && insights.diagnosticSummary.size() <= 1500
+        && insights.actionableTakeaways is list
+        && insights.actionableTakeaways.size() >= 1
+        && insights.actionableTakeaways.size() <= 8
+        && insights.actionableTakeaways[0] is string
+        && insights.actionableTakeaways[0].size() <= 400;
+    }
+
+    function isValidExamAttemptKeysAndIds(data, attemptId) {
+      return data.keys().hasAll([
+          'attemptId',
+          'userId',
+          'packId',
+          'examSlug',
+          'examTitle',
+          'setId',
+          'setTitle',
+          'mode',
+          'totalScore',
+          'maxScore',
+          'scorePct',
+          'accuracyPct',
+          'attemptPct',
+          'totalQuestions',
+          'totalAttempted',
+          'totalCorrect',
+          'totalPartial',
+          'totalWrong',
+          'totalUnattempted',
+          'positiveMarksEarned',
+          'negativeMarksLost',
+          'totalTimeSpentMs',
+          'avgTimePerAttemptedMs',
+          'responses',
+          'telemetry',
+          'markedForReview',
+          'sectionBreakdown',
+          'questionBreakdown',
+          'performanceInsights',
+          'startedAtIso',
+          'completedAtIso',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'attemptId',
+          'userId',
+          'packId',
+          'examSlug',
+          'examTitle',
+          'setId',
+          'setTitle',
+          'mode',
+          'totalScore',
+          'maxScore',
+          'scorePct',
+          'accuracyPct',
+          'attemptPct',
+          'totalQuestions',
+          'totalAttempted',
+          'totalCorrect',
+          'totalPartial',
+          'totalWrong',
+          'totalUnattempted',
+          'positiveMarksEarned',
+          'negativeMarksLost',
+          'totalTimeSpentMs',
+          'avgTimePerAttemptedMs',
+          'responses',
+          'telemetry',
+          'markedForReview',
+          'sectionBreakdown',
+          'questionBreakdown',
+          'performanceInsights',
+          'perceivedDifficulty',
+          'pacingFeedback',
+          'reflectionNote',
+          'startedAtIso',
+          'completedAtIso',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.attemptId is string
+        && data.attemptId.size() >= 5
+        && data.attemptId.size() <= 128
+        && data.attemptId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.attemptId == attemptId
+        && data.userId is string
+        && data.userId.size() >= 1
+        && data.userId.size() <= 128
+        && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userId == request.auth.uid
+        && data.packId is string
+        && data.packId.size() >= 1
+        && data.packId.size() <= 128
+        && data.packId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.examSlug is string
+        && data.examSlug.size() >= 1
+        && data.examSlug.size() <= 200
+        && data.examSlug.matches('^[a-z0-9\\-]+$')
+        && data.examTitle is string
+        && data.examTitle.size() >= 1
+        && data.examTitle.size() <= 300
+        && data.setId is string
+        && data.setId.size() >= 1
+        && data.setId.size() <= 128
+        && data.setId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.setTitle is string
+        && data.setTitle.size() >= 1
+        && data.setTitle.size() <= 300
+        && data.mode is string
+        && data.mode.size() <= 16
+        && (data.mode == 'trial' || data.mode == 'full');
+    }
+
+    function isValidExamAttemptScoresAndCounts(data) {
+      return (data.totalScore is int || data.totalScore is float)
+        && data.totalScore >= -10000
+        && data.totalScore <= 10000
+        && (data.maxScore is int || data.maxScore is float)
+        && data.maxScore >= 0
+        && data.maxScore <= 10000
+        && (data.scorePct is int || data.scorePct is float)
+        && data.scorePct >= 0
+        && data.scorePct <= 100
+        && (data.accuracyPct is int || data.accuracyPct is float)
+        && data.accuracyPct >= 0
+        && data.accuracyPct <= 100
+        && (data.attemptPct is int || data.attemptPct is float)
+        && data.attemptPct >= 0
+        && data.attemptPct <= 100
+        && data.totalQuestions is int
+        && data.totalQuestions >= 1
+        && data.totalQuestions <= 500
+        && data.totalAttempted is int
+        && data.totalAttempted >= 0
+        && data.totalAttempted <= 500
+        && data.totalCorrect is int
+        && data.totalCorrect >= 0
+        && data.totalCorrect <= 500
+        && data.totalPartial is int
+        && data.totalPartial >= 0
+        && data.totalPartial <= 500
+        && data.totalWrong is int
+        && data.totalWrong >= 0
+        && data.totalWrong <= 500
+        && data.totalUnattempted is int
+        && data.totalUnattempted >= 0
+        && data.totalUnattempted <= 500
+        && (data.positiveMarksEarned is int || data.positiveMarksEarned is float)
+        && data.positiveMarksEarned >= 0
+        && data.positiveMarksEarned <= 10000
+        && (data.negativeMarksLost is int || data.negativeMarksLost is float)
+        && data.negativeMarksLost >= 0
+        && data.negativeMarksLost <= 10000
+        && data.totalTimeSpentMs is int
+        && data.totalTimeSpentMs >= 0
+        && data.totalTimeSpentMs <= 86400000
+        && data.avgTimePerAttemptedMs is int
+        && data.avgTimePerAttemptedMs >= 0
+        && data.avgTimePerAttemptedMs <= 86400000;
+    }
+
+    function isValidExamAttemptPayloadsAndFeedback(data) {
+      return data.responses is map
+        && data.responses.size() <= 500
+        && data.telemetry is map
+        && data.telemetry.size() <= 500
+        && data.markedForReview is map
+        && data.markedForReview.size() <= 500
+        && data.sectionBreakdown is list
+        && data.sectionBreakdown.size() >= 1
+        && data.sectionBreakdown.size() <= 30
+        && data.sectionBreakdown[0] is map
+        && data.sectionBreakdown[0].size() <= 20
+        && data.questionBreakdown is list
+        && data.questionBreakdown.size() >= 1
+        && data.questionBreakdown.size() <= 500
+        && data.questionBreakdown[0] is map
+        && data.questionBreakdown[0].size() <= 20
+        && isValidPerformanceInsights(data.performanceInsights)
+        && (!('perceivedDifficulty' in data) || (data.perceivedDifficulty is string && data.perceivedDifficulty.size() <= 24 && (data.perceivedDifficulty == 'easy' || data.perceivedDifficulty == 'moderate' || data.perceivedDifficulty == 'challenging' || data.perceivedDifficulty == 'tough')))
+        && (!('pacingFeedback' in data) || (data.pacingFeedback is string && data.pacingFeedback.size() <= 24 && (data.pacingFeedback == 'comfortable' || data.pacingFeedback == 'balanced' || data.pacingFeedback == 'rushed' || data.pacingFeedback == 'time_shortage')))
+        && (!('reflectionNote' in data) || (data.reflectionNote is string && data.reflectionNote.size() <= 2000))
+        && data.startedAtIso is string
+        && data.startedAtIso.size() >= 10
+        && data.startedAtIso.size() <= 64
+        && data.completedAtIso is string
+        && data.completedAtIso.size() >= 10
+        && data.completedAtIso.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserExamAttempt(data, attemptId) {
+      return isValidExamAttemptKeysAndIds(data, attemptId)
+        && isValidExamAttemptScoresAndCounts(data)
+        && isValidExamAttemptPayloadsAndFeedback(data);
+    }
+
     // Connection Probe Read-Only Document
     match /test/connection {
       allow get: if true;
@@ -529,6 +769,59 @@ service cloud.firestore {
         allow delete: if isVerifiedOwner(userId)
           && isValidId(userId)
           && isValidId(cartKey);
+      }
+
+      // Historical Exam Set Attempts, Telemetry, Solution Review Outcomes & Learner Feedback
+      match /examAttempts/{attemptId} {
+        allow get: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(attemptId)
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isSignedIn()
+          && request.auth.uid == userId
+          && resource.data.userId == request.auth.uid;
+
+        allow create: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(attemptId)
+          && isValidUserExamAttempt(incoming(), attemptId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasParentUser(userId);
+
+        allow update: if (
+          isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(attemptId)
+          && isValidUserExamAttempt(incoming(), attemptId)
+          && incoming().attemptId == existing().attemptId
+          && incoming().userId == existing().userId
+          && incoming().packId == existing().packId
+          && incoming().examSlug == existing().examSlug
+          && incoming().setId == existing().setId
+          && incoming().mode == existing().mode
+          && incoming().totalScore == existing().totalScore
+          && incoming().maxScore == existing().maxScore
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: SaveAttemptFeedback
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'perceivedDifficulty',
+              'pacingFeedback',
+              'reflectionNote',
+              'updatedAt'
+            ])
+          )
+          && exists(/databases/$(database)/documents/users/$(userId))
+        );
+
+        allow delete: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(attemptId);
       }
     }
   }

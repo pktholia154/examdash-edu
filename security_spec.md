@@ -23,6 +23,10 @@
    - Public `get` and `list` are permitted ONLY when `resource.data.status == 'published'`. Zero PII (`email`, `phone`, `address`) is permitted in `/reviews/{reviewId}` (`hasOnly` allowlist).
    - `rating` must be an integer in `[1, 5]`, `comment` must be `10..2000` characters, `authorName` `1..80` characters, optional `title` `1..120` characters.
    - `verifiedPurchase == true` is permitted ONLY when `exists(/databases/$(database)/documents/users/$(request.auth.uid)/purchases/$(data.collectionName + '_' + data.itemId))` is true, preventing spoofed Verified Purchase badges.
+8. **Historical Exam Set Attempts, Telemetry & Feedback (`/users/{userId}/examAttempts/{attemptId}`)**:
+   - Strictly owner-scoped (`request.auth.uid == userId && resource.data.userId == request.auth.uid`), requiring verified email on writes and parent `/users/{userId}` Master Gate (`exists` / `existsAfter`).
+   - Enforces native Firestore `map` and `list` structures (zero JSON string blobs) with strict volumetric caps (`responses.size() <= 500`, `telemetry.size() <= 500`, `sectionBreakdown.size() <= 30`, `questionBreakdown.size() <= 500`, `reflectionNote.size() <= 2000`).
+   - Scores, responses, section/question telemetry, and diagnostic `performanceInsights` are **strictly immutable** after creation; `allow update` permits ONLY the `SaveAttemptFeedback` action (`affectedKeys().hasOnly(['perceivedDifficulty', 'pacingFeedback', 'reflectionNote', 'updatedAt'])`) with `updatedAt == request.time`.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
 
@@ -32,14 +36,15 @@
 4. **Shadow Ghost Field Injection**: Owner creates `/users/{uid}` with extra field `{ "isAdmin": true }` -> `PERMISSION_DENIED` (`hasOnly` check fails).
 5. **PII Leakage in Public Profile**: User attempts to write `email` directly into `/users/{uid}` -> `PERMISSION_DENIED`.
 6. **Cross-User PII Read**: User B attempts `get` on `/users/{userA}/private/contact` -> `PERMISSION_DENIED`.
-7. **Unverified Email Spoof**: User with `email_verified == false` attempts to create `/users/{uid}` or `/reviews/{id}` -> `PERMISSION_DENIED`.
+7. **Unverified Email Spoof**: User with `email_verified == false` attempts to create `/users/{uid}`, `/reviews/{id}`, or `/users/{uid}/examAttempts/{attemptId}` -> `PERMISSION_DENIED`.
 8. **ID Poisoning / Denial-of-Wallet**: Attacker passes a 500-character document ID or 100KB `displayName` -> `PERMISSION_DENIED`.
-9. **Orphaned Subcollection Write**: Owner attempts to write `/users/{uid}/cart/books_B1` when `/users/{uid}` neither `exists()` nor `existsAfter()` -> `PERMISSION_DENIED`.
+9. **Orphaned Subcollection Write**: Owner attempts to write `/users/{uid}/cart/books_B1` or `/users/{uid}/examAttempts/a1` when `/users/{uid}` neither `exists()` nor `existsAfter()` -> `PERMISSION_DENIED`.
 10. **Identity Spoofing in Payload**: User A writes `/users/{userA}/purchases/p1` with `userId: "userB"` -> `PERMISSION_DENIED`.
 11. **Terminal Purchase Mutation**: User A attempts `update` on `/users/{userA}/purchases/p1` (`status == 'completed'`) to alter `itemId` -> `PERMISSION_DENIED`.
 12. **Client-Forged Timestamp**: User A creates `/users/{userA}` with a past/future `createdAt` (`!= request.time`) -> `PERMISSION_DENIED`.
 13. **Paid Purchase Without Razorpay Proof**: User A writes `/users/{userA}/purchases/p2` with `paidPrice: 499` and omits `razorpayOrderId` / `razorpayPaymentId` or sends malformed IDs -> `PERMISSION_DENIED`.
 14. **Spoofed Verified Purchase Review**: User A creates `/reviews/books_B1_userA` with `verifiedPurchase: true` without owning `/users/userA/purchases/books_B1` -> `PERMISSION_DENIED`.
 15. **Multi-Review Spam / Out-of-Range Rating**: User A creates `/reviews/books_B1_random2` (violating deterministic ID) or sets `rating: 6` / `email: "a@b.com"` -> `PERMISSION_DENIED`.
-
-
+16. **Historical Score Tampering on Update**: User A attempts `update` on `/users/{userA}/examAttempts/att_1` to inflate `totalScore` or alter `responses` -> `PERMISSION_DENIED` (`SaveAttemptFeedback` `affectedKeys().hasOnly(...)` & score immutability gates reject).
+17. **Cross-User Attempt Telemetry Scraping**: User B attempts `list` or `get` on `/users/{userA}/examAttempts` -> `PERMISSION_DENIED` (`request.auth.uid == userId && resource.data.userId == request.auth.uid`).
+18. **Unbounded Array / Map Resource Exhaustion in Exam Attempt**: Attacker submits `questionBreakdown` with 2,000 items or `reflectionNote` of 50KB -> `PERMISSION_DENIED`.

@@ -234,3 +234,65 @@ export interface CompletedAttemptSummary {
   completedAtIso: string;
   synced: boolean;
 }
+
+export type PerceivedDifficulty =
+  | 'easy'
+  | 'moderate'
+  | 'challenging'
+  | 'tough';
+
+export type PacingFeedback =
+  | 'comfortable'
+  | 'balanced'
+  | 'rushed'
+  | 'time_shortage';
+
+export interface QuestionAttemptSnapshotItem extends QuestionAnalyticsItem {
+  userAnswerSummary: string;
+  correctAnswerSummary: string;
+}
+
+export interface AttemptPerformanceInsights {
+  strongestSectionTitle?: string;
+  strongestSectionAccuracyPct?: number;
+  focusSectionTitle?: string;
+  focusSectionAccuracyPct?: number;
+  pacingVerdict: string;
+  negativeMarkingImpactPct: number;
+  slowQuestionsCount: number;
+  markedUnattemptedCount: number;
+  diagnosticSummary: string;
+  actionableTakeaways: string[];
+}
+
+export interface AttemptFeedbackPatch {
+  perceivedDifficulty?: PerceivedDifficulty | null;
+  pacingFeedback?: PacingFeedback | null;
+  reflectionNote?: string | null;
+}
+
+export interface HistoricalExamAttemptRecord extends CompletedAttemptSummary {
+  attemptId: string;
+  userId?: string;
+  scorePct: number;
+  attemptPct: number;
+  totalCorrect: number;
+  totalPartial: number;
+  totalWrong: number;
+  totalUnattempted: number;
+  positiveMarksEarned: number;
+  negativeMarksLost: number;
+  avgTimePerAttemptedMs: number;
+  responses: Record<string, unknown>;
+  telemetry: Record<string, QuestionTelemetry>;
+  markedForReview: Record<string, boolean>;
+  sectionBreakdown: SectionAnalyticsItem[];
+  questionBreakdown: QuestionAttemptSnapshotItem[];
+  performanceInsights: AttemptPerformanceInsights;
+  perceivedDifficulty?: PerceivedDifficulty;
+  pacingFeedback?: PacingFeedback;
+  reflectionNote?: string;
+  startedAtIso: string;
+  updatedAtIso: string;
+}
+

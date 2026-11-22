@@ -59,4 +59,16 @@ test('Dirty Dozen: ItemReview rules enforce deterministic 1-review-per-user ID, 
   assert.match(rules, /hasValidReviewPurchaseProof\(incoming\(\)\)/);
 });
 
-
+test('Dirty Dozen: UserExamAttempt rules enforce owner isolation, bounded telemetry arrays/maps, score immutability, and SaveAttemptFeedback updates', () => {
+  const rules = readRules();
+  assert.match(rules, /match\s+\/examAttempts\/\{attemptId\}/);
+  assert.match(rules, /isValidUserExamAttempt\(incoming\(\),\s*attemptId\)/);
+  assert.match(rules, /isValidPerformanceInsights\(data\.performanceInsights\)/);
+  assert.match(rules, /data\.sectionBreakdown\s+is\s+list[\s\S]*data\.sectionBreakdown\.size\(\)\s*<=\s*30/);
+  assert.match(rules, /data\.questionBreakdown\s+is\s+list[\s\S]*data\.questionBreakdown\.size\(\)\s*<=\s*500/);
+  assert.match(rules, /incoming\(\)\.totalScore\s*==\s*existing\(\)\.totalScore/);
+  assert.match(
+    rules,
+    /affectedKeys\(\)\.hasOnly\(\[\s*'perceivedDifficulty',\s*'pacingFeedback',\s*'reflectionNote',\s*'updatedAt'\s*\]\)/
+  );
+});

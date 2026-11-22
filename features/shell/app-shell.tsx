@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -23,6 +24,7 @@ import { cn } from '../../lib/utils';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
 import { useSearchModal } from '../search/command-search-modal';
+import { HeaderPwaAction, MobileOpenInAppBanner } from '../pwa/install-banner';
 import { useTheme } from '../theme/theme-provider';
 
 const LazyCartDrawer = dynamic(
@@ -74,13 +76,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Sticky Top Navigation Bar (60px mobile / 64px desktop; 48px touch targets) */}
       <header className="sticky top-0 z-40 h-15 md:h-16 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-md">
         <div className="ed-container h-full flex items-center justify-between gap-4 sm:gap-8">
-          {/* Zone 1: Single-line Brand Wordmark */}
+          {/* Zone 1: Single-line Brand Logo & Wordmark */}
           <Link
             href="/"
             prefetch={false}
-            className="inline-flex items-center min-h-[48px] text-lg font-extrabold tracking-tight text-[var(--text-main)] whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2.5 min-h-[48px] text-lg font-extrabold tracking-tight text-[var(--text-main)] whitespace-nowrap shrink-0"
           >
-            ExamDash
+            <Image
+              src="/assets/aistudio/exam-dash_logo_ef0c6c39.png"
+              alt="ExamDash logo"
+              width={36}
+              height={36}
+              priority
+              referrerPolicy="no-referrer"
+              className="w-9 h-9 rounded-lg object-cover shrink-0"
+            />
+            <span>ExamDash</span>
           </Link>
 
           {/* Zone 2: Concise Single-Line Navigation Links (aria-current="page" strictly on exact pathname match) */}
@@ -115,6 +126,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Zone 3: Compact 48px Action Controls */}
           <div className="flex items-center gap-2 shrink-0">
+            <HeaderPwaAction />
+
             <button
               type="button"
               aria-label="Search catalog (Command K)"
@@ -239,6 +252,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+
+      {/* Mobile Open-in-App Deep-Link Strip on Non-Home, Non-Detail Routes */}
+      {pathname !== '/' && !isDetailRoute && !isAttemptRoute && <MobileOpenInAppBanner />}
 
       {/* Main Content Area */}
       <main

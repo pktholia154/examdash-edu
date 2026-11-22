@@ -24,6 +24,8 @@ export default async function AttemptExamSlotPage({
     mode?: string;
     autostart?: string;
     source?: string;
+    view?: string;
+    attemptId?: string;
   }>;
 }) {
   const { slug } = await params;
@@ -41,6 +43,12 @@ export default async function AttemptExamSlotPage({
       initialMode={sp.mode === 'trial' ? 'trial' : 'full'}
       initialSource={sp.source === 'offline' ? 'offline' : 'online'}
       autostart={sp.autostart === '1'}
+      initialView={sp.view === 'review' ? 'review' : undefined}
+      initialAttemptId={
+        typeof sp.attemptId === 'string' && sp.attemptId
+          ? sp.attemptId
+          : undefined
+      }
     />
   );
 }

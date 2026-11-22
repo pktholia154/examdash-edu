@@ -217,6 +217,84 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "UserExamAttempt": {
+      "title": "UserExamAttempt",
+      "description": "Historical user exam set attempt storing scores, responses, section and question time telemetry, solution review outcomes, deterministic after-exam analysis, and learner feedback.",
+      "type": "object",
+      "properties": {
+        "attemptId": { "type": "string", "minLength": 5, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "packId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "examSlug": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "examTitle": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "setId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "setTitle": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "mode": { "type": "string", "enum": ["trial", "full"], "maxLength": 16 },
+        "totalScore": { "type": "number", "description": "Net marks scored in this attempt" },
+        "maxScore": { "type": "number", "description": "Maximum marks possible in the exam set" },
+        "scorePct": { "type": "number", "description": "Net percentage of maxScore (0..100)" },
+        "accuracyPct": { "type": "number", "description": "Accuracy percentage on attempted questions (0..100)" },
+        "attemptPct": { "type": "number", "description": "Percentage of total questions attempted (0..100)" },
+        "totalQuestions": { "type": "number", "description": "Total questions in the exam set (1..500)" },
+        "totalAttempted": { "type": "number", "description": "Total attempted questions (0..500)" },
+        "totalCorrect": { "type": "number", "description": "Total correct answers (0..500)" },
+        "totalPartial": { "type": "number", "description": "Total partially correct MSQ answers (0..500)" },
+        "totalWrong": { "type": "number", "description": "Total wrong answers (0..500)" },
+        "totalUnattempted": { "type": "number", "description": "Total unattempted questions (0..500)" },
+        "positiveMarksEarned": { "type": "number", "description": "Gross positive marks earned" },
+        "negativeMarksLost": { "type": "number", "description": "Gross negative marks deducted" },
+        "totalTimeSpentMs": { "type": "number", "description": "Total dwell time spent in milliseconds" },
+        "avgTimePerAttemptedMs": { "type": "number", "description": "Average time spent per attempted question in milliseconds" },
+        "responses": { "type": "object", "description": "Map of questionId to selected option ID(s) or NAT numeric string (max 500 keys)" },
+        "telemetry": { "type": "object", "description": "Map of questionId to { timeSpentMs, visits } telemetry (max 500 keys)" },
+        "markedForReview": { "type": "object", "description": "Map of questionId to boolean marked-for-review flag (max 500 keys)" },
+        "sectionBreakdown": { "type": "array", "description": "Ordered list of section performance and time telemetry maps (1..30 sections)" },
+        "questionBreakdown": { "type": "array", "description": "Ordered list of per-question evaluation, dwell time, revisit, and key summaries (1..500 questions)" },
+        "performanceInsights": { "type": "object", "description": "Deterministic post-exam diagnostic analysis and actionable takeaways" },
+        "perceivedDifficulty": { "type": "string", "enum": ["easy", "moderate", "challenging", "tough"], "maxLength": 24 },
+        "pacingFeedback": { "type": "string", "enum": ["comfortable", "balanced", "rushed", "time_shortage"], "maxLength": 24 },
+        "reflectionNote": { "type": "string", "maxLength": 2000 },
+        "startedAtIso": { "type": "string", "minLength": 10, "maxLength": 64 },
+        "completedAtIso": { "type": "string", "minLength": 10, "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "attemptId",
+        "userId",
+        "packId",
+        "examSlug",
+        "examTitle",
+        "setId",
+        "setTitle",
+        "mode",
+        "totalScore",
+        "maxScore",
+        "scorePct",
+        "accuracyPct",
+        "attemptPct",
+        "totalQuestions",
+        "totalAttempted",
+        "totalCorrect",
+        "totalPartial",
+        "totalWrong",
+        "totalUnattempted",
+        "positiveMarksEarned",
+        "negativeMarksLost",
+        "totalTimeSpentMs",
+        "avgTimePerAttemptedMs",
+        "responses",
+        "telemetry",
+        "markedForReview",
+        "sectionBreakdown",
+        "questionBreakdown",
+        "performanceInsights",
+        "startedAtIso",
+        "completedAtIso",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -247,6 +325,10 @@
     "/users/{userId}/cart/{cartKey}": {
       "schema": { "$ref": "#/entities/UserCartItem" },
       "description": "Owner-scoped active shopping cart items."
+    },
+    "/users/{userId}/examAttempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/UserExamAttempt" },
+      "description": "Owner-scoped historical exam set attempts with immutable telemetry, solution review outcomes, diagnostic analysis, and editable learner feedback."
     }
   }
 }

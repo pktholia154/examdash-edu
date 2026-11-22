@@ -55,4 +55,20 @@ describe('default-db-mirror helpers', () => {
     expect(withDownloadToken.Authorization).toBeUndefined();
     expect(withDownloadToken['X-Firebase-Storage-Version']).toBe('webjs/13.4.0');
   });
+
+  it('recognizes Firebase Storage URLs with vs without download tokens', async () => {
+    const { hasFirebaseDownloadToken } = await import(
+      '../repositories/catalog-repository'
+    );
+    expect(
+      hasFirebaseDownloadToken(
+        'https://firebasestorage.googleapis.com/v0/b/examdash-ed.firebasestorage.app/o/public%2Fpdfs%2FB1_full.pdf?alt=media'
+      )
+    ).toBe(false);
+    expect(
+      hasFirebaseDownloadToken(
+        'https://firebasestorage.googleapis.com/v0/b/examdash-ed.firebasestorage.app/o/public%2Fpdfs%2FB1_full.pdf?alt=media&token=c96e5ddc-76d3-4894-9d86-8f21e0b1594e'
+      )
+    ).toBe(true);
+  });
 });

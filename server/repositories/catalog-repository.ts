@@ -558,6 +558,19 @@ export function resolveFirebaseTokenizedMediaUrl(
   });
 }
 
+export function hasFirebaseDownloadToken(url: string): boolean {
+  if (!url || !url.startsWith('https://')) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'firebasestorage.googleapis.com') {
+      return Boolean(parsed.searchParams.get('token')?.trim());
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getSigningSecret(): string {
   const runtimeEnv = process.env as Record<string, string | undefined>;
   return (
@@ -698,38 +711,49 @@ export async function verifyCallerPurchaseRecord(
   const safeItemId = rawItemId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
   const purchaseId = `${collectionName}_${safeItemId}`.slice(0, 120);
 
-  const [primaryDoc, defaultDoc, defaultExamAliasDoc] = await Promise.all([
-    getPurchaseDocInDb({
-      projectId,
-      databaseId,
-      userId,
-      purchaseDocId: purchaseId,
-      bearerIdToken,
-    }),
-    databaseId !== '(default)'
-      ? getPurchaseDocInDb({
-          projectId,
-          databaseId: '(default)',
-          userId,
-          purchaseDocId: purchaseId,
-          bearerIdToken,
-        })
-      : Promise.resolve(null),
-    databaseId !== '(default)' && collectionName === 'ExamPackDocument'
-      ? getPurchaseDocInDb({
-          projectId,
-          databaseId: '(default)',
-          userId,
-          purchaseDocId: `exams_${safeItemId}`.slice(0, 120),
-          bearerIdToken,
-        })
-      : Promise.resolve(null),
-  ]);
+  const [primaryDoc, defaultDoc, defaultRawAliasDoc, defaultExamAliasDoc] =
+    await Promise.all([
+      getPurchaseDocInDb({
+        projectId,
+        databaseId,
+        userId,
+        purchaseDocId: purchaseId,
+        bearerIdToken,
+      }),
+      databaseId !== '(default)'
+        ? getPurchaseDocInDb({
+            projectId,
+            databaseId: '(default)',
+            userId,
+            purchaseDocId: purchaseId,
+            bearerIdToken,
+          })
+        : Promise.resolve(null),
+      databaseId !== '(default)'
+        ? getPurchaseDocInDb({
+            projectId,
+            databaseId: '(default)',
+            userId,
+            purchaseDocId: safeItemId,
+            bearerIdToken,
+          })
+        : Promise.resolve(null),
+      databaseId !== '(default)' && collectionName === 'ExamPackDocument'
+        ? getPurchaseDocInDb({
+            projectId,
+            databaseId: '(default)',
+            userId,
+            purchaseDocId: `exams_${safeItemId}`.slice(0, 120),
+            bearerIdToken,
+          })
+        : Promise.resolve(null),
+    ]);
 
   if (
     primaryDoc &&
     databaseId !== '(default)' &&
     (!defaultDoc ||
+      !defaultRawAliasDoc ||
       (collectionName === 'ExamPackDocument' && !defaultExamAliasDoc))
   ) {
     const paidPrice =
@@ -776,7 +800,9 @@ export async function verifyCallerPurchaseRecord(
     });
   }
 
-  return Boolean(primaryDoc || defaultDoc || defaultExamAliasDoc);
+  return Boolean(
+    primaryDoc || defaultDoc || defaultRawAliasDoc || defaultExamAliasDoc
+  );
 }
 
 export interface SignedAssetGrant {
@@ -966,8 +992,12 @@ export async function issueShortLivedAssetGrant(
             : {}),
         },
         directUrls: {
-          ...(directPdfUrl ? { pdfUrl: directPdfUrl } : {}),
-          ...(directMdUrl ? { markdownUrl: directMdUrl } : {}),
+          ...(hasFirebaseDownloadToken(directPdfUrl)
+            ? { pdfUrl: directPdfUrl }
+            : {}),
+          ...(hasFirebaseDownloadToken(directMdUrl)
+            ? { markdownUrl: directMdUrl }
+            : {}),
         },
         storagePaths: {
           ...(fullPdf ? { fullPdfStoragePath: fullPdf } : {}),
@@ -1015,7 +1045,9 @@ export async function issueShortLivedAssetGrant(
         ...(fullJson ? { jsonUrl: examStreamUrl } : {}),
       },
       directUrls: {
-        ...(directJsonUrl ? { jsonUrl: directJsonUrl } : {}),
+        ...(hasFirebaseDownloadToken(directJsonUrl)
+          ? { jsonUrl: directJsonUrl }
+          : {}),
       },
       storagePaths: {
         ...(fullJson ? { fullJsonStoragePath: fullJson } : {}),

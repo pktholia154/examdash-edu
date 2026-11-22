@@ -6,6 +6,7 @@ import { ToastProvider } from '../toast/toast-context';
 import { AuthProvider } from '../auth/auth-provider';
 import { CartProvider } from '../cart/cart-provider';
 import { SearchModalProvider } from '../search/command-search-modal';
+import { PWAInstallProvider } from '../pwa/pwa-install-provider';
 import { AppShell } from './app-shell';
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
@@ -15,7 +16,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         <AuthProvider>
           <CartProvider>
             <SearchModalProvider>
-              <AppShell>{children}</AppShell>
+              <PWAInstallProvider>
+                <AppShell>{children}</AppShell>
+              </PWAInstallProvider>
             </SearchModalProvider>
           </CartProvider>
         </AuthProvider>
