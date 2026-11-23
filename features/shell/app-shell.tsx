@@ -28,7 +28,7 @@ import { cn } from '../../lib/utils';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
 import { useSearchModal } from '../search/command-search-modal';
-import { HeaderPwaAction, MobileOpenInAppBanner } from '../pwa/install-banner';
+import { HeaderPwaAction } from '../pwa/install-banner';
 import { useTheme } from '../theme/theme-provider';
 
 const LazyCartDrawer = dynamic(
@@ -104,9 +104,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [pathname]);
 
-  const isDetailRoute =
-    (pathname.startsWith('/books/') && pathname !== '/books') ||
-    (pathname.startsWith('/exams/') && pathname !== '/exams');
   const isAttemptRoute = pathname.startsWith('/attempt/');
   const isReaderRoute = pathname.startsWith('/read/');
   const showMobileBottomNav = shouldShowMobileBottomNav(pathname);
@@ -311,9 +308,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-
-      {/* Mobile Open-in-App Deep-Link Strip on Non-Home, Non-Detail Routes */}
-      {pathname !== '/' && !isDetailRoute && !isAttemptRoute && <MobileOpenInAppBanner />}
 
       {/* Main Content Area */}
       <main

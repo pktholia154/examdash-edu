@@ -123,19 +123,19 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: buildSiteOgUrl('home'),
-        width: 1200,
-        height: 675,
+        url: buildSiteOgUrl(),
+        width: 512,
+        height: 512,
         alt: 'ExamDash — Verified Books, Question Banks & Mock Exam Packs',
         type: 'image/png',
       },
     ],
   },
   twitter: {
-    card: 'summary_large_image',
+    card: 'summary',
     title: SITE_TITLE,
     description: SITE_DESC,
-    images: [buildSiteOgUrl('home')],
+    images: [buildSiteOgUrl()],
   },
 };
 

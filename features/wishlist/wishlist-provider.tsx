@@ -35,6 +35,8 @@ export interface WishlistTargetItem {
   listPrice: number;
   buyPrice: number;
   totalMocktest?: number;
+  imageUrl?: string;
+  imageAlt?: string;
 }
 
 interface WishlistContextValue {
@@ -293,6 +295,21 @@ export function WishlistProvider({ children }: { children: React.ReactNode }) {
           ? catalogItem.totalMocktest
           : undefined;
 
+      const resolvedImageUrl =
+        'imageUrl' in catalogItem &&
+        typeof catalogItem.imageUrl === 'string' &&
+        catalogItem.imageUrl.trim()
+          ? catalogItem.imageUrl.trim()
+          : undefined;
+      const resolvedImageAlt =
+        'imageAlt' in catalogItem &&
+        typeof catalogItem.imageAlt === 'string' &&
+        catalogItem.imageAlt.trim()
+          ? catalogItem.imageAlt.trim()
+          : 'imageMeta' in catalogItem && catalogItem.imageMeta?.alt
+          ? catalogItem.imageMeta.alt
+          : undefined;
+
       const newItem: WishlistItem = {
         compositeKey,
         wishlistKey: makeFirestoreSafeCartKey(
@@ -312,6 +329,8 @@ export function WishlistProvider({ children }: { children: React.ReactNode }) {
         listPrice: catalogItem.listPrice,
         buyPrice: catalogItem.buyPrice,
         ...(totalMocktest !== undefined ? { totalMocktest } : {}),
+        ...(resolvedImageUrl ? { imageUrl: resolvedImageUrl } : {}),
+        ...(resolvedImageAlt ? { imageAlt: resolvedImageAlt } : {}),
         createdAtIso: new Date().toISOString(),
       };
 

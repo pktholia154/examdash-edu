@@ -1,5 +1,6 @@
 import { BUSINESS_INFO } from '../legal/business-info';
 import type {
+  ImageMetaDTO,
   ItemReviewSummaryDTO,
   PublicBookDTO,
   PublicExamDTO,
@@ -20,10 +21,8 @@ export function getCanonicalOrigin(): string {
   return 'https://exam-dash.com';
 }
 
-export function buildSiteOgUrl(
-  slug: 'home' | 'books' | 'exams' | 'legal' = 'home'
-): string {
-  return `${getCanonicalOrigin()}/thumbs/og/site/${slug}.png?v=1`;
+export function buildSiteOgUrl(): string {
+  return `${getCanonicalOrigin()}/app-icons/icon-512.png?v=ef0c6c39`;
 }
 
 export function buildCanonicalAlternates(
@@ -64,22 +63,38 @@ export function serializeSafeJsonLd(payload: Record<string, unknown>): string {
 }
 
 /**
- * Builds versioned crawlable 1:1 (`sq` 1200x1200) and 16:9 (`og` 1200x675) PNG URLs
- * for OpenGraph, Twitter Cards, Schema.org Product/Book `image`, and Image Sitemaps.
+ * Builds a Schema.org `ImageObject` enriched with Firestore `imageUrl` and `imageMeta`
+ * fields (`title`, `caption`, `alt`, `description`, `keywords`) for rich image SEO.
+ * Falls back to the canonical static brand icon when an item has no cover image yet.
  */
-export function buildThumbUrls(
-  collection: 'books' | 'exams',
-  urlSlug: string,
-  updatedAtIso: string
-): { sqPngUrl: string; ogPngUrl: string } {
-  const origin = getCanonicalOrigin();
-  const parsedMs = new Date(updatedAtIso).getTime();
-  const versionMillis = Number.isFinite(parsedMs) && parsedMs > 0 ? parsedMs : 1;
-  const encodedSlug = encodeURIComponent(urlSlug);
+export function buildItemCoverSchemaImage(params: {
+  pageUrl: string;
+  title: string;
+  fallbackDescription: string;
+  imageUrl?: string;
+  imageMeta?: ImageMetaDTO;
+}): Record<string, unknown> | string {
+  const cleanUrl = (params.imageUrl || '').trim();
+  if (!cleanUrl) {
+    return buildSiteOgUrl();
+  }
+
+  const meta = params.imageMeta;
+  const caption = meta?.caption || meta?.alt || params.title;
+  const description = meta?.description || params.fallbackDescription;
+  const name = meta?.title || params.title;
 
   return {
-    sqPngUrl: `${origin}/thumbs/sq/${collection}/${encodedSlug}.png?v=${versionMillis}`,
-    ogPngUrl: `${origin}/thumbs/og/${collection}/${encodedSlug}.png?v=${versionMillis}`,
+    '@type': 'ImageObject',
+    '@id': `${params.pageUrl}#cover-image`,
+    url: cleanUrl,
+    contentUrl: cleanUrl,
+    encodingFormat: 'image/png',
+    representativeOfPage: true,
+    name,
+    caption,
+    ...(description ? { description } : {}),
+    ...(meta?.keywords ? { keywords: meta.keywords } : {}),
   };
 }
 
@@ -240,41 +255,85 @@ export function buildLegalPageJsonLd(input: {
   };
 }
 
-function buildVerifiedReviewSchemaProps(reviewSummary?: ItemReviewSummaryDTO) {
+function normalizeSchemaReviewDate(iso: string): string | undefined {
+  if (!iso || typeof iso !== 'string') return undefined;
+  const parsed = new Date(iso);
+  if (!Number.isFinite(parsed.getTime()) || parsed.getUTCFullYear() < 2020) {
+    return undefined;
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildVerifiedReviewSchemaProps(
+  reviewSummary: ItemReviewSummaryDTO | undefined,
+  pageUrl: string
+) {
   if (
     !reviewSummary ||
+    !Number.isInteger(reviewSummary.reviewCount) ||
     reviewSummary.reviewCount <= 0 ||
+    !Number.isFinite(reviewSummary.averageRating) ||
     reviewSummary.averageRating < 1 ||
+    reviewSummary.averageRating > 5 ||
     !Array.isArray(reviewSummary.reviews) ||
     reviewSummary.reviews.length === 0
   ) {
     return {};
   }
 
+  const validSchemaReviews = reviewSummary.reviews
+    .filter(
+      (r) =>
+        Number.isInteger(r.rating) &&
+        r.rating >= 1 &&
+        r.rating <= 5 &&
+        typeof r.comment === 'string' &&
+        r.comment.trim().length > 0 &&
+        typeof r.authorName === 'string' &&
+        r.authorName.trim().length > 0
+    )
+    .slice(0, 10)
+    .map((r) => {
+      const datePublished = normalizeSchemaReviewDate(r.createdAtIso);
+      const cleanTitle =
+        typeof r.title === 'string' && r.title.trim().length > 0
+          ? r.title.trim()
+          : undefined;
+      return {
+        '@type': 'Review',
+        '@id': `${pageUrl}#review-${encodeURIComponent(r.reviewId)}`,
+        author: {
+          '@type': 'Person',
+          name: r.authorName.trim(),
+        },
+        ...(datePublished ? { datePublished } : {}),
+        ...(cleanTitle ? { name: cleanTitle } : {}),
+        reviewBody: r.comment.trim(),
+        reviewRating: {
+          '@type': 'Rating',
+          ratingValue: r.rating,
+          bestRating: 5,
+          worstRating: 1,
+        },
+      };
+    });
+
+  if (validSchemaReviews.length === 0) {
+    return {};
+  }
+
+  const clampedAvg = Math.min(5, Math.max(1, reviewSummary.averageRating));
+
   return {
     aggregateRating: {
       '@type': 'AggregateRating',
-      ratingValue: Number(reviewSummary.averageRating.toFixed(2)),
+      ratingValue: Number(clampedAvg.toFixed(2)),
+      ratingCount: reviewSummary.reviewCount,
       reviewCount: reviewSummary.reviewCount,
       bestRating: 5,
       worstRating: 1,
     },
-    review: reviewSummary.reviews.slice(0, 10).map((r) => ({
-      '@type': 'Review',
-      author: {
-        '@type': 'Person',
-        name: r.authorName,
-      },
-      datePublished: r.createdAtIso.slice(0, 10),
-      ...(r.title ? { name: r.title } : {}),
-      reviewBody: r.comment,
-      reviewRating: {
-        '@type': 'Rating',
-        ratingValue: r.rating,
-        bestRating: 5,
-        worstRating: 1,
-      },
-    })),
+    review: validSchemaReviews,
   };
 }
 
@@ -284,11 +343,17 @@ export function buildBookDetailJsonLd(
 ) {
   const origin = getCanonicalOrigin();
   const pageUrl = `${origin}/books/${book.urlSlug}`;
-  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
-    'books',
-    book.urlSlug,
-    book.updatedAtIso
-  );
+  const description =
+    book.seoDescription ||
+    book.fullDescription.slice(0, 220) ||
+    `${book.title} digital edition by ${book.authorName}.`;
+  const coverImage = buildItemCoverSchemaImage({
+    pageUrl,
+    title: book.title,
+    fallbackDescription: description,
+    imageUrl: book.imageUrl,
+    imageMeta: book.imageMeta,
+  });
 
   return {
     '@context': 'https://schema.org',
@@ -306,12 +371,9 @@ export function buildBookDetailJsonLd(
         '@id': `${pageUrl}#product`,
         sku: book.id,
         name: book.title,
-        description:
-          book.seoDescription ||
-          book.fullDescription.slice(0, 220) ||
-          `${book.title} digital edition by ${book.authorName}.`,
+        description,
         url: pageUrl,
-        image: [sqPngUrl, ogPngUrl],
+        image: coverImage,
         brand: {
           '@type': 'Brand',
           name: 'ExamDash',
@@ -335,7 +397,7 @@ export function buildBookDetailJsonLd(
           buyPrice: book.buyPrice,
           currency: book.currency,
         }),
-        ...buildVerifiedReviewSchemaProps(reviewSummary),
+        ...buildVerifiedReviewSchemaProps(reviewSummary, pageUrl),
       },
     ],
   };
@@ -347,11 +409,17 @@ export function buildExamDetailJsonLd(
 ) {
   const origin = getCanonicalOrigin();
   const pageUrl = `${origin}/exams/${exam.urlSlug}`;
-  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
-    'exams',
-    exam.urlSlug,
-    exam.updatedAtIso
-  );
+  const description =
+    exam.seoDescription ||
+    exam.fullDescription.slice(0, 220) ||
+    `${exam.title} mock exam pack (${exam.totalMocktest} tests).`;
+  const coverImage = buildItemCoverSchemaImage({
+    pageUrl,
+    title: exam.title,
+    fallbackDescription: description,
+    imageUrl: exam.imageUrl,
+    imageMeta: exam.imageMeta,
+  });
 
   return {
     '@context': 'https://schema.org',
@@ -369,12 +437,9 @@ export function buildExamDetailJsonLd(
         '@id': `${pageUrl}#product`,
         sku: exam.id,
         name: exam.title,
-        description:
-          exam.seoDescription ||
-          exam.fullDescription.slice(0, 220) ||
-          `${exam.title} mock exam pack (${exam.totalMocktest} tests).`,
+        description,
         url: pageUrl,
-        image: [sqPngUrl, ogPngUrl],
+        image: coverImage,
         brand: {
           '@type': 'Brand',
           name: 'ExamDash',
@@ -388,7 +453,7 @@ export function buildExamDetailJsonLd(
           buyPrice: exam.buyPrice,
           currency: exam.currency,
         }),
-        ...buildVerifiedReviewSchemaProps(reviewSummary),
+        ...buildVerifiedReviewSchemaProps(reviewSummary, pageUrl),
       },
     ],
   };

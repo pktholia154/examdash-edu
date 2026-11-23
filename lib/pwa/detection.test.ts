@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildOpenInAppHref,
   isCrawlerUserAgent,
+  isOpenInAppAllowedRoute,
   resolvePWADeviceRoute,
   stripPwaLaunchParams,
 } from './detection';
@@ -157,3 +158,30 @@ test('isCrawlerUserAgent suppresses PWA logic for search and AI citation bots', 
     false
   );
 });
+
+test('isOpenInAppAllowedRoute allows only Home and Book/Exam product detail pages', () => {
+  assert.equal(isOpenInAppAllowedRoute('/'), true);
+  assert.equal(isOpenInAppAllowedRoute('/books/upsc-prelims-guide'), true);
+  assert.equal(isOpenInAppAllowedRoute('/books/upsc-prelims-guide/'), true);
+  assert.equal(isOpenInAppAllowedRoute('/exams/ssc-cgl-tier-1'), true);
+  assert.equal(isOpenInAppAllowedRoute('/exams/ssc-cgl-tier-1/'), true);
+
+  for (const blockedPath of [
+    '',
+    '/books',
+    '/books/',
+    '/exams',
+    '/exams/',
+    '/purchased',
+    '/profile',
+    '/search',
+    '/attempt/ssc-cgl',
+    '/read/upsc-prelims-guide',
+    '/contact-us',
+    '/privacy-policy',
+    '/terms-of-service',
+  ]) {
+    assert.equal(isOpenInAppAllowedRoute(blockedPath), false, `Expected ${blockedPath} to be blocked`);
+  }
+});
+

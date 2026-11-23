@@ -1,5 +1,7 @@
+import { revalidatePath } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateReviewSubmission } from '../../../../lib/reviews/validation';
+import { submitIndexNowBatch } from '../../../../lib/seo/indexnow';
 import type { CollectionName } from '../../../../lib/types/catalog';
 import { verifyBearerIdToken } from '../../../../server/firebase/verify-auth';
 import {
@@ -7,6 +9,24 @@ import {
   getItemReviewsSummary,
   upsertUserItemReview,
 } from '../../../../server/repositories/review-repository';
+
+function revalidateReviewRoutes(collectionName: CollectionName, urlSlug?: string) {
+  const hubPath = collectionName === 'books' ? '/books' : '/exams';
+  const detailPath = urlSlug ? `${hubPath}/${urlSlug}` : null;
+  try {
+    revalidatePath('/');
+    revalidatePath(hubPath);
+    if (detailPath) {
+      revalidatePath(detailPath);
+    }
+  } catch {
+    // Revalidation errors must never block the review response
+  }
+
+  if (detailPath) {
+    void submitIndexNowBatch([detailPath]).catch(() => undefined);
+  }
+}
 
 function parseCollectionParam(raw: unknown): CollectionName | null {
   if (raw === 'books' || raw === 'ExamPackDocument') {
@@ -126,6 +146,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  revalidateReviewRoutes(collectionName, result.urlSlug);
+
   return NextResponse.json(
     {
       reviewId: result.reviewId,
@@ -178,6 +200,8 @@ export async function DELETE(req: NextRequest) {
       { status: 500, headers: PRIVATE_NO_STORE_HEADERS }
     );
   }
+
+  revalidateReviewRoutes(collectionName, result.urlSlug);
 
   return NextResponse.json(
     { summary: result.summary },

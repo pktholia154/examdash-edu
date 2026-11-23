@@ -9,7 +9,7 @@ import React, {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowUpRight, Search, X } from 'lucide-react';
-import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
+import { CatalogThumbnail } from '../../components/ui/catalog-thumbnail';
 import { apiUrl } from '../../lib/platform/api-base';
 import { formatPrice } from '../../lib/registry/content-type-registry';
 import type { CatalogCardDTO } from '../../lib/types/catalog';
@@ -232,13 +232,13 @@ export function CommandSearchDialog({
                               : 'hover:bg-[var(--bg-elevated)]/60'
                           )}
                         >
-                          <MonogramThumbnail
+                          <CatalogThumbnail
                             title={b.title}
-                            type={b.type}
                             collectionName="books"
-                            size="sm"
-                            showBadge={false}
-                            className="w-11 h-11"
+                            imageUrl={b.imageUrl}
+                            imageAlt={b.imageAlt}
+                            imageTitle={b.imageTitle}
+                            size="xs"
                           />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-[var(--text-main)] truncate">
@@ -286,13 +286,13 @@ export function CommandSearchDialog({
                               : 'hover:bg-[var(--bg-elevated)]/60'
                           )}
                         >
-                          <MonogramThumbnail
+                          <CatalogThumbnail
                             title={ex.title}
-                            type={ex.type}
                             collectionName="ExamPackDocument"
-                            size="sm"
-                            showBadge={false}
-                            className="w-11 h-11"
+                            imageUrl={ex.imageUrl}
+                            imageAlt={ex.imageAlt}
+                            imageTitle={ex.imageTitle}
+                            size="xs"
                           />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-[var(--text-main)] truncate">

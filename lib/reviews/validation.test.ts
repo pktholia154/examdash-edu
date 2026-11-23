@@ -27,6 +27,8 @@ const TEST_BOOK: PublicBookDTO = {
   publishAtIso: '2026-01-01T00:00:00.000Z',
   updatedAtIso: '2026-02-01T00:00:00.000Z',
   createdAtIso: '2026-01-01T00:00:00.000Z',
+  imageUrl: '',
+  bookChapters: [],
   samplePdfUrl: '',
   sampleMarkdownUrl: '',
   hasFullPdf: true,

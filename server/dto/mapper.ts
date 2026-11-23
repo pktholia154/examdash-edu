@@ -1,4 +1,5 @@
 import type {
+  ImageMetaDTO,
   MocktestTitleItem,
   PublicBookDTO,
   PublicExamDTO,
@@ -55,6 +56,135 @@ function normalizePrice(val: unknown): number {
 function normalizeProse(val: unknown): string {
   if (typeof val !== 'string') return '';
   return val.replace(/\\n/g, '\n').trim();
+}
+
+const IMAGE_META_KEYS = new Set<keyof ImageMetaDTO>([
+  'alt',
+  'slug',
+  'title',
+  'caption',
+  'description',
+  'filename',
+  'keywords',
+]);
+
+/**
+ * Parses Firestore `imageMeta` stored either as:
+ * 1) an array of `"key: value"` strings (e.g. `["alt: ...", "caption: ...", "title: ..."]`), or
+ * 2) a plain map object `{ alt, slug, title, caption, description, filename, keywords }`.
+ */
+export function parseImageMeta(raw: unknown): ImageMetaDTO | undefined {
+  if (!raw) return undefined;
+
+  const out: ImageMetaDTO = {};
+
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (typeof entry !== 'string') continue;
+      const colonIdx = entry.indexOf(':');
+      if (colonIdx <= 0) continue;
+      const key = entry.slice(0, colonIdx).trim().toLowerCase() as keyof ImageMetaDTO;
+      const value = entry.slice(colonIdx + 1).trim();
+      if (value && IMAGE_META_KEYS.has(key)) {
+        out[key] = value;
+      }
+    }
+  } else if (typeof raw === 'object') {
+    for (const [rawKey, rawVal] of Object.entries(raw as Record<string, unknown>)) {
+      const key = rawKey.trim().toLowerCase() as keyof ImageMetaDTO;
+      if (!IMAGE_META_KEYS.has(key)) continue;
+      if (typeof rawVal === 'string' && rawVal.trim()) {
+        out[key] = rawVal.trim();
+      } else if (Array.isArray(rawVal) && key === 'keywords') {
+        const joined = rawVal
+          .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+          .map((v) => v.trim())
+          .join(', ');
+        if (joined) out.keywords = joined;
+      }
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+const DEFAULT_STORAGE_BUCKET =
+  process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim() ||
+  'examdash-ed.firebasestorage.app';
+
+/**
+ * Resolves thumbnail image URL from Firestore `imageUrl` (preferred) with fallback to `bookCover`.
+ * Supports full HTTPS URLs as well as `gs://bucket/path` or relative Firebase Storage paths.
+ */
+export function normalizeImageUrl(
+  rawPrimary: unknown,
+  rawFallback?: unknown
+): string {
+  const candidates = [rawPrimary, rawFallback];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+          return parsed.toString();
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    if (trimmed.startsWith('gs://')) {
+      const withoutScheme = trimmed.slice(5);
+      const slashIdx = withoutScheme.indexOf('/');
+      if (slashIdx > 0 && slashIdx < withoutScheme.length - 1) {
+        const bucket = withoutScheme.slice(0, slashIdx);
+        const objectPath = withoutScheme.slice(slashIdx + 1);
+        return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(
+          bucket
+        )}/o/${encodeURIComponent(objectPath)}?alt=media`;
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+      return trimmed;
+    }
+
+    // Relative Firebase Storage object path (e.g. `public/covers/B3.png`)
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+      const cleanPath = trimmed.replace(/^\/+/, '');
+      if (cleanPath) {
+        return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(
+          DEFAULT_STORAGE_BUCKET
+        )}/o/${encodeURIComponent(cleanPath)}?alt=media`;
+      }
+    }
+  }
+
+  return '';
+}
+
+export function normalizeBookChapters(rawChapters: unknown): string[] {
+  if (!Array.isArray(rawChapters)) return [];
+  const chapters: string[] = [];
+  for (const entry of rawChapters) {
+    if (typeof entry === 'string') {
+      const trimmed = entry.trim();
+      if (trimmed) chapters.push(trimmed);
+    } else if (entry && typeof entry === 'object' && 'title' in entry) {
+      const title = (entry as { title?: unknown }).title;
+      if (typeof title === 'string' && title.trim()) {
+        chapters.push(title.trim());
+      }
+    }
+    if (chapters.length >= 250) break;
+  }
+  return chapters;
 }
 
 /**
@@ -171,6 +301,17 @@ export function mapBookToPublicDTO(
     hasSample
   );
 
+  const rawSold =
+    raw.soldCount ?? raw.salesCount ?? raw.purchaseCount;
+  const parsedSold =
+    typeof rawSold === 'number' ? rawSold : Number(rawSold);
+  const soldCount =
+    Number.isFinite(parsedSold) && parsedSold > 0
+      ? Math.floor(parsedSold)
+      : undefined;
+  const isBestseller =
+    raw.isBestseller === true || raw.bestseller === true ? true : undefined;
+
   return {
     id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : docId,
     collectionName: 'books',
@@ -205,6 +346,11 @@ export function mapBookToPublicDTO(
     publishAtIso: new Date(publishMs).toISOString(),
     updatedAtIso: new Date(updatedMs).toISOString(),
     createdAtIso: new Date(createdMs).toISOString(),
+    imageUrl: normalizeImageUrl(raw.imageUrl, raw.bookCover),
+    ...(parseImageMeta(raw.imageMeta)
+      ? { imageMeta: parseImageMeta(raw.imageMeta) }
+      : {}),
+    bookChapters: normalizeBookChapters(raw.bookChapters),
     samplePdfUrl,
     sampleMarkdownUrl,
     hasFullPdf:
@@ -215,6 +361,8 @@ export function mapBookToPublicDTO(
       raw.hasFullMarkdown === true ||
       (typeof raw.fullMarkdownStoragePath === 'string' &&
         raw.fullMarkdownStoragePath.trim().length > 0),
+    ...(soldCount !== undefined ? { soldCount } : {}),
+    ...(isBestseller ? { isBestseller: true } : {}),
   };
 }
 
@@ -305,6 +453,10 @@ export function mapExamToPublicDTO(
     publishAtIso: new Date(publishMs).toISOString(),
     updatedAtIso: new Date(updatedMs).toISOString(),
     createdAtIso: new Date(createdMs).toISOString(),
+    imageUrl: normalizeImageUrl(raw.imageUrl, raw.examCover),
+    ...(parseImageMeta(raw.imageMeta)
+      ? { imageMeta: parseImageMeta(raw.imageMeta) }
+      : {}),
     totalMocktest,
     MocktestTitles: syllabus,
     sampleJsonStoragePath,

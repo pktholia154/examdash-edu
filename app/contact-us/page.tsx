@@ -28,19 +28,19 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: buildSiteOgUrl('legal'),
-        width: 1200,
-        height: 675,
+        url: buildSiteOgUrl(),
+        width: 512,
+        height: 512,
         alt: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
         type: 'image/png',
       },
     ],
   },
   twitter: {
-    card: 'summary_large_image',
+    card: 'summary',
     title: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
     description: PAGE_DESC,
-    images: [buildSiteOgUrl('legal')],
+    images: [buildSiteOgUrl()],
   },
 };
 

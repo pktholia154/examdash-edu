@@ -9,7 +9,7 @@ import {
   Sparkles,
   Star,
 } from 'lucide-react';
-import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
+import { CatalogThumbnail } from '../../components/ui/catalog-thumbnail';
 import type {
   CatalogCardDTO,
   CatalogItemDTO,
@@ -61,6 +61,21 @@ export function CatalogCard({ item }: CatalogCardProps) {
   const tags =
     'tags' in item && Array.isArray(item.tags) ? item.tags : [];
 
+  const imageUrl =
+    'imageUrl' in item && typeof item.imageUrl === 'string'
+      ? item.imageUrl
+      : undefined;
+  const imageMeta =
+    'imageMeta' in item ? item.imageMeta : undefined;
+  const imageAlt =
+    'imageAlt' in item && typeof item.imageAlt === 'string'
+      ? item.imageAlt
+      : imageMeta?.alt;
+  const imageTitle =
+    'imageTitle' in item && typeof item.imageTitle === 'string'
+      ? item.imageTitle
+      : imageMeta?.title;
+
   const detailHref =
     item.collectionName === 'books'
       ? `/books/${item.urlSlug}`
@@ -85,20 +100,21 @@ export function CatalogCard({ item }: CatalogCardProps) {
 
   return (
     <article className="flex flex-row items-center gap-3.5 sm:gap-4 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 sm:p-4 hover:border-[var(--border-strong)] transition-colors max-md:items-start max-md:gap-3 max-md:p-2.5">
-      {/* Left Thumbnail with Bottom-Left Wishlist & Bottom-Right Cart Circular Icons */}
-      <div className="relative w-24 h-24 sm:w-28 sm:h-28 shrink-0 max-md:w-[88px] max-md:h-[88px]">
+      {/* Left 4:3 Portrait Thumbnail with Bottom-Left Wishlist & Bottom-Right Cart Circular Icons */}
+      <div className="relative shrink-0 w-[84px] h-[112px] md:w-[90px] md:h-[120px]">
         <a
           href={detailHref}
           aria-label={`View ${item.title}`}
           className="block w-full h-full rounded-[var(--radius-thumb)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-primary)]"
         >
-          <MonogramThumbnail
+          <CatalogThumbnail
             title={item.title}
-            type={item.type}
             collectionName={item.collectionName}
+            imageUrl={imageUrl}
+            imageMeta={imageMeta}
+            imageAlt={imageAlt}
+            imageTitle={imageTitle}
             size="list"
-            showBadge={true}
-            contentOffsetClass="pb-4"
             className="w-full h-full"
           />
         </a>
@@ -114,15 +130,15 @@ export function CatalogCard({ item }: CatalogCardProps) {
           aria-pressed={wishlisted}
           onClick={() => toggleWishlist(item)}
           className={cn(
-            'absolute bottom-1.5 left-1.5 z-10 w-8 h-8 rounded-full inline-flex items-center justify-center border transition-colors before:content-[""] before:absolute before:-inset-1.5',
+            'absolute bottom-1.5 left-1.5 z-10 w-[26px] h-[26px] rounded-full inline-flex items-center justify-center border shadow-sm transition-colors before:content-[""] before:absolute before:-inset-1.5',
             wishlisted
               ? 'border-[var(--status-wishlist)] bg-[var(--status-wishlist-bg)] text-[var(--status-wishlist)]'
-              : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--status-wishlist)] hover:border-[var(--border-strong)]'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 text-[var(--text-muted)] hover:text-[var(--status-wishlist)] hover:border-[var(--border-strong)]'
           )}
         >
           <Heart
             className={cn(
-              'w-3.5 h-3.5 shrink-0',
+              'w-[13px] h-[13px] shrink-0',
               wishlisted && 'fill-current'
             )}
             aria-hidden="true"
@@ -136,9 +152,9 @@ export function CatalogCard({ item }: CatalogCardProps) {
             rel="nofollow"
             aria-label={`Open ${item.title} in Library`}
             title="Open in Library"
-            className="absolute bottom-1.5 right-1.5 z-10 w-8 h-8 rounded-full inline-flex items-center justify-center border border-[var(--status-success)] bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity before:content-[''] before:absolute before:-inset-1.5"
+            className="absolute bottom-1.5 right-1.5 z-10 w-[26px] h-[26px] rounded-full inline-flex items-center justify-center border border-[var(--status-success)] bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity before:content-[''] before:absolute before:-inset-1.5"
           >
-            <ExternalLink className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <ExternalLink className="w-[13px] h-[13px] shrink-0" aria-hidden="true" />
           </a>
         ) : (
           <button
@@ -161,18 +177,18 @@ export function CatalogCard({ item }: CatalogCardProps) {
             }
             onClick={handleCartCornerClick}
             className={cn(
-              'absolute bottom-1.5 right-1.5 z-10 w-8 h-8 rounded-full inline-flex items-center justify-center border transition-colors disabled:opacity-50 before:content-[""] before:absolute before:-inset-1.5',
+              'absolute bottom-1.5 right-1.5 z-10 w-[26px] h-[26px] rounded-full inline-flex items-center justify-center border transition-colors disabled:opacity-50 before:content-[""] before:absolute before:-inset-1.5',
               inCart
                 ? 'border-[var(--status-success)] bg-[var(--status-success-bg)] text-[var(--status-success)]'
                 : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:bg-[var(--brand-primary)] hover:text-[var(--brand-primary-ink)] hover:border-[var(--brand-primary)]'
             )}
           >
             {isFree ? (
-              <Sparkles className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <Sparkles className="w-[13px] h-[13px] shrink-0" aria-hidden="true" />
             ) : inCart ? (
-              <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <Check className="w-[13px] h-[13px] shrink-0" aria-hidden="true" />
             ) : (
-              <ShoppingCart className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <ShoppingCart className="w-[13px] h-[13px] shrink-0" aria-hidden="true" />
             )}
           </button>
         )}

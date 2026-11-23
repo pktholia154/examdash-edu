@@ -23,10 +23,16 @@
         "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
         "listPrice": { "type": "number" },
         "buyPrice": { "type": "number" },
+        "imageUrl": { "type": "string", "maxLength": 2048 },
+        "bookCover": { "type": "string", "maxLength": 2048 },
+        "imageMeta": { "type": "array", "description": "SEO image metadata entries (alt, slug, title, caption, description, filename, keywords)" },
+        "bookChapters": { "type": "array", "description": "Ordered list of chapter titles for book details page" },
         "sampleMarkdownUrl": { "type": "string", "maxLength": 2048 },
         "samplePdfUrl": { "type": "string", "maxLength": 2048 },
         "fullMarkdownStoragePath": { "type": "string", "maxLength": 1024 },
-        "fullPdfStoragePath": { "type": "string", "maxLength": 1024 }
+        "fullPdfStoragePath": { "type": "string", "maxLength": 1024 },
+        "soldCount": { "type": "number", "description": "Optional verified units sold count" },
+        "isBestseller": { "type": "boolean", "description": "Optional editorial bestseller flag" }
       },
       "required": [
         "id",
@@ -64,6 +70,8 @@
         "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
         "listPrice": { "type": "number" },
         "buyPrice": { "type": "number" },
+        "imageUrl": { "type": "string", "maxLength": 2048 },
+        "imageMeta": { "type": "array", "description": "SEO image metadata entries" },
         "totalMocktest": { "type": "number" },
         "MocktestTitles": { "type": "array", "description": "Syllabus list of mock tests" },
         "fullJsonStoragePath": { "type": "string", "maxLength": 1024 },

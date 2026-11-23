@@ -44,9 +44,21 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
+        hostname: 'firebasestorage.googleapis.com',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'storage.googleapis.com',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
         hostname: 'picsum.photos',
         port: '',
-        pathname: '/**', // This allows any path under the hostname
+        pathname: '/**',
       },
       {
         protocol: 'https',
@@ -58,7 +70,6 @@ const nextConfig: NextConfig = {
   },
   output: 'standalone',
   outputFileTracingIncludes: {
-    '/thumbs/[variant]/[collection]/[slug]': ['./assets/fonts/**/*'],
     '/app-icons/[file]': [
       './public/apple-touch-icon.png',
       './public/pwa-*.png',

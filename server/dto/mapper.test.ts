@@ -4,6 +4,9 @@ import {
   isDocumentLive,
   mapBookToPublicDTO,
   mapExamToPublicDTO,
+  normalizeBookChapters,
+  normalizeImageUrl,
+  parseImageMeta,
 } from './mapper';
 
 test('mapBookToPublicDTO strips fullPdfStoragePath and fullMarkdownStoragePath and falls back to createdAt', () => {
@@ -140,4 +143,93 @@ test('mapBookToPublicDTO strips misleading Free from title/tags and normalizes d
   assert.equal(genuinelyFreeBook.title, 'Free NCERT Polity Digest');
   assert.deepEqual(genuinelyFreeBook.tags, ['Free', 'NCERT']);
 });
+
+test('mapBookToPublicDTO parses imageUrl/bookCover, imageMeta key:value arrays, and bookChapters', () => {
+  const coverUrl =
+    'https://firebasestorage.googleapis.com/v0/b/examdash-ed.firebasestorage.app/o/public%2Fcovers%2FB3_cover.png?alt=media&token=abc';
+
+  const dto = mapBookToPublicDTO('B3', {
+    id: 'B3',
+    isPublished: true,
+    isDeleted: false,
+    title: 'Indian Geography Book Question Bank',
+    urlSlug: 'indian-geography-book-question-bank-b3',
+    bookCover: coverUrl,
+    imageMeta: [
+      'alt: Indian Geography Book Question Bank Cover',
+      'slug: indian-geography-book-cover',
+      'title: Indian Geography Book Question Bank | Mocktime',
+      'caption: Book cover of Indian Geography Book Question Bank.',
+      'description: Get indian geography book, download pdf',
+      'filename: indian-geography-book-cover.png',
+      'keywords: Indian Geography, Question Bank, book cover',
+    ],
+    bookChapters: [
+      'Chapter 1: Prehistoric India and the Stone Age',
+      '  Chapter 2: Indus Valley Civilization  ',
+      '',
+    ],
+    buyPrice: 99,
+    listPrice: 199,
+  });
+
+  assert.equal(dto.imageUrl, coverUrl);
+  assert.deepEqual(dto.imageMeta, {
+    alt: 'Indian Geography Book Question Bank Cover',
+    slug: 'indian-geography-book-cover',
+    title: 'Indian Geography Book Question Bank | Mocktime',
+    caption: 'Book cover of Indian Geography Book Question Bank.',
+    description: 'Get indian geography book, download pdf',
+    filename: 'indian-geography-book-cover.png',
+    keywords: 'Indian Geography, Question Bank, book cover',
+  });
+  assert.deepEqual(dto.bookChapters, [
+    'Chapter 1: Prehistoric India and the Stone Age',
+    'Chapter 2: Indus Valley Civilization',
+  ]);
+
+  // imageUrl takes precedence over bookCover
+  assert.equal(
+    normalizeImageUrl('https://example.com/primary.png', coverUrl),
+    'https://example.com/primary.png'
+  );
+  // Plain object map imageMeta is also supported
+  assert.deepEqual(
+    parseImageMeta({
+      alt: 'Cover Alt',
+      keywords: ['Geography', 'MCQs'],
+    }),
+    { alt: 'Cover Alt', keywords: 'Geography, MCQs' }
+  );
+  // Rejects unsafe URL schemes
+  assert.equal(normalizeImageUrl('javascript:alert(1)'), '');
+  assert.deepEqual(normalizeBookChapters(null), []);
+});
+
+test('mapBookToPublicDTO maps optional positive soldCount and isBestseller without fabricating defaults', () => {
+  const plainBook = mapBookToPublicDTO('B10', {
+    id: 'B10',
+    isPublished: true,
+    title: 'Plain Book',
+    urlSlug: 'plain-book-b10',
+    buyPrice: 99,
+    listPrice: 199,
+  });
+  assert.equal(plainBook.soldCount, undefined);
+  assert.equal(plainBook.isBestseller, undefined);
+
+  const bestsellerBook = mapBookToPublicDTO('B11', {
+    id: 'B11',
+    isPublished: true,
+    title: 'Top Book',
+    urlSlug: 'top-book-b11',
+    buyPrice: 89,
+    listPrice: 200,
+    soldCount: 42,
+    isBestseller: true,
+  });
+  assert.equal(bestsellerBook.soldCount, 42);
+  assert.equal(bestsellerBook.isBestseller, true);
+});
+
 

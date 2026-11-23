@@ -15,10 +15,7 @@ import type {
   ItemReviewSummaryDTO,
   ReviewAggregateBadge,
 } from '../../lib/types/catalog';
-import {
-  getCatalogItemsByRefs,
-  verifyCallerPurchaseRecord,
-} from './catalog-repository';
+import { getCatalogItemsByRefs } from './catalog-repository';
 
 type FirestoreRestFieldMap = Record<string, Record<string, unknown>>;
 
@@ -472,7 +469,7 @@ export interface UpsertItemReviewInput {
 }
 
 export type UpsertItemReviewResult =
-  | { status: 'ok'; reviewId: string; summary: ItemReviewSummaryDTO }
+  | { status: 'ok'; reviewId: string; urlSlug: string; summary: ItemReviewSummaryDTO }
   | { status: 'not_found'; error: string }
   | { status: 'error'; error: string };
 
@@ -506,7 +503,7 @@ export async function upsertUserItemReview(
 
   const { docPrefix, restBase } = getProvisionedFirestoreRoot();
 
-  const [userRes, existingReviewRes, hasPurchaseDoc] = await Promise.all([
+  const [userRes, existingReviewRes, primaryPurchaseRes] = await Promise.all([
     firestoreRestCall<{ fields?: FirestoreRestFieldMap }>({
       method: 'GET',
       path: `${restBase}/users/${encodeURIComponent(input.userId)}`,
@@ -517,13 +514,18 @@ export async function upsertUserItemReview(
       path: `${restBase}/reviews/${encodeURIComponent(reviewId)}`,
       bearerIdToken: input.bearerIdToken,
     }),
-    verifyCallerPurchaseRecord(
-      input.userId,
-      input.collectionName,
-      catalogItem.id,
-      input.bearerIdToken
-    ),
+    // Check the exact provisioned-DB path enforced by firestore.rules `hasValidReviewPurchaseProof`
+    // so users with legacy `(default)`-only records never hit HTTP 403 on review submission.
+    firestoreRestCall<{ fields?: FirestoreRestFieldMap }>({
+      method: 'GET',
+      path: `${restBase}/users/${encodeURIComponent(
+        input.userId
+      )}/purchases/${encodeURIComponent(targetKey)}`,
+      bearerIdToken: input.bearerIdToken,
+    }).catch(() => ({ statusCode: 404, data: null, rawText: '' })),
   ]);
+
+  const hasProvisionedPurchaseDoc = primaryPurchaseRes.statusCode === 200;
 
   const writes: Array<Record<string, unknown>> = [];
 
@@ -587,7 +589,7 @@ export async function upsertUserItemReview(
     authorName: { stringValue: authorName },
     rating: { integerValue: String(input.rating) },
     comment: { stringValue: input.comment },
-    verifiedPurchase: { booleanValue: Boolean(hasPurchaseDoc) },
+    verifiedPurchase: { booleanValue: hasProvisionedPurchaseDoc },
     status: { stringValue: 'published' },
   };
 
@@ -639,6 +641,7 @@ export async function upsertUserItemReview(
   return {
     status: 'ok',
     reviewId,
+    urlSlug: existingSlugRaw || cleanSlug,
     summary,
   };
 }
@@ -648,7 +651,10 @@ export async function deleteUserItemReview(params: {
   bearerIdToken: string;
   collectionName: CollectionName;
   itemId: string;
-}): Promise<{ status: 'ok'; summary: ItemReviewSummaryDTO } | { status: 'error'; error: string }> {
+}): Promise<
+  | { status: 'ok'; urlSlug?: string; summary: ItemReviewSummaryDTO }
+  | { status: 'error'; error: string }
+> {
   const safeItemId = sanitizeReviewItemId(params.itemId);
   if (!safeItemId) {
     return { status: 'error', error: 'Invalid catalog item identifier.' };
@@ -661,11 +667,17 @@ export async function deleteUserItemReview(params: {
   );
   const { docPrefix, restBase } = getProvisionedFirestoreRoot();
 
-  const existingRes = await firestoreRestCall({
+  const existingRes = await firestoreRestCall<{ fields?: FirestoreRestFieldMap }>({
     method: 'GET',
     path: `${restBase}/reviews/${encodeURIComponent(reviewId)}`,
     bearerIdToken: params.bearerIdToken,
   });
+
+  const existingSlug =
+    existingRes.statusCode === 200 &&
+    typeof existingRes.data?.fields?.urlSlug?.stringValue === 'string'
+      ? String(existingRes.data.fields.urlSlug.stringValue)
+      : undefined;
 
   if (existingRes.statusCode === 200) {
     const delRes = await firestoreRestCall({
@@ -686,5 +698,5 @@ export async function deleteUserItemReview(params: {
   }
 
   const summary = await getItemReviewsSummary(params.collectionName, safeItemId);
-  return { status: 'ok', summary };
+  return { status: 'ok', urlSlug: existingSlug, summary };
 }

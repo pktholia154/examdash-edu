@@ -117,3 +117,24 @@ export function buildOpenInAppHref(
   const qs = params.toString();
   return qs ? `${safePath}?${qs}` : `${safePath}?from=browser`;
 }
+
+/**
+ * Restricts post-install "Open in App" prompts strictly to the Home page (`/`)
+ * and Product Detail pages (`/books/[slug]`, `/exams/[slug]`).
+ */
+export function isOpenInAppAllowedRoute(pathname: string): boolean {
+  if (!pathname) return false;
+  const normalized =
+    pathname.length > 1 && pathname.endsWith('/')
+      ? pathname.slice(0, -1)
+      : pathname;
+  if (normalized === '/') return true;
+  if (normalized.startsWith('/books/')) {
+    return normalized.slice('/books/'.length).length > 0;
+  }
+  if (normalized.startsWith('/exams/')) {
+    return normalized.slice('/exams/'.length).length > 0;
+  }
+  return false;
+}
+

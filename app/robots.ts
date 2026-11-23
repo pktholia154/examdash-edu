@@ -8,7 +8,6 @@ const PUBLIC_ALLOW_PATHS = [
   '/books',
   '/exams',
   '/sitemaps/',
-  '/thumbs/',
   '/app-icons/',
   '/feed.xml',
 ];

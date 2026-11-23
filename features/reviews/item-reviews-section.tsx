@@ -140,6 +140,25 @@ export function ItemReviewsSection({
     };
   }, [collectionName, itemId]);
 
+  // Auto-scroll and open composer when arriving via #write-review or legacy #reviews hash
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleReviewHash = () => {
+      const hash = window.location.hash.toLowerCase();
+      if (hash === '#write-review' || hash === '#reviews') {
+        const el = document.getElementById('learner-reviews');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        setFormError(null);
+        setIsComposerOpen(true);
+      }
+    };
+    handleReviewHash();
+    window.addEventListener('hashchange', handleReviewHash);
+    return () => window.removeEventListener('hashchange', handleReviewHash);
+  }, []);
+
   const myExistingReview = useMemo(() => {
     if (!user) return null;
     return summary.reviews.find((r) => r.userId === user.uid) || null;
@@ -646,18 +665,42 @@ export function ItemReviewsSection({
           {/* Published Reviews List (Zero-Pill Clean Editorial List) */}
           {summary.reviewCount === 0 ? (
             !isComposerOpen && (
-              <div className="py-6 text-sm text-[var(--text-muted)]">
+              <div className="py-5 space-y-3 text-sm text-[var(--text-muted)]">
                 <p>
                   There are no learner reviews for{' '}
                   <strong className="font-semibold text-[var(--text-main)]">
                     {itemTitle}
                   </strong>{' '}
-                  yet.
+                  yet. Tap a star to share your authentic review:
                 </p>
+                <div
+                  className="flex flex-wrap items-center gap-1"
+                  role="group"
+                  aria-label={`Quick rate ${itemTitle}`}
+                >
+                  {STAR_VALUES.map((star) => (
+                    <button
+                      key={`quick-star-${star}`}
+                      type="button"
+                      aria-label={`Rate ${star} out of 5 stars and write a review`}
+                      onClick={() => {
+                        setRatingInput(star);
+                        setFormError(null);
+                        setIsComposerOpen(true);
+                      }}
+                      className="inline-flex items-center justify-center min-h-[48px] min-w-[48px] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors"
+                    >
+                      <Star
+                        aria-hidden="true"
+                        className="w-5 h-5 fill-transparent text-[var(--status-warning)]"
+                      />
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   onClick={openNewComposer}
-                  className="mt-3 inline-flex items-center justify-center min-h-[48px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+                  className="inline-flex items-center justify-center min-h-[48px] px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
                 >
                   Be the First to Review
                 </button>

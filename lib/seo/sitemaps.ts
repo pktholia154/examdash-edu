@@ -1,10 +1,10 @@
 import { BUSINESS_INFO, LEGAL_PAGES } from '../legal/business-info';
 import type { SitemapCatalogEntry } from '../../server/repositories/catalog-repository';
-import { buildThumbUrls, getCanonicalOrigin } from './schema';
+import { getCanonicalOrigin } from './schema';
 
 /**
  * Deterministic batch size per sitemap shard:
- * 1,000 canonical URLs per shard (~360 KB uncompressed XML including 2 <image:image> tags each),
+ * 1,000 canonical URLs per shard (~360 KB uncompressed XML including optional <image:image> tag),
  * strictly below Google's 50,000 URL / 50 MB limits and Pillar 4's <= 5,000 URL / < 400 KB target.
  */
 export const SITEMAP_BATCH_SIZE = 1000;
@@ -19,6 +19,7 @@ export const SITEMAP_RECENT_UPDATES_LIMIT = 200;
 export interface SitemapImageEntry {
   loc: string;
   title?: string;
+  caption?: string;
 }
 
 export interface SitemapUrlEntry {
@@ -115,6 +116,10 @@ export function buildSitemapUrlsetXml(entries: readonly SitemapUrlEntry[]): stri
             img.title
               ? `\n      <image:title>${escapeXml(img.title)}</image:title>`
               : ''
+          }${
+            img.caption
+              ? `\n      <image:caption>${escapeXml(img.caption)}</image:caption>`
+              : ''
           }
     </image:image>`
         )
@@ -138,20 +143,25 @@ export function mapCatalogEntryToSitemapUrl(
   origin: string = getCanonicalOrigin()
 ): SitemapUrlEntry {
   const collectionSegment = entry.collectionName === 'books' ? 'books' : 'exams';
-  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
-    collectionSegment,
-    entry.urlSlug,
-    entry.updatedAtIso
-  );
   const fallbackIso = new Date(BUSINESS_INFO.effectiveDateIso).toISOString();
+  const coverUrl = (entry.imageUrl || '').trim();
 
   return {
     loc: `${origin}/${collectionSegment}/${encodeURIComponent(entry.urlSlug)}`,
     lastmod: normalizeIsoTimestamp(entry.updatedAtIso, fallbackIso),
-    images: [
-      { loc: ogPngUrl, title: entry.title },
-      { loc: sqPngUrl, title: entry.title },
-    ],
+    ...(coverUrl
+      ? {
+          images: [
+            {
+              loc: coverUrl,
+              title: entry.imageMeta?.title || entry.title,
+              ...(entry.imageMeta?.caption || entry.imageMeta?.alt
+                ? { caption: entry.imageMeta.caption || entry.imageMeta.alt }
+                : {}),
+            },
+          ],
+        }
+      : {}),
   };
 }
 
@@ -362,11 +372,7 @@ export function buildCatalogRssFeedXml(params: {
       const itemUrl = `${origin}/${collectionSegment}/${encodeURIComponent(
         item.urlSlug
       )}`;
-      const { ogPngUrl } = buildThumbUrls(
-        collectionSegment,
-        item.urlSlug,
-        item.updatedAtIso
-      );
+      const coverUrl = (item.imageUrl || '').trim();
       const pubRfc = new Date(
         normalizeIsoTimestamp(item.publishAtIso, fallbackIso)
       ).toUTCString();
@@ -382,8 +388,11 @@ export function buildCatalogRssFeedXml(params: {
       <pubDate>${escapeXml(pubRfc)}</pubDate>
       <atom:updated>${escapeXml(updatedIso)}</atom:updated>
       <category>${escapeXml(item.type)}</category>
-      <description>${escapeXml(summary)}</description>
-      <enclosure url="${escapeXml(ogPngUrl)}" type="image/png" length="0" />
+      <description>${escapeXml(summary)}</description>${
+        coverUrl
+          ? `\n      <enclosure url="${escapeXml(coverUrl)}" type="image/png" length="0" />`
+          : ''
+      }
     </item>`;
     })
     .join('\n');

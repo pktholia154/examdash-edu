@@ -26,7 +26,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
+import { CatalogThumbnail } from '../../components/ui/catalog-thumbnail';
 import { EmptyState } from '../../components/ui/state-blocks';
 import { formatDurationCompact } from '../../lib/exam/grading';
 import {
@@ -64,6 +64,8 @@ export interface PurchasedBookCatalogMeta {
   type?: string;
   category?: string;
   language?: string;
+  imageUrl?: string;
+  imageAlt?: string;
   hasFullPdf: boolean;
   hasFullMarkdown: boolean;
   updatedAtMs: number;
@@ -75,6 +77,8 @@ export interface PurchasedExamCatalogMeta {
   type?: string;
   category?: string;
   language?: string;
+  imageUrl?: string;
+  imageAlt?: string;
   totalMocktest: number;
   hasFullJson: boolean;
   updatedAtMs: number;
@@ -1209,16 +1213,15 @@ export function PurchasedLibraryView({
                   <Link
                     href={`/books/${record.urlSlug}`}
                     aria-label={`View details for ${record.title}`}
-                    className="shrink-0 rounded-[var(--radius-thumb)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-primary)]"
+                    className="shrink-0 rounded-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-primary)]"
                   >
-                    <MonogramThumbnail
+                    <CatalogThumbnail
                       title={record.title}
-                      type={meta?.type || record.type || 'EB'}
                       collectionName="books"
+                      imageUrl={meta?.imageUrl}
+                      imageAlt={meta?.imageAlt}
                       size="list"
-                      showBadge={true}
-                      className="max-md:w-[72px] max-md:h-[72px]"
-                      contentOffsetClass="max-md:mt-1.5"
+                      className="max-md:w-[66px] max-md:h-[88px]"
                     />
                   </Link>
 
@@ -1263,12 +1266,12 @@ export function PurchasedLibraryView({
                       )}
                     </div>
 
-                    <div className="hidden md:block pt-0.5">
+                    <div className="pt-1">
                       <Link
-                        href={`/books/${record.urlSlug}#reviews`}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
+                        href={`/books/${record.urlSlug}#write-review`}
+                        className="inline-flex items-center gap-1 min-h-[32px] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
                       >
-                        <span>Book Details & Verified Review</span>
+                        <span>Book Details &amp; Verified Review</span>
                         <ArrowRight
                           className="w-3 h-3 shrink-0"
                           aria-hidden="true"
@@ -1620,14 +1623,13 @@ export function PurchasedLibraryView({
                       aria-label={`View details for ${record.title}`}
                       className="shrink-0 rounded-[var(--radius-thumb)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-primary)]"
                     >
-                      <MonogramThumbnail
+                      <CatalogThumbnail
                         title={record.title}
-                        type={catalogMeta?.type || record.type || 'EX'}
                         collectionName="ExamPackDocument"
+                        imageUrl={catalogMeta?.imageUrl}
+                        imageAlt={catalogMeta?.imageAlt}
                         size="list"
-                        showBadge={true}
-                        className="max-md:w-[72px] max-md:h-[72px]"
-                        contentOffsetClass="max-md:mt-1.5"
+                        className="max-md:w-[66px] max-md:h-[88px]"
                       />
                     </Link>
 
@@ -1695,12 +1697,12 @@ export function PurchasedLibraryView({
                         )}
                       </div>
 
-                      <div className="hidden md:block pt-0.5">
+                      <div className="pt-1">
                         <Link
-                          href={`/exams/${record.urlSlug}#reviews`}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
+                          href={`/exams/${record.urlSlug}#write-review`}
+                          className="inline-flex items-center gap-1 min-h-[32px] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors whitespace-nowrap"
                         >
-                          <span>Exam Syllabus & Verified Review</span>
+                          <span>Exam Syllabus &amp; Verified Review</span>
                           <ArrowRight
                             className="w-3 h-3 shrink-0"
                             aria-hidden="true"

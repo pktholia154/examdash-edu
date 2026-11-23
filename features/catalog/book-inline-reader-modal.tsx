@@ -113,6 +113,8 @@ export function BookInlineReaderModal({
       publishAtIso: '',
       updatedAtIso: '',
       createdAtIso: '',
+      imageUrl: '',
+      bookChapters: [],
       samplePdfUrl: book.samplePdfUrl || '',
       sampleMarkdownUrl: book.sampleMarkdownUrl || '',
       hasFullPdf: true,

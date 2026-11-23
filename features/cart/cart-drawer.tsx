@@ -2,7 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { ArrowRight, ShoppingBag, Trash2, X } from 'lucide-react';
-import { MonogramThumbnail } from '../../components/ui/monogram-thumbnail';
+import { CatalogThumbnail } from '../../components/ui/catalog-thumbnail';
 import { formatPrice } from '../../lib/registry/content-type-registry';
 import { useCart } from './cart-provider';
 import { useAuth } from '../auth/auth-provider';
@@ -120,12 +120,12 @@ export function CartDrawer() {
                   className="flex items-start gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5"
                 >
                   <a href={detailHref} onClick={closeCart} className="shrink-0">
-                    <MonogramThumbnail
+                    <CatalogThumbnail
                       title={item.title}
-                      type={item.type}
                       collectionName={item.collectionName}
+                      imageUrl={item.imageUrl}
+                      imageAlt={item.imageAlt}
                       size="sm"
-                      showBadge={false}
                     />
                   </a>
 

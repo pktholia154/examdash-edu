@@ -3,34 +3,12 @@ import assert from 'node:assert/strict';
 import {
   calculateCartSummary,
   computeDiscountPercent,
-  deriveMonogram,
   formatPrice,
   makeCompositeKey,
   makeFirestoreSafeCartKey,
   reconcileCartAgainstOwned,
-  resolveContentTypeVisual,
 } from './content-type-registry';
 import type { CartItem } from '../types/catalog';
-
-test('deriveMonogram extracts uppercase initials from first two words or 2-char fallback', () => {
-  assert.equal(deriveMonogram('Indian History MCQs Free Sample Book'), 'IH');
-  assert.equal(deriveMonogram('Online Exam IBPS E1'), 'OE');
-  assert.equal(deriveMonogram('Macroeconomics'), 'MA');
-  assert.equal(deriveMonogram('  quantitative - aptitude  '), 'QA');
-  assert.equal(deriveMonogram('A'), 'AX');
-  assert.equal(deriveMonogram(''), 'ED');
-});
-
-test('resolveContentTypeVisual performs case-insensitive match + collection fallback', () => {
-  assert.equal(resolveContentTypeVisual('Ebook', 'books').bgHex, '#81D44C');
-  assert.equal(resolveContentTypeVisual('EXAM', 'books').bgHex, '#4CC2D4');
-  assert.equal(resolveContentTypeVisual('Quizbook', 'books').bgHex, '#924CD4');
-  assert.equal(resolveContentTypeVisual('Question Bank', 'books').bgHex, '#924CD4');
-  assert.equal(resolveContentTypeVisual('TEST_SERIES', 'ExamPackDocument').bgHex, '#4CC2D4');
-  // Unknown custom type falls back to collection
-  assert.equal(resolveContentTypeVisual('Reference Manual', 'books').bgHex, '#81D44C');
-  assert.equal(resolveContentTypeVisual('Assessment Pack', 'ExamPackDocument').bgHex, '#4CC2D4');
-});
 
 test('computeDiscountPercent and formatPrice handle pricing edge cases accurately', () => {
   assert.equal(computeDiscountPercent(300, 200), 33);

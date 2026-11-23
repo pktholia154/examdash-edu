@@ -5,7 +5,8 @@ import {
   buildCanonicalAlternates,
   buildCollectionHubJsonLd,
   buildExamDetailJsonLd,
-  buildThumbUrls,
+  buildItemCoverSchemaImage,
+  buildSiteOgUrl,
   normalizeSchemaLanguageTag,
   serializeSafeJsonLd,
 } from './schema';
@@ -27,6 +28,9 @@ import { apiUrl } from '../platform/api-base';
 import { toCatalogCardDTO, type PublicBookDTO, type PublicExamDTO } from '../types/catalog';
 import type { SitemapCatalogEntry } from '../../server/repositories/catalog-repository';
 
+const SAMPLE_COVER_URL =
+  'https://firebasestorage.googleapis.com/v0/b/examdash-ed.firebasestorage.app/o/public%2Fcovers%2Fbook_101.png?alt=media&token=test';
+
 const SAMPLE_BOOK: PublicBookDTO = {
   id: 'book_101',
   collectionName: 'books',
@@ -45,6 +49,18 @@ const SAMPLE_BOOK: PublicBookDTO = {
   publishAtIso: '2026-01-10T00:00:00.000Z',
   updatedAtIso: '2026-02-15T12:30:00.000Z',
   createdAtIso: '2026-01-01T00:00:00.000Z',
+  imageUrl: SAMPLE_COVER_URL,
+  imageMeta: {
+    alt: 'UPSC Modern History Question Bank Cover',
+    title: 'UPSC Modern History Question Bank | ExamDash',
+    caption: 'Book cover of UPSC Modern History Question Bank by Dr. A. Verma.',
+    description: 'Chapter-wise UPSC Modern History MCQs cover.',
+    keywords: 'UPSC, Modern History, Question Bank',
+  },
+  bookChapters: [
+    'Chapter 1: Decline of the Mughal Empire',
+    'Chapter 2: Advent of the Europeans',
+  ],
   samplePdfUrl: 'https://example.com/sample.pdf',
   sampleMarkdownUrl: '',
   hasFullPdf: true,
@@ -69,6 +85,7 @@ const SAMPLE_EXAM: PublicExamDTO = {
   publishAtIso: '2026-01-10T00:00:00.000Z',
   updatedAtIso: '2026-02-20T08:00:00.000Z',
   createdAtIso: '2026-01-05T00:00:00.000Z',
+  imageUrl: '',
   totalMocktest: 20,
   MocktestTitles: [
     { id: 'set_1', title: 'Mock 01', duration: 60, totalQuestions: 100, totalMarks: 200 },
@@ -77,19 +94,37 @@ const SAMPLE_EXAM: PublicExamDTO = {
   hasFullJson: true,
 };
 
-test('buildThumbUrls generates immutable versioned sq and og PNG URLs', () => {
-  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
-    'books',
-    'upsc-modern-history-101',
-    '2026-02-15T12:30:00.000Z'
-  );
-  const expectedV = new Date('2026-02-15T12:30:00.000Z').getTime();
+test('buildItemCoverSchemaImage builds SEO ImageObject from imageUrl + imageMeta and falls back to brand PNG when empty', () => {
+  const imgObj = buildItemCoverSchemaImage({
+    pageUrl: 'https://exam-dash.com/books/upsc-modern-history-101',
+    title: SAMPLE_BOOK.title,
+    fallbackDescription: SAMPLE_BOOK.seoDescription,
+    imageUrl: SAMPLE_BOOK.imageUrl,
+    imageMeta: SAMPLE_BOOK.imageMeta,
+  }) as Record<string, unknown>;
 
-  assert.ok(sqPngUrl.endsWith(`/thumbs/sq/books/upsc-modern-history-101.png?v=${expectedV}`));
-  assert.ok(ogPngUrl.endsWith(`/thumbs/og/books/upsc-modern-history-101.png?v=${expectedV}`));
+  assert.equal(imgObj['@type'], 'ImageObject');
+  assert.equal(imgObj.url, SAMPLE_COVER_URL);
+  assert.equal(imgObj.contentUrl, SAMPLE_COVER_URL);
+  assert.equal(imgObj.encodingFormat, 'image/png');
+  assert.equal(imgObj.name, 'UPSC Modern History Question Bank | ExamDash');
+  assert.equal(
+    imgObj.caption,
+    'Book cover of UPSC Modern History Question Bank by Dr. A. Verma.'
+  );
+  assert.equal(imgObj.keywords, 'UPSC, Modern History, Question Bank');
+
+  const fallback = buildItemCoverSchemaImage({
+    pageUrl: 'https://exam-dash.com/exams/ssc-cgl-tier-1-202',
+    title: SAMPLE_EXAM.title,
+    fallbackDescription: SAMPLE_EXAM.seoDescription,
+    imageUrl: '',
+  });
+  assert.equal(fallback, buildSiteOgUrl());
+  assert.equal(String(fallback).includes('/thumbs/'), false);
 });
 
-test('buildBookDetailJsonLd emits ["Product", "Book"] with Brand @type, complete Offer, images, and omits aggregateRating/review when reviewCount is 0', () => {
+test('buildBookDetailJsonLd emits ["Product", "Book"] with Brand @type, complete Offer, ImageObject, and omits aggregateRating/review when reviewCount is 0', () => {
   const graphDoc = buildBookDetailJsonLd(SAMPLE_BOOK);
   const serialized = serializeSafeJsonLd(graphDoc as unknown as Record<string, unknown>);
 
@@ -99,10 +134,10 @@ test('buildBookDetailJsonLd emits ["Product", "Book"] with Brand @type, complete
   assert.equal(breadcrumb['@type'], 'BreadcrumbList');
   assert.deepEqual(product['@type'], ['Product', 'Book']);
   assert.equal(product.sku, 'book_101');
-  assert.equal(Array.isArray(product.image), true);
-  assert.equal(product.image.length, 2);
-  assert.ok(product.image[0].includes('/thumbs/sq/books/'));
-  assert.ok(product.image[1].includes('/thumbs/og/books/'));
+  const coverImage = product.image as Record<string, unknown>;
+  assert.equal(coverImage['@type'], 'ImageObject');
+  assert.equal(coverImage.url, SAMPLE_COVER_URL);
+  assert.equal(serialized.includes('/thumbs/'), false);
   assert.deepEqual(product.brand, { '@type': 'Brand', name: 'ExamDash' });
   assert.equal(product.inLanguage, 'en');
   assert.equal(product.publisher['@type'], 'Organization');
@@ -196,6 +231,7 @@ test('buildBookDetailJsonLd and buildExamDetailJsonLd include 1:1 AggregateRatin
   assert.deepEqual(productAny.aggregateRating, {
     '@type': 'AggregateRating',
     ratingValue: 4.5,
+    ratingCount: 2,
     reviewCount: 2,
     bestRating: 5,
     worstRating: 1,
@@ -203,8 +239,44 @@ test('buildBookDetailJsonLd and buildExamDetailJsonLd include 1:1 AggregateRatin
   const schemaReviews = productAny.review as Array<Record<string, unknown>>;
   assert.equal(schemaReviews.length, 2);
   assert.equal(schemaReviews[0]['@type'], 'Review');
+  assert.equal(
+    schemaReviews[0]['@id'],
+    'https://exam-dash.com/exams/ssc-cgl-tier-1-202#review-ExamPackDocument_exam_202_u1'
+  );
   assert.equal(schemaReviews[0].name, 'Accurate Tier-1 difficulty');
   assert.equal(schemaReviews[0].datePublished, '2026-11-20');
+
+  // Guard against epoch 1970-01-01 dates leaking into Review.datePublished
+  const bookWithEpochReview = buildBookDetailJsonLd(SAMPLE_BOOK, {
+    targetKey: 'books_book_101',
+    collectionName: 'books',
+    itemId: 'book_101',
+    reviewCount: 1,
+    averageRating: 5,
+    distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 1 },
+    reviews: [
+      {
+        reviewId: 'books_book_101_u9',
+        targetKey: 'books_book_101',
+        collectionName: 'books',
+        itemId: 'book_101',
+        urlSlug: 'upsc-modern-history-101',
+        userId: 'u9',
+        authorName: 'A. Patel',
+        rating: 5,
+        comment: 'Well-organized questions for revision.',
+        verifiedPurchase: true,
+        createdAtIso: new Date(0).toISOString(),
+        updatedAtIso: new Date(0).toISOString(),
+      },
+    ],
+  });
+  const [, epochBookProduct] = bookWithEpochReview['@graph'];
+  const epochReviews = (epochBookProduct as Record<string, unknown>).review as Array<
+    Record<string, unknown>
+  >;
+  assert.equal(epochReviews.length, 1);
+  assert.equal('datePublished' in epochReviews[0], false);
 });
 
 test('prepareEditorialMarkdown strips leading duplicate hero heading while preserving body headings', () => {
@@ -221,14 +293,17 @@ test('prepareEditorialMarkdown strips leading duplicate hero heading while prese
   assert.equal(kept, '# Key Exam Strategy\n\nFocus on PYQs.');
 });
 
-test('toCatalogCardDTO omits fullDescription, seoDescription, and MocktestTitles from RSC card payloads', () => {
+test('toCatalogCardDTO omits fullDescription, seoDescription, bookChapters, and MocktestTitles while retaining imageUrl & imageAlt', () => {
   const slimBook = toCatalogCardDTO(SAMPLE_BOOK);
   const slimExam = toCatalogCardDTO(SAMPLE_EXAM);
   const json = JSON.stringify([slimBook, slimExam]);
 
   assert.equal(json.includes('fullDescription'), false);
   assert.equal(json.includes('seoDescription'), false);
+  assert.equal(json.includes('bookChapters'), false);
   assert.equal(json.includes('MocktestTitles'), false);
+  assert.equal(slimBook.imageUrl, SAMPLE_COVER_URL);
+  assert.equal(slimBook.imageAlt, 'UPSC Modern History Question Bank Cover');
   assert.equal(slimExam.totalMocktest, 20);
 });
 
@@ -262,6 +337,15 @@ test('batched sitemaps organize 3,900+ products into 1,000-URL shards with isola
     buyPrice: 99,
     publishAtIso: '2026-01-01T00:00:00.000Z',
     updatedAtIso: updatedIso,
+    ...(collectionName === 'books'
+      ? {
+          imageUrl: `https://firebasestorage.googleapis.com/v0/b/examdash-ed.firebasestorage.app/o/public%2Fcovers%2Fbook_${idx}.png?alt=media`,
+          imageMeta: {
+            title: `Book #${idx} Cover`,
+            caption: `Cover of Book #${idx}`,
+          },
+        }
+      : {}),
   });
 
   // 2,500 books -> 3 shards (1000, 1000, 500)
@@ -335,6 +419,8 @@ test('batched sitemaps organize 3,900+ products into 1,000-URL shards with isola
   assert.ok(books3Xml);
   assert.ok(books3Xml.includes('https://exam-dash.com/books/book-slug-2500'));
   assert.ok(books3Xml.includes('<image:image>'));
+  assert.ok(books3Xml.includes('<image:caption>Cover of Book #2500</image:caption>'));
+  assert.equal(books3Xml.includes('/thumbs/'), false);
   assert.equal(books3Xml.includes('<priority>'), false);
   assert.equal(books3Xml.includes('<changefreq>'), false);
 

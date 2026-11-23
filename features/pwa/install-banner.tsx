@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import {
   ArrowUpRight,
   Check,
@@ -10,6 +11,7 @@ import {
   LayoutGrid,
   Loader2,
 } from 'lucide-react';
+import { isOpenInAppAllowedRoute } from '../../lib/pwa/detection';
 import { usePWAInstall } from './pwa-install-provider';
 
 export interface InstallAppCalloutProps {
@@ -149,9 +151,10 @@ export function InstallAppCallout({
 
 /**
  * Compact Desktop/Tablet Navbar Action (rendered inside AppShell Zone 3 on lg+ viewports)
- * Gives 1-click Install / Add to Dock / Open in App access on any catalog or detail page.
+ * Gives 1-click Install / Add to Dock access; post-install "Open in App" is shown only on Home and Product Detail routes.
  */
 export function HeaderPwaAction() {
+  const pathname = usePathname() || '/';
   const {
     status,
     progressLabel,
@@ -191,6 +194,9 @@ export function HeaderPwaAction() {
   }
 
   if (status === 'open-in-app') {
+    if (!isOpenInAppAllowedRoute(pathname)) {
+      return null;
+    }
     return (
       <a
         data-nosnippet=""
@@ -231,58 +237,3 @@ export function HeaderPwaAction() {
   );
 }
 
-/**
- * Slim Mobile Handoff Banner for Non-Home Routes (/books/*, /exams/*)
- * Appears on mobile viewports ONLY when ExamDash is already installed on the OS (or mid-install)
- * so deep links opened in Chrome can jump directly into the standalone WebAPK in 1 tap.
- */
-export function MobileOpenInAppBanner() {
-  const { status, progressLabel, openInAppHref } = usePWAInstall();
-
-  if (
-    status !== 'open-in-app' &&
-    status !== 'installing' &&
-    status !== 'installed-success'
-  ) {
-    return null;
-  }
-
-  return (
-    <div
-      data-nosnippet=""
-      className="lg:hidden border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]"
-    >
-      <div className="ed-container py-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <Image
-            src="/assets/aistudio/exam-dash_logo_ef0c6c39.png"
-            alt="ExamDash"
-            width={28}
-            height={28}
-            referrerPolicy="no-referrer"
-            className="w-7 h-7 rounded-lg object-cover shrink-0"
-          />
-          <span className="text-xs font-medium text-[var(--text-main)] truncate">
-            {status === 'installing'
-              ? progressLabel || 'Building app package...'
-              : status === 'installed-success'
-              ? 'Successfully Installed ✓'
-              : 'Open this page in ExamDash App'}
-          </span>
-        </div>
-
-        {status === 'open-in-app' && (
-          <a
-            href={openInAppHref}
-            target="_blank"
-            rel="noopener"
-            className="inline-flex items-center gap-1 min-h-[36px] max-md:min-h-[44px] px-3 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-xs font-semibold whitespace-nowrap shrink-0"
-          >
-            <span>Open in App</span>
-            <ArrowUpRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-          </a>
-        )}
-      </div>
-    </div>
-  );
-}

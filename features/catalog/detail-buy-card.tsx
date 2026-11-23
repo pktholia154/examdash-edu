@@ -48,6 +48,8 @@ export interface DetailBuyCardProps {
   currency: string;
   buyPrice: number;
   listPrice: number;
+  imageUrl?: string;
+  imageAlt?: string;
   samplePdfUrl?: string;
   sampleMarkdownUrl?: string;
   sampleJsonUrl?: string;
@@ -65,6 +67,8 @@ export function DetailBuyCard({
   currency,
   buyPrice,
   listPrice,
+  imageUrl,
+  imageAlt,
   samplePdfUrl,
   sampleMarkdownUrl,
   sampleJsonUrl,
@@ -124,6 +128,8 @@ export function DetailBuyCard({
     currency,
     buyPrice,
     listPrice,
+    ...(imageUrl ? { imageUrl } : {}),
+    ...(imageAlt ? { imageAlt } : {}),
     ...(typeof totalMocktest === 'number' ? { totalMocktest } : {}),
   };
 

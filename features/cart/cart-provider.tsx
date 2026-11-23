@@ -39,6 +39,8 @@ export interface BuyTargetItem {
   type?: string;
   authorName?: string;
   language?: string;
+  imageUrl?: string;
+  imageAlt?: string;
 }
 
 interface BuyNowOptions {
@@ -221,6 +223,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      const resolvedImageUrl =
+        'imageUrl' in catalogItem && typeof catalogItem.imageUrl === 'string' && catalogItem.imageUrl.trim()
+          ? catalogItem.imageUrl.trim()
+          : undefined;
+      const resolvedImageAlt =
+        'imageAlt' in catalogItem && typeof catalogItem.imageAlt === 'string' && catalogItem.imageAlt.trim()
+          ? catalogItem.imageAlt.trim()
+          : 'imageMeta' in catalogItem && catalogItem.imageMeta?.alt
+          ? catalogItem.imageMeta.alt
+          : undefined;
+
       const newItem: CartItem = {
         compositeKey,
         firestoreKey: makeFirestoreSafeCartKey(
@@ -239,6 +252,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         currency: incomingCurrency,
         listPrice: catalogItem.listPrice,
         buyPrice: catalogItem.buyPrice,
+        ...(resolvedImageUrl ? { imageUrl: resolvedImageUrl } : {}),
+        ...(resolvedImageAlt ? { imageAlt: resolvedImageAlt } : {}),
       };
 
       writeCartStorage([...items, newItem]);

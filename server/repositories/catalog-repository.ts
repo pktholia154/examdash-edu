@@ -3,6 +3,7 @@ import https from 'node:https';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type {
   CollectionName,
+  ImageMetaDTO,
   PublicBookDTO,
   PublicExamDTO,
 } from '../../lib/types/catalog';
@@ -11,6 +12,8 @@ import {
   isDocumentLive,
   mapBookToPublicDTO,
   mapExamToPublicDTO,
+  normalizeImageUrl,
+  parseImageMeta,
   sanitizePaidDescription,
   sanitizePaidTitle,
 } from '../dto/mapper';
@@ -42,8 +45,14 @@ const PUBLIC_BOOK_CARD_FIELDS = [
   'publishAt',
   'updatedAt',
   'createdAt',
+  'imageUrl',
+  'bookCover',
+  'imageMeta',
   'samplePdfUrl',
   'sampleMarkdownUrl',
+  'soldCount',
+  'salesCount',
+  'isBestseller',
 ] as const;
 
 const PUBLIC_EXAM_CARD_FIELDS = [
@@ -64,6 +73,8 @@ const PUBLIC_EXAM_CARD_FIELDS = [
   'publishAt',
   'updatedAt',
   'createdAt',
+  'imageUrl',
+  'imageMeta',
   'totalMocktest',
   'sampleJsonStoragePath',
 ] as const;
@@ -87,10 +98,17 @@ const PUBLIC_BOOK_FIELDS = [
   'publishAt',
   'updatedAt',
   'createdAt',
+  'imageUrl',
+  'bookCover',
+  'imageMeta',
+  'bookChapters',
   'samplePdfUrl',
   'sampleMarkdownUrl',
   'fullPdfStoragePath',
   'fullMarkdownStoragePath',
+  'soldCount',
+  'salesCount',
+  'isBestseller',
 ] as const;
 
 const PUBLIC_EXAM_FIELDS = [
@@ -112,6 +130,8 @@ const PUBLIC_EXAM_FIELDS = [
   'publishAt',
   'updatedAt',
   'createdAt',
+  'imageUrl',
+  'imageMeta',
   'totalMocktest',
   'MocktestTitles',
   'sampleJsonStoragePath',
@@ -175,6 +195,9 @@ const SITEMAP_PROJECTION_FIELDS = [
   'publishAt',
   'updatedAt',
   'createdAt',
+  'imageUrl',
+  'bookCover',
+  'imageMeta',
   'samplePdfUrl',
   'sampleMarkdownUrl',
   'sampleJsonStoragePath',
@@ -192,6 +215,8 @@ export interface SitemapCatalogEntry {
   buyPrice: number;
   publishAtIso: string;
   updatedAtIso: string;
+  imageUrl?: string;
+  imageMeta?: ImageMetaDTO;
 }
 
 /**
@@ -817,6 +842,12 @@ function mapDocToSitemapEntry(
     buyPrice,
     publishAtIso: new Date(publishMs > 0 ? publishMs : 1704067200000).toISOString(),
     updatedAtIso: new Date(updatedMs > 0 ? updatedMs : 1704067200000).toISOString(),
+    ...(normalizeImageUrl(raw.imageUrl, raw.bookCover)
+      ? { imageUrl: normalizeImageUrl(raw.imageUrl, raw.bookCover) }
+      : {}),
+    ...(parseImageMeta(raw.imageMeta)
+      ? { imageMeta: parseImageMeta(raw.imageMeta) }
+      : {}),
   };
 }
 

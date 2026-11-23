@@ -4,14 +4,15 @@ import React, { cache } from 'react';
 import { Star } from 'lucide-react';
 import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
 import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
-import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
+import { CatalogThumbnail } from '../../../components/ui/catalog-thumbnail';
+import { BookChaptersList } from '../../../features/catalog/book-chapters-list';
 import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
 import { ItemReviewsSection } from '../../../features/reviews/item-reviews-section';
 import { formatPrice } from '../../../lib/registry/content-type-registry';
 import {
   buildBookDetailJsonLd,
   buildCanonicalAlternates,
-  buildThumbUrls,
+  buildSiteOgUrl,
   getCanonicalOrigin,
   serializeSafeJsonLd,
 } from '../../../lib/seo/schema';
@@ -41,48 +42,52 @@ export async function generateMetadata({
   const book = lookup.data;
   const origin = getCanonicalOrigin();
   const canonicalUrl = `${origin}/books/${book.urlSlug}`;
-  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
-    'books',
-    book.urlSlug,
-    book.updatedAtIso
-  );
+  const coverUrl = book.imageUrl || buildSiteOgUrl();
+  const coverAlt = book.imageMeta?.alt || `${book.title} book cover`;
 
   const description =
     book.seoDescription ||
+    book.imageMeta?.description ||
     book.fullDescription.slice(0, 155) ||
     `${book.title} by ${book.authorName} on ExamDash.`;
+
+  const seoKeywords = book.imageMeta?.keywords
+    ? book.imageMeta.keywords
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean)
+    : book.tags.length > 0
+    ? book.tags
+    : undefined;
 
   return {
     title: book.title,
     description,
+    ...(seoKeywords ? { keywords: seoKeywords } : {}),
     alternates: buildCanonicalAlternates(`/books/${book.urlSlug}`),
     openGraph: {
-      title: `${book.title} | ExamDash`,
+      title: book.imageMeta?.title || `${book.title} | ExamDash`,
       description,
       type: 'book',
       url: canonicalUrl,
       images: [
         {
-          url: ogPngUrl,
-          width: 1200,
-          height: 675,
-          alt: book.title,
-          type: 'image/png',
-        },
-        {
-          url: sqPngUrl,
-          width: 1200,
-          height: 1200,
-          alt: book.title,
+          url: coverUrl,
+          alt: coverAlt,
           type: 'image/png',
         },
       ],
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${book.title} | ExamDash`,
+      title: book.imageMeta?.title || `${book.title} | ExamDash`,
       description,
-      images: [ogPngUrl],
+      images: [
+        {
+          url: coverUrl,
+          alt: coverAlt,
+        },
+      ],
     },
   };
 }
@@ -152,15 +157,23 @@ export default async function BookDetailPage({
       />
 
       <article className="w-full min-w-0">
-        {/* Header Block: Side-by-Side Thumbnail (Left) + Title (Right) on All Screens */}
+        {/* Header Block: Side-by-Side 4:3 Cover Thumbnail (Left) + Title (Right) on All Screens */}
         <div className="flex flex-row items-center gap-4 sm:gap-6 max-md:gap-3.5 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
-          <MonogramThumbnail
-            title={book.title}
-            type={book.type}
-            collectionName="books"
-            size="lg"
-            className="w-24 h-24 max-md:w-20 max-md:h-20 sm:w-32 sm:h-32 md:w-36 md:h-36 shrink-0"
-          />
+          <figure className="shrink-0">
+            <CatalogThumbnail
+              title={book.title}
+              collectionName="books"
+              imageUrl={book.imageUrl}
+              imageMeta={book.imageMeta}
+              size="lg"
+              priority
+            />
+            {book.imageMeta?.caption && (
+              <figcaption className="sr-only">
+                {book.imageMeta.caption}
+              </figcaption>
+            )}
+          </figure>
 
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-[var(--text-muted)] break-words">
@@ -184,6 +197,8 @@ export default async function BookDetailPage({
           currency={book.currency}
           buyPrice={book.buyPrice}
           listPrice={book.listPrice}
+          imageUrl={book.imageUrl || undefined}
+          imageAlt={book.imageMeta?.alt || undefined}
           samplePdfUrl={book.samplePdfUrl || undefined}
           sampleMarkdownUrl={book.sampleMarkdownUrl || undefined}
         />
@@ -235,7 +250,7 @@ export default async function BookDetailPage({
               <>
                 <span aria-hidden="true">·</span>
                 <a
-                  href="#learner-reviews"
+                  href="#write-review"
                   className="font-medium text-[var(--text-main)] hover:underline underline-offset-4"
                 >
                   Write the first review
@@ -250,6 +265,13 @@ export default async function BookDetailPage({
             </p>
           )}
         </div>
+
+        {/* Book Chapters List directly above About This Book & Coverage */}
+        <BookChaptersList
+          bookId={book.id}
+          urlSlug={book.urlSlug}
+          chapters={book.bookChapters}
+        />
 
         {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
         <section aria-labelledby="book-description-heading" className="mt-8 max-md:mt-6">
@@ -299,13 +321,12 @@ export default async function BookDetailPage({
                   href={`/books/${rel.urlSlug}`}
                   className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
                 >
-                  <MonogramThumbnail
+                  <CatalogThumbnail
                     title={rel.title}
-                    type={rel.type}
                     collectionName="books"
-                    size="sm"
-                    showBadge={false}
-                    className="w-12 h-12"
+                    imageUrl={rel.imageUrl}
+                    imageMeta={rel.imageMeta}
+                    size="xs"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-[var(--text-main)] truncate">
@@ -327,13 +348,12 @@ export default async function BookDetailPage({
                   href={`/exams/${relEx.urlSlug}`}
                   className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
                 >
-                  <MonogramThumbnail
+                  <CatalogThumbnail
                     title={relEx.title}
-                    type={relEx.type}
                     collectionName="ExamPackDocument"
-                    size="sm"
-                    showBadge={false}
-                    className="w-12 h-12"
+                    imageUrl={relEx.imageUrl}
+                    imageMeta={relEx.imageMeta}
+                    size="xs"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-[var(--text-main)] truncate">

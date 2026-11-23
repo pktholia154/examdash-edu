@@ -14,6 +14,7 @@ import {
   Loader2,
   MessageSquareText,
   RotateCcw,
+  Star,
   Target,
   TrendingUp,
   Trophy,
@@ -1586,6 +1587,31 @@ export function ExamAnalyticsDashboard({
             isSignedIn={isSignedIn}
             onSaveFeedback={onSaveFeedback}
           />
+
+          {/* Public Learner Review Invitation */}
+          <section
+            aria-label="Share a public review"
+            className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          >
+            <div className="min-w-0 space-y-1">
+              <h3 className="text-sm sm:text-base font-bold text-[var(--text-main)]">
+                Rate &amp; Review {examTitle}
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                Help fellow candidates by sharing your genuine rating on question difficulty, explanations, and exam relevance.
+              </p>
+            </div>
+            <a
+              href={`/exams/${examSlug}#write-review`}
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-main)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto"
+            >
+              <Star
+                className="w-4 h-4 fill-[var(--status-warning)] text-[var(--status-warning)] shrink-0"
+                aria-hidden="true"
+              />
+              <span>Write a Review</span>
+            </a>
+          </section>
         </div>
       )}
     </div>

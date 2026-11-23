@@ -16,6 +16,16 @@ export interface MocktestTitleItem {
   totalMarks: number;
 }
 
+export interface ImageMetaDTO {
+  alt?: string;
+  slug?: string;
+  title?: string;
+  caption?: string;
+  description?: string;
+  filename?: string;
+  keywords?: string;
+}
+
 /**
  * Public Book DTO — Strictly whitelisted server projection.
  * NEVER includes fullPdfStoragePath or fullMarkdownStoragePath.
@@ -38,10 +48,15 @@ export interface PublicBookDTO {
   publishAtIso: string;
   updatedAtIso: string;
   createdAtIso: string;
+  imageUrl: string;
+  imageMeta?: ImageMetaDTO;
+  bookChapters: string[];
   samplePdfUrl: string;
   sampleMarkdownUrl: string;
   hasFullPdf: boolean;
   hasFullMarkdown: boolean;
+  soldCount?: number;
+  isBestseller?: boolean;
 }
 
 /**
@@ -66,6 +81,8 @@ export interface PublicExamDTO {
   publishAtIso: string;
   updatedAtIso: string;
   createdAtIso: string;
+  imageUrl: string;
+  imageMeta?: ImageMetaDTO;
   totalMocktest: number;
   MocktestTitles: MocktestTitleItem[];
   sampleJsonStoragePath: string;
@@ -115,7 +132,7 @@ export interface ReviewAggregateBadge {
 
 /**
  * Slim card projection for catalog grids/lists so client islands never serialize
- * `fullDescription`, `seoDescription`, or `MocktestTitles` into `self.__next_f`.
+ * `fullDescription`, `seoDescription`, `bookChapters`, or `MocktestTitles` into `self.__next_f`.
  */
 export interface CatalogCardDTO {
   id: string;
@@ -130,9 +147,14 @@ export interface CatalogCardDTO {
   listPrice: number;
   buyPrice: number;
   publishAtIso: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  imageTitle?: string;
   totalMocktest?: number;
   averageRating?: number;
   reviewCount?: number;
+  soldCount?: number;
+  isBestseller?: boolean;
 }
 
 export function toCatalogCardDTO(
@@ -159,8 +181,19 @@ export function toCatalogCardDTO(
     listPrice: item.listPrice,
     buyPrice: item.buyPrice,
     publishAtIso: item.publishAtIso,
+    ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
+    ...(item.imageMeta?.alt ? { imageAlt: item.imageMeta.alt } : {}),
+    ...(item.imageMeta?.title ? { imageTitle: item.imageMeta.title } : {}),
     ...(item.collectionName === 'ExamPackDocument'
       ? { totalMocktest: item.totalMocktest }
+      : {}),
+    ...(item.collectionName === 'books' &&
+    typeof item.soldCount === 'number' &&
+    item.soldCount > 0
+      ? { soldCount: item.soldCount }
+      : {}),
+    ...(item.collectionName === 'books' && item.isBestseller === true
+      ? { isBestseller: true }
       : {}),
     ...(hasRealReviews && reviewBadge
       ? {
@@ -184,6 +217,8 @@ export interface CartItem {
   currency: string;
   listPrice: number;
   buyPrice: number;
+  imageUrl?: string;
+  imageAlt?: string;
 }
 
 export interface UserPurchaseRecord {
@@ -221,5 +256,7 @@ export interface WishlistItem {
   listPrice: number;
   buyPrice: number;
   totalMocktest?: number;
+  imageUrl?: string;
+  imageAlt?: string;
   createdAtIso: string;
 }

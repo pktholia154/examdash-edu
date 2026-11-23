@@ -62,13 +62,13 @@ export function ReaderTopBar({
               aria-pressed={activeFormat === 'markdown'}
               onClick={() => onFormatChange('markdown')}
               className={cn(
-                'inline-flex items-center justify-center h-8 sm:h-9 px-2 sm:px-3 rounded text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap',
+                'inline-flex items-center justify-center h-8 sm:h-9 px-2 sm:px-3 rounded border-2 border-solid border-[#0f766e] text-[11px] sm:text-xs font-semibold transition-colors whitespace-nowrap',
                 activeFormat === 'markdown'
                   ? 'bg-[var(--reader-accent,var(--brand-primary))] text-[var(--reader-accent-ink,var(--brand-primary-ink))]'
                   : 'text-[var(--reader-muted,var(--text-muted))] hover:text-[var(--reader-ink,var(--text-main))]'
               )}
             >
-              Markdown
+              eMobi
             </button>
           </div>
         )}

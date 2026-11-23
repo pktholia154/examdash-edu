@@ -18,9 +18,14 @@ import {
 import { HomeSearchBar } from '../features/catalog/search-hero';
 import { InstallAppCallout } from '../features/pwa/install-banner';
 import { KpiStrip } from '../features/catalog/kpi-strip';
+import { BookCarouselSection } from '../features/catalog/book-carousel';
 import { CatalogSection } from '../features/catalog/catalog-section';
 import { ErrorState } from '../components/ui/state-blocks';
 import { HomeComplianceSection } from '../components/legal/home-compliance-section';
+import {
+  buildBestsellerBooksShelf,
+  buildLatestBooksShelf,
+} from '../lib/catalog/carousel-shelves';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +34,7 @@ export const metadata: Metadata = {
 };
 
 const HOME_LIST_LIMIT = 5;
+const HOME_CAROUSEL_LIMIT = 16;
 
 export default async function HomePage() {
   let fetchError: string | null = null;
@@ -49,7 +55,7 @@ export default async function HomePage() {
   try {
     [booksPage, examsPage, booksTotalCount, examsTotalCount] =
       await Promise.all([
-        getLiveBooksPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
+        getLiveBooksPage({ limit: HOME_CAROUSEL_LIMIT, offset: 0 }),
         getLiveExamsPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
         getLiveCollectionCount('books'),
         getLiveCollectionCount('ExamPackDocument'),
@@ -81,9 +87,23 @@ export default async function HomePage() {
       ? Math.max(exams.length, examsTotalCount)
       : exams.length;
 
-  const slimBooks = books.map((b) =>
+  const allSlimBooks = books.map((b) =>
     toCatalogCardDTO(b, reviewAggregates.get(buildReviewTargetKey('books', b.id)))
   );
+  const latestCarouselBooks = buildLatestBooksShelf(
+    allSlimBooks,
+    HOME_CAROUSEL_LIMIT
+  );
+  const bestsellerCarouselBooks = buildBestsellerBooksShelf(
+    allSlimBooks,
+    HOME_CAROUSEL_LIMIT
+  );
+
+  const slimBooksList = allSlimBooks.slice(0, HOME_LIST_LIMIT);
+  const booksListHasMore =
+    allSlimBooks.length > HOME_LIST_LIMIT || booksPage.hasMore;
+  const booksListNextOffset = Math.min(HOME_LIST_LIMIT, allSlimBooks.length);
+
   const slimExams = exams.map((e) =>
     toCatalogCardDTO(
       e,
@@ -116,18 +136,47 @@ export default async function HomePage() {
         </div>
       ) : (
         <>
+          {latestCarouselBooks.length > 0 && (
+            <BookCarouselSection
+              id="latest-books-carousel"
+              heading="Latest Books"
+              subheading="Newly published study editions and chapterwise question banks"
+              items={latestCarouselBooks}
+              viewAllHref="/books"
+              viewAllLabel="All Books"
+              prioritizeFirstCount={4}
+            />
+          )}
+
+          {bestsellerCarouselBooks.length > 0 && (
+            <BookCarouselSection
+              id="bestsellers-carousel"
+              heading="Bestsellers"
+              subheading="Top-value practice books and high-demand exam editions"
+              items={bestsellerCarouselBooks}
+              viewAllHref="/books"
+              viewAllLabel="Explore All"
+            />
+          )}
+
+          {latestCarouselBooks.length > 0 && (
+            <div className="ed-container">
+              <hr className="border-[var(--border-subtle)]" />
+            </div>
+          )}
+
           <CatalogSection
             id="books-catalog"
             heading="Books & Question Banks"
             storageKey="home-books"
-            items={slimBooks}
+            items={slimBooksList}
             viewAllHref="/books"
             viewAllLabel="All Books"
             showFilters={false}
             collectionName="books"
             pageSize={HOME_LIST_LIMIT}
-            initialHasMore={booksPage.hasMore}
-            initialNextOffset={booksPage.nextOffset}
+            initialHasMore={booksListHasMore}
+            initialNextOffset={booksListNextOffset}
             totalCount={booksTotalCount !== null ? displayBookCount : undefined}
             loadMoreLabel="Load More Books"
           />

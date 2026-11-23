@@ -58,7 +58,7 @@ export async function generateMetadata({
   const origin = getCanonicalOrigin();
   const relCanonical = pageNum > 1 ? `/books?page=${pageNum}` : '/books';
   const fullCanonical = `${origin}${relCanonical}`;
-  const ogImg = buildSiteOgUrl('books');
+  const ogImg = buildSiteOgUrl();
   const title =
     pageNum > 1
       ? `Books & Question Banks (Page ${pageNum})`
@@ -95,15 +95,15 @@ export async function generateMetadata({
       images: [
         {
           url: ogImg,
-          width: 1200,
-          height: 675,
+          width: 512,
+          height: 512,
           alt: title,
           type: 'image/png',
         },
       ],
     },
     twitter: {
-      card: 'summary_large_image',
+      card: 'summary',
       title: `${title} | ExamDash`,
       description,
       images: [ogImg],

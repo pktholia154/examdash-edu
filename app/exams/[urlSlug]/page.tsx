@@ -4,7 +4,7 @@ import React, { cache } from 'react';
 import { Star } from 'lucide-react';
 import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
 import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
-import { MonogramThumbnail } from '../../../components/ui/monogram-thumbnail';
+import { CatalogThumbnail } from '../../../components/ui/catalog-thumbnail';
 import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
 import { SyllabusTable } from '../../../features/catalog/syllabus-table';
 import { ItemReviewsSection } from '../../../features/reviews/item-reviews-section';
@@ -12,7 +12,7 @@ import { formatPrice } from '../../../lib/registry/content-type-registry';
 import {
   buildCanonicalAlternates,
   buildExamDetailJsonLd,
-  buildThumbUrls,
+  buildSiteOgUrl,
   getCanonicalOrigin,
   serializeSafeJsonLd,
 } from '../../../lib/seo/schema';
@@ -42,14 +42,12 @@ export async function generateMetadata({
   const exam = lookup.data;
   const origin = getCanonicalOrigin();
   const canonicalUrl = `${origin}/exams/${exam.urlSlug}`;
-  const { sqPngUrl, ogPngUrl } = buildThumbUrls(
-    'exams',
-    exam.urlSlug,
-    exam.updatedAtIso
-  );
+  const coverUrl = exam.imageUrl || buildSiteOgUrl();
+  const coverAlt = exam.imageMeta?.alt || `${exam.title} exam pack cover`;
 
   const description =
     exam.seoDescription ||
+    exam.imageMeta?.description ||
     exam.fullDescription.slice(0, 155) ||
     `${exam.title} (${exam.totalMocktest} Mock Tests) on ExamDash.`;
 
@@ -58,32 +56,28 @@ export async function generateMetadata({
     description,
     alternates: buildCanonicalAlternates(`/exams/${exam.urlSlug}`),
     openGraph: {
-      title: `${exam.title} | ExamDash`,
+      title: exam.imageMeta?.title || `${exam.title} | ExamDash`,
       description,
       type: 'website',
       url: canonicalUrl,
       images: [
         {
-          url: ogPngUrl,
-          width: 1200,
-          height: 675,
-          alt: exam.title,
-          type: 'image/png',
-        },
-        {
-          url: sqPngUrl,
-          width: 1200,
-          height: 1200,
-          alt: exam.title,
+          url: coverUrl,
+          alt: coverAlt,
           type: 'image/png',
         },
       ],
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${exam.title} | ExamDash`,
+      title: exam.imageMeta?.title || `${exam.title} | ExamDash`,
       description,
-      images: [ogPngUrl],
+      images: [
+        {
+          url: coverUrl,
+          alt: coverAlt,
+        },
+      ],
     },
   };
 }
@@ -166,15 +160,23 @@ export default async function ExamDetailPage({
       />
 
       <article className="w-full min-w-0">
-        {/* Header Block: Side-by-Side Thumbnail (Left) + Title (Right) on All Screens */}
+        {/* Header Block: Side-by-Side 4:3 Cover Thumbnail (Left) + Title (Right) on All Screens */}
         <div className="flex flex-row items-center gap-4 sm:gap-6 max-md:gap-3.5 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
-          <MonogramThumbnail
-            title={exam.title}
-            type={exam.type}
-            collectionName="ExamPackDocument"
-            size="lg"
-            className="w-24 h-24 max-md:w-20 max-md:h-20 sm:w-32 sm:h-32 md:w-36 md:h-36 shrink-0"
-          />
+          <figure className="shrink-0">
+            <CatalogThumbnail
+              title={exam.title}
+              collectionName="ExamPackDocument"
+              imageUrl={exam.imageUrl}
+              imageMeta={exam.imageMeta}
+              size="lg"
+              priority
+            />
+            {exam.imageMeta?.caption && (
+              <figcaption className="sr-only">
+                {exam.imageMeta.caption}
+              </figcaption>
+            )}
+          </figure>
 
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-[var(--text-muted)] break-words">
@@ -199,6 +201,8 @@ export default async function ExamDetailPage({
           currency={exam.currency}
           buyPrice={exam.buyPrice}
           listPrice={exam.listPrice}
+          imageUrl={exam.imageUrl || undefined}
+          imageAlt={exam.imageMeta?.alt || undefined}
           sampleJsonUrl={sampleTrialHref}
         />
 
@@ -266,7 +270,7 @@ export default async function ExamDetailPage({
               <>
                 <span aria-hidden="true">·</span>
                 <a
-                  href="#learner-reviews"
+                  href="#write-review"
                   className="font-medium text-[var(--text-main)] hover:underline underline-offset-4"
                 >
                   Write the first review
@@ -337,13 +341,12 @@ export default async function ExamDetailPage({
                   href={`/books/${b.urlSlug}`}
                   className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
                 >
-                  <MonogramThumbnail
+                  <CatalogThumbnail
                     title={b.title}
-                    type={b.type}
                     collectionName="books"
-                    size="sm"
-                    showBadge={false}
-                    className="w-12 h-12"
+                    imageUrl={b.imageUrl}
+                    imageMeta={b.imageMeta}
+                    size="xs"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-[var(--text-main)] truncate">
@@ -365,13 +368,12 @@ export default async function ExamDetailPage({
                   href={`/exams/${ex.urlSlug}`}
                   className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
                 >
-                  <MonogramThumbnail
+                  <CatalogThumbnail
                     title={ex.title}
-                    type={ex.type}
                     collectionName="ExamPackDocument"
-                    size="sm"
-                    showBadge={false}
-                    className="w-12 h-12"
+                    imageUrl={ex.imageUrl}
+                    imageMeta={ex.imageMeta}
+                    size="xs"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-[var(--text-main)] truncate">
