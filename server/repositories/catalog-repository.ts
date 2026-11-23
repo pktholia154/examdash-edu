@@ -7,9 +7,12 @@ import type {
   PublicExamDTO,
 } from '../../lib/types/catalog';
 import {
+  extractTimestampMs,
   isDocumentLive,
   mapBookToPublicDTO,
   mapExamToPublicDTO,
+  sanitizePaidDescription,
+  sanitizePaidTitle,
 } from '../dto/mapper';
 import {
   buildFirebaseStorageHeaders,
@@ -154,7 +157,41 @@ function parseFirestoreRestFields(fields: FirestoreRestFieldMap | undefined): Re
 
 interface ParsedFirestoreDoc {
   docId: string;
+  fullName: string;
   data: Record<string, unknown>;
+}
+
+const SITEMAP_PROJECTION_FIELDS = [
+  'id',
+  'title',
+  'urlSlug',
+  'seoDescription',
+  'type',
+  'authorName',
+  'currency',
+  'buyPrice',
+  'isPublished',
+  'isDeleted',
+  'publishAt',
+  'updatedAt',
+  'createdAt',
+  'samplePdfUrl',
+  'sampleMarkdownUrl',
+  'sampleJsonStoragePath',
+] as const;
+
+export interface SitemapCatalogEntry {
+  id: string;
+  collectionName: CollectionName;
+  title: string;
+  urlSlug: string;
+  seoDescription: string;
+  type: string;
+  authorName: string;
+  currency: string;
+  buyPrice: number;
+  publishAtIso: string;
+  updatedAtIso: string;
 }
 
 /**
@@ -223,6 +260,7 @@ function runDefaultFirestoreQuery(
                 }
                 docs.push({
                   docId,
+                  fullName: row.document.name,
                   data: parsed,
                 });
               }
@@ -335,8 +373,8 @@ async function runPaginatedCollectionQuery<T>(params: {
   offset: number;
   mapper: (docId: string, raw: Record<string, unknown>) => T;
 }): Promise<CatalogPageResult<T>> {
-  const safeLimit = Math.max(1, Math.min(24, Math.floor(params.limit) || 10));
-  const safeOffset = Math.max(0, Math.min(5000, Math.floor(params.offset) || 0));
+  const safeLimit = Math.max(1, Math.min(48, Math.floor(params.limit) || 20));
+  const safeOffset = Math.max(0, Math.min(50000, Math.floor(params.offset) || 0));
   const nowMs = Date.now();
   const items: T[] = [];
   let hasMore = false;
@@ -611,16 +649,71 @@ export async function getCatalogItemsByRefs(
     });
   }
 
-  const wantsBooks = Array.from(uniqueRefs.values()).some(
-    (r) => r.collectionName === 'books'
-  );
-  const wantsExams = Array.from(uniqueRefs.values()).some(
-    (r) => r.collectionName === 'ExamPackDocument'
-  );
+  const bookIds = Array.from(uniqueRefs.values())
+    .filter((r) => r.collectionName === 'books')
+    .map((r) => r.id);
+  const examIds = Array.from(uniqueRefs.values())
+    .filter((r) => r.collectionName === 'ExamPackDocument')
+    .map((r) => r.id);
+
+  const fetchTargetedCollection = async <T extends PublicBookDTO | PublicExamDTO>(
+    collectionId: CollectionName,
+    fields: readonly string[],
+    ids: string[],
+    mapper: (docId: string, raw: Record<string, unknown>) => T
+  ): Promise<T[]> => {
+    if (ids.length === 0) return [];
+    const nowMs = Date.now();
+    const byKey = new Map<string, T>();
+
+    // Query in Firestore IN chunks of <= 30 identifiers (matching both `id` and `urlSlug`)
+    for (let i = 0; i < ids.length; i += 30) {
+      const chunk = ids.slice(i, i + 30);
+      const stringValues = chunk.map((v) => ({ stringValue: v }));
+      const [byIdDocs, bySlugDocs] = await Promise.all([
+        runDefaultFirestoreQuery({
+          from: [{ collectionId }],
+          select: { fields: fields.map((fieldPath) => ({ fieldPath })) },
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'id' },
+              op: 'IN',
+              value: { arrayValue: { values: stringValues } },
+            },
+          },
+        }).catch(() => [] as ParsedFirestoreDoc[]),
+        runDefaultFirestoreQuery({
+          from: [{ collectionId }],
+          select: { fields: fields.map((fieldPath) => ({ fieldPath })) },
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'urlSlug' },
+              op: 'IN',
+              value: { arrayValue: { values: stringValues } },
+            },
+          },
+        }).catch(() => [] as ParsedFirestoreDoc[]),
+      ]);
+
+      for (const docSnap of [...byIdDocs, ...bySlugDocs]) {
+        if (isDocumentLive(docSnap.data, nowMs)) {
+          const dto = mapper(docSnap.docId, docSnap.data);
+          byKey.set(dto.id, dto);
+        }
+      }
+    }
+
+    return Array.from(byKey.values());
+  };
 
   const [books, exams] = await Promise.all([
-    wantsBooks ? getLiveBooks() : Promise.resolve([] as PublicBookDTO[]),
-    wantsExams ? getLiveExams() : Promise.resolve([] as PublicExamDTO[]),
+    fetchTargetedCollection('books', PUBLIC_BOOK_FIELDS, bookIds, mapBookToPublicDTO),
+    fetchTargetedCollection(
+      'ExamPackDocument',
+      PUBLIC_EXAM_FIELDS,
+      examIds,
+      mapExamToPublicDTO
+    ),
   ]);
 
   const bookMap = new Map<string, PublicBookDTO>();
@@ -649,19 +742,261 @@ export async function getCatalogItemsByRefs(
   return resolved;
 }
 
+const SITEMAP_CACHE_TTL_MS = 60_000;
+
+const sitemapEntriesCache = new Map<
+  CollectionName,
+  { expiresAtMs: number; entries: SitemapCatalogEntry[] }
+>();
+
+let deletedSlugsCache: {
+  expiresAtMs: number;
+  books: Set<string>;
+  exams: Set<string>;
+} | null = null;
+
+export function invalidateCatalogSitemapCache(): void {
+  sitemapEntriesCache.clear();
+  deletedSlugsCache = null;
+}
+
+function mapDocToSitemapEntry(
+  collectionName: CollectionName,
+  docId: string,
+  raw: Record<string, unknown>
+): SitemapCatalogEntry {
+  const createdMs = extractTimestampMs(raw.createdAt) ?? 0;
+  const publishMs = extractTimestampMs(raw.publishAt) ?? createdMs;
+  const updatedMs = extractTimestampMs(raw.updatedAt) ?? publishMs;
+  const buyPrice =
+    typeof raw.buyPrice === 'number' && Number.isFinite(raw.buyPrice) && raw.buyPrice >= 0
+      ? raw.buyPrice
+      : Number(raw.buyPrice) >= 0
+      ? Number(raw.buyPrice)
+      : 0;
+
+  const hasSample = Boolean(
+    (typeof raw.samplePdfUrl === 'string' && raw.samplePdfUrl.trim()) ||
+      (typeof raw.sampleMarkdownUrl === 'string' && raw.sampleMarkdownUrl.trim()) ||
+      (typeof raw.sampleJsonStoragePath === 'string' &&
+        raw.sampleJsonStoragePath.trim())
+  );
+
+  const fallbackTitle =
+    collectionName === 'books' ? 'Untitled Book' : 'Untitled Exam Pack';
+  const rawTitle = typeof raw.title === 'string' ? raw.title : '';
+  const title = sanitizePaidTitle(rawTitle, buyPrice, fallbackTitle);
+  const rawSeo = typeof raw.seoDescription === 'string' ? raw.seoDescription : '';
+  const seoDescription = sanitizePaidDescription(rawSeo, buyPrice, hasSample);
+
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : docId,
+    collectionName,
+    title,
+    urlSlug:
+      typeof raw.urlSlug === 'string' && raw.urlSlug.trim()
+        ? raw.urlSlug.trim()
+        : docId,
+    seoDescription,
+    type:
+      typeof raw.type === 'string' && raw.type.trim()
+        ? raw.type.trim()
+        : collectionName === 'books'
+        ? 'Ebook'
+        : 'Exam',
+    authorName:
+      typeof raw.authorName === 'string' && raw.authorName.trim()
+        ? raw.authorName.trim()
+        : collectionName === 'books'
+        ? 'ExamDash Editorial'
+        : 'ExamDash Faculty',
+    currency:
+      typeof raw.currency === 'string' && raw.currency.trim()
+        ? raw.currency.trim().toUpperCase()
+        : 'INR',
+    buyPrice,
+    publishAtIso: new Date(publishMs > 0 ? publishMs : 1704067200000).toISOString(),
+    updatedAtIso: new Date(updatedMs > 0 ? updatedMs : 1704067200000).toISOString(),
+  };
+}
+
+/**
+ * Streams all live published catalog entries using a minimal field projection and cursor-based
+ * `startAt(before: false)` batches of 1,000 documents (zero `fullDescription` / `MocktestTitles` overhead).
+ * Deterministic ordering (`publishAt ASC, urlSlug ASC`) guarantees stable shard membership as
+ * thousands of new products are published over time.
+ */
+export async function getSitemapCatalogEntries(
+  collectionName: CollectionName
+): Promise<SitemapCatalogEntry[]> {
+  const nowMs = Date.now();
+  const cached = sitemapEntriesCache.get(collectionName);
+  if (cached && cached.expiresAtMs > nowMs) {
+    return cached.entries;
+  }
+
+  const CURSOR_BATCH_LIMIT = 1000;
+  const MAX_BATCHES = 50; // Supports up to 50,000 live items per collection
+  const seenDocIds = new Set<string>();
+  const entries: SitemapCatalogEntry[] = [];
+  let cursorFullName: string | null = null;
+  let useNameOrder = true;
+
+  for (let batchIdx = 0; batchIdx < MAX_BATCHES; batchIdx++) {
+    const baseQuery: Record<string, unknown> = {
+      from: [{ collectionId: collectionName }],
+      select: {
+        fields: SITEMAP_PROJECTION_FIELDS.map((fieldPath) => ({ fieldPath })),
+      },
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'isPublished' },
+          op: 'EQUAL',
+          value: { booleanValue: true },
+        },
+      },
+      limit: CURSOR_BATCH_LIMIT,
+    };
+
+    let docs: ParsedFirestoreDoc[] = [];
+    if (useNameOrder) {
+      try {
+        docs = await runDefaultFirestoreQuery({
+          ...baseQuery,
+          orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+          ...(cursorFullName
+            ? {
+                startAt: {
+                  values: [{ referenceValue: cursorFullName }],
+                  before: false,
+                },
+              }
+            : {}),
+        });
+      } catch {
+        useNameOrder = false;
+        docs = await runDefaultFirestoreQuery(baseQuery);
+      }
+    } else {
+      docs = await runDefaultFirestoreQuery(baseQuery);
+    }
+
+    if (docs.length === 0) break;
+
+    let addedInBatch = 0;
+    for (const docSnap of docs) {
+      if (seenDocIds.has(docSnap.docId)) continue;
+      seenDocIds.add(docSnap.docId);
+      addedInBatch += 1;
+
+      if (isDocumentLive(docSnap.data, nowMs)) {
+        entries.push(mapDocToSitemapEntry(collectionName, docSnap.docId, docSnap.data));
+      }
+    }
+
+    cursorFullName = docs[docs.length - 1]?.fullName || null;
+
+    if (!useNameOrder || addedInBatch === 0 || docs.length < CURSOR_BATCH_LIMIT) {
+      break;
+    }
+  }
+
+  // Deterministic chronological sort so existing shard batches never reshuffle when new items publish
+  entries.sort((a, b) => {
+    const pubDiff =
+      new Date(a.publishAtIso).getTime() - new Date(b.publishAtIso).getTime();
+    if (pubDiff !== 0) return pubDiff;
+    return a.urlSlug.localeCompare(b.urlSlug);
+  });
+
+  sitemapEntriesCache.set(collectionName, {
+    expiresAtMs: Date.now() + SITEMAP_CACHE_TTL_MS,
+    entries,
+  });
+
+  return entries;
+}
+
+/**
+ * Fetches lightweight tombstone slug sets (`isDeleted == true`) cached for 60s
+ * so deleted catalog URLs consistently return HTTP 410 Gone.
+ */
+export async function getDeletedCatalogSlugs(): Promise<{
+  books: Set<string>;
+  exams: Set<string>;
+}> {
+  const nowMs = Date.now();
+  if (deletedSlugsCache && deletedSlugsCache.expiresAtMs > nowMs) {
+    return {
+      books: deletedSlugsCache.books,
+      exams: deletedSlugsCache.exams,
+    };
+  }
+
+  const queryTombstones = async (collectionId: CollectionName): Promise<Set<string>> => {
+    try {
+      const docs = await runDefaultFirestoreQuery({
+        from: [{ collectionId }],
+        select: { fields: [{ fieldPath: 'urlSlug' }, { fieldPath: 'isDeleted' }] },
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'isDeleted' },
+            op: 'EQUAL',
+            value: { booleanValue: true },
+          },
+        },
+        limit: 2000,
+      });
+      const set = new Set<string>();
+      for (const d of docs) {
+        if (d.data.isDeleted === true) {
+          const slug =
+            typeof d.data.urlSlug === 'string' && d.data.urlSlug.trim()
+              ? d.data.urlSlug.trim()
+              : d.docId;
+          if (slug) set.add(slug);
+        }
+      }
+      return set;
+    } catch {
+      return new Set<string>();
+    }
+  };
+
+  const [books, exams] = await Promise.all([
+    queryTombstones('books'),
+    queryTombstones('ExamPackDocument'),
+  ]);
+
+  deletedSlugsCache = {
+    expiresAtMs: nowMs + SITEMAP_CACHE_TTL_MS,
+    books,
+    exams,
+  };
+
+  return { books, exams };
+}
+
 export async function searchCatalog(rawQuery: string): Promise<{
   books: PublicBookDTO[];
   exams: PublicExamDTO[];
 }> {
   const q = (rawQuery || '').trim().toLowerCase();
-  const [books, exams] = await Promise.all([getLiveBooks(), getLiveExams()]);
-
   if (!q) {
+    const [booksPage, examsPage] = await Promise.all([
+      getLiveBooksPage({ limit: 6, offset: 0 }),
+      getLiveExamsPage({ limit: 6, offset: 0 }),
+    ]);
     return {
-      books: books.slice(0, 6),
-      exams: exams.slice(0, 6),
+      books: booksPage.items,
+      exams: examsPage.items,
     };
   }
+
+  const [booksPage, examsPage] = await Promise.all([
+    getLiveBooksPage({ limit: 48, offset: 0 }),
+    getLiveExamsPage({ limit: 48, offset: 0 }),
+  ]);
 
   const matchesQuery = (
     title: string,
@@ -676,12 +1011,12 @@ export async function searchCatalog(rawQuery: string): Promise<{
   };
 
   return {
-    books: books
+    books: booksPage.items
       .filter((b) => matchesQuery(b.title, b.authorName, b.tags, b.type))
-      .slice(0, 8),
-    exams: exams
+      .slice(0, 12),
+    exams: examsPage.items
       .filter((e) => matchesQuery(e.title, e.authorName, e.tags, e.type))
-      .slice(0, 8),
+      .slice(0, 12),
   };
 }
 

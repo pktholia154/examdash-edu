@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import React from 'react';
+import React, { cache } from 'react';
 import { Star } from 'lucide-react';
 import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
 import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
@@ -10,18 +10,21 @@ import { ItemReviewsSection } from '../../../features/reviews/item-reviews-secti
 import { formatPrice } from '../../../lib/registry/content-type-registry';
 import {
   buildBookDetailJsonLd,
+  buildCanonicalAlternates,
   buildThumbUrls,
   getCanonicalOrigin,
   serializeSafeJsonLd,
 } from '../../../lib/seo/schema';
 import {
   getBookBySlug,
-  getLiveBooks,
-  getLiveExams,
+  getLiveBooksPage,
+  getLiveExamsPage,
 } from '../../../server/repositories/catalog-repository';
 import { getItemReviewsSummary } from '../../../server/repositories/review-repository';
 
 export const dynamic = 'force-dynamic';
+
+const loadBookBySlug = cache(async (slug: string) => getBookBySlug(slug));
 
 export async function generateMetadata({
   params,
@@ -29,7 +32,7 @@ export async function generateMetadata({
   params: Promise<{ urlSlug: string }>;
 }): Promise<Metadata> {
   const { urlSlug } = await params;
-  const lookup = await getBookBySlug(urlSlug);
+  const lookup = await loadBookBySlug(urlSlug);
 
   if (lookup.status !== 'ok') {
     notFound();
@@ -52,9 +55,7 @@ export async function generateMetadata({
   return {
     title: book.title,
     description,
-    alternates: {
-      canonical: canonicalUrl,
-    },
+    alternates: buildCanonicalAlternates(`/books/${book.urlSlug}`),
     openGraph: {
       title: `${book.title} | ExamDash`,
       description,
@@ -105,10 +106,18 @@ export default async function BookDetailPage({
   params: Promise<{ urlSlug: string }>;
 }) {
   const { urlSlug } = await params;
-  const [lookup, allBooks, allExams] = await Promise.all([
-    getBookBySlug(urlSlug),
-    getLiveBooks(),
-    getLiveExams(),
+  const [lookup, booksSample, examsSample] = await Promise.all([
+    loadBookBySlug(urlSlug),
+    getLiveBooksPage({ limit: 5, offset: 0 }).catch(() => ({
+      items: [],
+      hasMore: false,
+      nextOffset: 0,
+    })),
+    getLiveExamsPage({ limit: 2, offset: 0 }).catch(() => ({
+      items: [],
+      hasMore: false,
+      nextOffset: 0,
+    })),
   ]);
 
   if (lookup.status !== 'ok') {
@@ -119,11 +128,11 @@ export default async function BookDetailPage({
   const reviewSummary = await getItemReviewsSummary('books', book.id);
   const jsonLd = serializeSafeJsonLd(buildBookDetailJsonLd(book, reviewSummary));
 
-  // Up to 6 cross-taxonomy related <a href> links for shallow <= 3 click graph
-  const siblingBooks = allBooks
+  // Up to 6 cross-taxonomy related <a href> links using bounded card reads (O(1) Firestore FinOps)
+  const siblingBooks = booksSample.items
     .filter((b) => b.urlSlug !== book.urlSlug)
     .slice(0, 4);
-  const relatedExams = allExams.slice(0, 2);
+  const relatedExams = examsSample.items.slice(0, 2);
 
   return (
     <div className="ed-container pt-8 sm:pt-10 max-md:pt-4 pb-24 max-md:pb-4 lg:pb-10">

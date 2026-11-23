@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import React from 'react';
+import { notFound } from 'next/navigation';
+import React, { cache } from 'react';
 import {
   getLiveCollectionCount,
   getLiveExamsPage,
@@ -7,10 +8,17 @@ import {
 } from '../../server/repositories/catalog-repository';
 import { getPublishedReviewAggregates } from '../../server/repositories/review-repository';
 import { Breadcrumbs } from '../../components/ui/breadcrumbs';
+import { ServerPagination } from '../../components/ui/server-pagination';
 import { CatalogSection } from '../../features/catalog/catalog-section';
 import { ErrorState } from '../../components/ui/state-blocks';
 import { buildReviewTargetKey } from '../../lib/reviews/validation';
-import { getCanonicalOrigin } from '../../lib/seo/schema';
+import {
+  buildCanonicalAlternates,
+  buildCollectionHubJsonLd,
+  buildSiteOgUrl,
+  getCanonicalOrigin,
+  serializeSafeJsonLd,
+} from '../../lib/seo/schema';
 import {
   toCatalogCardDTO,
   type PublicExamDTO,
@@ -19,7 +27,11 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
+
+const loadExamsHubPage = cache(async (offset: number) => {
+  return getLiveExamsPage({ limit: PAGE_SIZE, offset });
+});
 
 export async function generateMetadata({
   searchParams,
@@ -27,24 +39,73 @@ export async function generateMetadata({
   searchParams: Promise<{ page?: string }>;
 }): Promise<Metadata> {
   const sp = await searchParams;
-  const pageNum = Math.max(1, Number(sp.page) || 1);
+  const pageNum = Math.max(1, Math.floor(Number(sp.page) || 1));
+  const offset = Math.min(50000, (pageNum - 1) * PAGE_SIZE);
+
+  let itemCount = 1;
+  try {
+    const pageResult = await loadExamsHubPage(offset);
+    itemCount = pageResult.items.length;
+  } catch {
+    // Allow transient error state in page body without throwing 404 on page 1
+  }
+
+  // Pillar 3 Anti-Soft-404 Gate: out-of-bounds pagination pages return genuine HTTP 404
+  if (pageNum > 1 && itemCount === 0) {
+    notFound();
+  }
+
   const origin = getCanonicalOrigin();
-  const canonicalPath =
-    pageNum > 1 ? `${origin}/exams?page=${pageNum}` : `${origin}/exams`;
+  const relCanonical = pageNum > 1 ? `/exams?page=${pageNum}` : '/exams';
+  const fullCanonical = `${origin}${relCanonical}`;
+  const ogImg = buildSiteOgUrl('exams');
+  const title =
+    pageNum > 1
+      ? `Exam Packs & Mock Test Series (Page ${pageNum})`
+      : 'Exam Packs & Mock Test Series Catalog';
+  const description =
+    'Explore full-length timed mock exam packs with complete paper-wise syllabus tables, question counts, and free trial sets on ExamDash.';
+
+  if (itemCount === 0) {
+    return {
+      title,
+      description,
+      robots: {
+        index: false,
+        follow: true,
+      },
+    };
+  }
 
   return {
-    title:
-      pageNum > 1
-        ? `Exam Packs & Mock Test Series (Page ${pageNum})`
-        : 'Exam Packs & Mock Test Series Catalog',
-    description:
-      'Explore full-length timed mock exam packs with complete paper-wise syllabus tables, question counts, and free trial sets on ExamDash.',
-    alternates: {
-      canonical: canonicalPath,
-    },
+    title,
+    description,
+    alternates: buildCanonicalAlternates(relCanonical, { includeRssFeed: true }),
     robots: {
       index: true,
       follow: true,
+    },
+    openGraph: {
+      title: `${title} | ExamDash`,
+      description,
+      url: fullCanonical,
+      siteName: 'ExamDash',
+      type: 'website',
+      images: [
+        {
+          url: ogImg,
+          width: 1200,
+          height: 675,
+          alt: title,
+          type: 'image/png',
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${title} | ExamDash`,
+      description,
+      images: [ogImg],
     },
   };
 }
@@ -56,7 +117,7 @@ export default async function ExamsCatalogPage({
 }) {
   const sp = await searchParams;
   const pageNum = Math.max(1, Math.floor(Number(sp.page) || 1));
-  const offset = Math.min(5000, (pageNum - 1) * PAGE_SIZE);
+  const offset = Math.min(50000, (pageNum - 1) * PAGE_SIZE);
 
   let examsPage: CatalogPageResult<PublicExamDTO> = {
     items: [],
@@ -68,12 +129,28 @@ export default async function ExamsCatalogPage({
   let fetchError: string | null = null;
 
   try {
-    [examsPage, totalExamsCount, reviewAggregates] = await Promise.all([
-      getLiveExamsPage({ limit: PAGE_SIZE, offset }),
+    [examsPage, totalExamsCount] = await Promise.all([
+      loadExamsHubPage(offset),
       getLiveCollectionCount('ExamPackDocument'),
-      getPublishedReviewAggregates(),
     ]);
+
+    if (pageNum > 1 && examsPage.items.length === 0) {
+      notFound();
+    }
+
+    const visibleKeys = examsPage.items.map((e) =>
+      buildReviewTargetKey('ExamPackDocument', e.id)
+    );
+    reviewAggregates = await getPublishedReviewAggregates(visibleKeys);
   } catch (err) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'digest' in err &&
+      String((err as { digest?: unknown }).digest).includes('NEXT_HTTP_ERROR_FALLBACK')
+    ) {
+      throw err;
+    }
     fetchError =
       err instanceof Error ? err.message : 'Unable to fetch exam packs catalog.';
   }
@@ -89,15 +166,48 @@ export default async function ExamsCatalogPage({
       ? Math.max(totalExamsCount, offset + pagedExams.length)
       : undefined;
 
+  const hubJsonLd = serializeSafeJsonLd(
+    buildCollectionHubJsonLd({
+      collection: 'exams',
+      title:
+        pageNum > 1
+          ? `Online Exam Mock Tests — Page ${pageNum}`
+          : 'Online Exam Mock Tests & CBT Series',
+      description:
+        'Full-length timed CBT mock exam packs, practice tests, and paper-wise syllabus series with free trial sets and performance analytics.',
+      pageNum,
+      items: examsPage.items,
+    })
+  );
+
   return (
     <div className="pt-8 max-md:pt-4">
+      <script
+        key={`exams-hub-jsonld-${pageNum}`}
+        type="application/ld+json"
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{ __html: hubJsonLd }}
+      />
+
       <div className="ed-container">
-        <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Exams' }]} />
+        <Breadcrumbs
+          items={
+            pageNum > 1
+              ? [
+                  { label: 'Home', href: '/' },
+                  { label: 'Exams', href: '/exams' },
+                  { label: `Page ${pageNum}` },
+                ]
+              : [{ label: 'Home', href: '/' }, { label: 'Exams' }]
+          }
+        />
         <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)]">
-          Online Exam Mock Tests
+          {pageNum > 1
+            ? `Online Exam Mock Tests — Page ${pageNum}`
+            : 'Online Exam Mock Tests'}
         </h1>
         <p className="mt-2 max-md:mt-1.5 text-base max-md:text-sm text-[var(--text-muted)] max-w-2xl">
-          Attempt free online exams, mock tests, practice tests, and full-length test series. Boost your competitive exam preparation with instant results and detailed performance analysis.
+          Attempt free trial mock sets, full-length online CBT exams, and structured practice test series. Boost your competitive exam preparation with instant scoring and detailed performance analysis.
         </p>
       </div>
 
@@ -106,20 +216,31 @@ export default async function ExamsCatalogPage({
           <ErrorState message={fetchError} />
         </div>
       ) : (
-        <CatalogSection
-          key={`exams-offset-${offset}`}
-          heading="Published Exam Packs"
-          progressUnit="available test series"
-          storageKey="hub-exams"
-          items={pagedExams}
-          showFilters={false}
-          collectionName="ExamPackDocument"
-          pageSize={PAGE_SIZE}
-          initialHasMore={examsPage.hasMore}
-          initialNextOffset={examsPage.nextOffset}
-          totalCount={effectiveTotal}
-          loadMoreLabel="Load More Exam Packs"
-        />
+        <>
+          <CatalogSection
+            key={`exams-offset-${offset}`}
+            heading="Published Exam Packs"
+            progressUnit="available test series"
+            storageKey="hub-exams"
+            items={pagedExams}
+            showFilters={false}
+            collectionName="ExamPackDocument"
+            pageSize={PAGE_SIZE}
+            initialHasMore={examsPage.hasMore}
+            initialNextOffset={examsPage.nextOffset}
+            totalCount={effectiveTotal}
+            loadMoreLabel="Load More Exam Packs"
+          />
+
+          <ServerPagination
+            basePath="/exams"
+            currentPage={pageNum}
+            pageSize={PAGE_SIZE}
+            hasMore={examsPage.hasMore}
+            totalCount={effectiveTotal}
+            ariaLabel="Exam packs catalog pagination"
+          />
+        </>
       )}
     </div>
   );

@@ -198,6 +198,7 @@ export function DetailBuyCard({
     <>
       {/* Dedicated Utility Action Bar directly ABOVE Price & Buy Now Bar */}
       <div
+        data-nosnippet=""
         role="toolbar"
         aria-label="Quick item actions"
         className={cn(
@@ -312,6 +313,7 @@ export function DetailBuyCard({
           {isOwned ? (
             <a
               href="/purchased"
+              rel="nofollow"
               className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-5 max-md:px-3.5 rounded-lg bg-[var(--status-success)] text-white text-sm font-semibold hover:opacity-90 transition-opacity whitespace-nowrap min-w-0"
             >
               <span className="truncate">Open in Purchased Library →</span>
@@ -352,6 +354,7 @@ export function DetailBuyCard({
           {hasExamSample && sampleJsonUrl && (
             <a
               href={sampleJsonUrl}
+              rel="nofollow"
               className="ed-sample-cta inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-5 max-md:px-3 rounded-lg border text-sm font-semibold whitespace-nowrap min-w-0"
             >
               <span

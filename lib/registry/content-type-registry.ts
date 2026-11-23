@@ -34,7 +34,7 @@ const REGISTRY: Record<ContentVisualKind, ContentTypeVisual> = {
     inkCssVar: 'var(--thumb-quizbook-ink)',
     bgHex: '#924CD4',
     inkHex: '#FFFFFF',
-    badgeLabel: 'QUIZBOOK',
+    badgeLabel: 'eBOOK',
   },
 };
 

@@ -6,6 +6,7 @@ import {
   type LegalTocItem,
 } from '../../components/legal/legal-document-shell';
 import { BUSINESS_INFO } from '../../lib/legal/business-info';
+import { buildCanonicalAlternates, buildSiteOgUrl } from '../../lib/seo/schema';
 import { ContactSupportComposer } from '../../features/legal/contact-support-composer';
 
 const PAGE_TITLE = 'Contact Us';
@@ -15,9 +16,7 @@ const PAGE_DESC =
 export const metadata: Metadata = {
   title: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
   description: PAGE_DESC,
-  alternates: {
-    canonical: '/contact-us',
-  },
+  alternates: buildCanonicalAlternates('/contact-us'),
   robots: {
     index: true,
     follow: true,
@@ -27,6 +26,21 @@ export const metadata: Metadata = {
     description: PAGE_DESC,
     url: `${BUSINESS_INFO.officialWebsiteOrigin}/contact-us`,
     type: 'website',
+    images: [
+      {
+        url: buildSiteOgUrl('legal'),
+        width: 1200,
+        height: 675,
+        alt: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
+        type: 'image/png',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
+    description: PAGE_DESC,
+    images: [buildSiteOgUrl('legal')],
   },
 };
 

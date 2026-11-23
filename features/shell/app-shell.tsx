@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -37,20 +37,31 @@ const LazyCartDrawer = dynamic(
 );
 
 const NAV_LINKS = [
-  { label: 'Explore', href: '/' },
-  { label: 'Books', href: '/books' },
-  { label: 'Exams', href: '/exams' },
-  { label: 'Purchased', href: '/purchased' },
-  { label: 'Profile', href: '/profile' },
+  { label: 'Explore', href: '/', nofollow: false },
+  { label: 'Books', href: '/books', nofollow: false },
+  { label: 'Exams', href: '/exams', nofollow: false },
+  { label: 'Purchased', href: '/purchased', nofollow: true },
+  { label: 'Profile', href: '/profile', nofollow: true },
 ];
 
 const MOBILE_TABS = [
-  { label: 'Home', href: '/', icon: Compass },
-  { label: 'Books', href: '/books', icon: BookOpen },
-  { label: 'Exams', href: '/exams', icon: ClipboardCheck },
-  { label: 'Purchased', href: '/purchased', icon: Library },
-  { label: 'Profile', href: '/profile', icon: UserIcon },
+  { label: 'Home', href: '/', icon: Compass, nofollow: false },
+  { label: 'Books', href: '/books', icon: BookOpen, nofollow: false },
+  { label: 'Exams', href: '/exams', icon: ClipboardCheck, nofollow: false },
+  { label: 'Purchased', href: '/purchased', icon: Library, nofollow: true },
+  { label: 'Profile', href: '/profile', icon: UserIcon, nofollow: true },
 ];
+
+const MARKETING_STRIP_PARAMS = new Set([
+  'gclid',
+  'fbclid',
+  'msclkid',
+  'dclid',
+  'twclid',
+  'yclid',
+  'mc_cid',
+  'mc_eid',
+]);
 
 const COPYRIGHT_YEAR = BUSINESS_INFO.effectiveDateIso.slice(0, 4) || '2026';
 
@@ -70,6 +81,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
+  // Pillar 3: Post-mount URL cleanup for marketing query variants (?utm_*, ?gclid, ?fbclid)
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined' || !window.location.search) return;
+      const url = new URL(window.location.href);
+      let mutated = false;
+      for (const key of Array.from(url.searchParams.keys())) {
+        const lower = key.toLowerCase();
+        if (lower.startsWith('utm_') || MARKETING_STRIP_PARAMS.has(lower)) {
+          url.searchParams.delete(key);
+          mutated = true;
+        }
+      }
+      if (mutated) {
+        const cleanHref = `${url.pathname}${url.search}${url.hash}`;
+        window.history.replaceState(window.history.state, '', cleanHref);
+      }
+    } catch {
+      // Ignore restricted iframe history environments
+    }
+  }, [pathname]);
 
   const isDetailRoute =
     (pathname.startsWith('/books/') && pathname !== '/books') ||
@@ -121,6 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={link.href}
                   href={link.href}
                   prefetch={false}
+                  rel={link.nofollow ? 'nofollow' : undefined}
                   aria-current={isExactPage ? 'page' : undefined}
                   className={cn(
                     'inline-flex items-center min-h-[48px] transition-colors whitespace-nowrap shrink-0 hover:text-[var(--text-main)] hover:underline underline-offset-8 decoration-2',
@@ -136,7 +170,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           {/* Zone 3: Compact Action Controls (48px desktop, 44px zero-overflow mobile) */}
-          <div className="flex items-center gap-2 max-md:gap-1.5 shrink-0 min-w-0">
+          <div
+            data-nosnippet=""
+            className="flex items-center gap-2 max-md:gap-1.5 shrink-0 min-w-0"
+          >
             <HeaderPwaAction />
 
             <button
@@ -330,6 +367,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   href="/purchased"
                   prefetch={false}
+                  rel="nofollow"
                   className="max-md:min-h-[44px] max-md:inline-flex max-md:items-center hover:text-[var(--text-main)] transition-colors"
                 >
                   Study Library
@@ -381,6 +419,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={tab.href}
                   href={tab.href}
                   prefetch={false}
+                  rel={tab.nofollow ? 'nofollow' : undefined}
                   aria-current={isExactPage ? 'page' : undefined}
                   className={cn(
                     'relative flex flex-col items-center justify-center gap-1 min-h-[48px] h-full min-w-0 px-1 rounded-xl transition-transform duration-150 active:scale-[0.95] chrome-no-select',

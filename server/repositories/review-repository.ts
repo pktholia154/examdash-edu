@@ -279,13 +279,119 @@ export async function getItemReviewsSummary(
 }
 
 /**
- * Fetches lightweight published review aggregates across the catalog so catalog cards
- * display real rating stars ONLY when real learner reviews exist (0 fake/demo badges).
+ * Fetches lightweight published review aggregates across the catalog (or targeted item keys)
+ * so catalog cards display real rating stars ONLY when real learner reviews exist (0 fake/demo badges)
+ * without scanning thousands of unrelated review documents.
  */
-export async function getPublishedReviewAggregates(): Promise<
-  Map<string, ReviewAggregateBadge>
-> {
+export async function getPublishedReviewAggregates(
+  targetKeys?: string[]
+): Promise<Map<string, ReviewAggregateBadge>> {
   const queryPaths = getPublicReviewQueryPaths();
+
+  if (Array.isArray(targetKeys)) {
+    const uniqueKeys = Array.from(
+      new Set(targetKeys.map((k) => k.trim()).filter(Boolean))
+    );
+    if (uniqueKeys.length === 0) {
+      return new Map();
+    }
+
+    const chunks: string[][] = [];
+    for (let i = 0; i < uniqueKeys.length; i += 30) {
+      chunks.push(uniqueKeys.slice(i, i + 30));
+    }
+
+    try {
+      const byDocId = new Map<string, { targetKey: string; rating: number }>();
+
+      await Promise.all(
+        chunks.flatMap((chunk) => {
+          const chunkQueryBody = {
+            structuredQuery: {
+              from: [{ collectionId: 'reviews' }],
+              select: {
+                fields: [
+                  { fieldPath: 'targetKey' },
+                  { fieldPath: 'rating' },
+                  { fieldPath: 'status' },
+                ],
+              },
+              where: {
+                compositeFilter: {
+                  op: 'AND',
+                  filters: [
+                    {
+                      fieldFilter: {
+                        field: { fieldPath: 'status' },
+                        op: 'EQUAL',
+                        value: { stringValue: 'published' },
+                      },
+                    },
+                    {
+                      fieldFilter: {
+                        field: { fieldPath: 'targetKey' },
+                        op: 'IN',
+                        value: {
+                          arrayValue: {
+                            values: chunk.map((stringValue) => ({ stringValue })),
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+              limit: 500,
+            },
+          };
+
+          return queryPaths.map((path) =>
+            firestoreRestCall<
+              Array<{
+                document?: { name?: string; fields?: FirestoreRestFieldMap };
+              }>
+            >({
+              method: 'POST',
+              path,
+              body: chunkQueryBody,
+            })
+              .then((res) => {
+                if (
+                  res.statusCode < 200 ||
+                  res.statusCode >= 300 ||
+                  !Array.isArray(res.data)
+                ) {
+                  return;
+                }
+                for (const row of res.data) {
+                  if (!row?.document?.name || !row?.document?.fields) continue;
+                  const segments = row.document.name.split('/');
+                  const docId = segments[segments.length - 1] || row.document.name;
+                  const parsed = parseRestFields(row.document.fields);
+                  if (parsed.status !== 'published') continue;
+                  if (
+                    typeof parsed.targetKey === 'string' &&
+                    typeof parsed.rating === 'number' &&
+                    !byDocId.has(docId)
+                  ) {
+                    byDocId.set(docId, {
+                      targetKey: parsed.targetKey,
+                      rating: parsed.rating,
+                    });
+                  }
+                }
+              })
+              .catch(() => undefined)
+          );
+        })
+      );
+
+      return computeReviewAggregateMap(Array.from(byDocId.values()));
+    } catch {
+      return new Map();
+    }
+  }
+
   const queryBody = {
     structuredQuery: {
       from: [{ collectionId: 'reviews' }],

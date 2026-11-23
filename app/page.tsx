@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import React from 'react';
 import {
   getLiveBooksPage,
@@ -7,6 +8,7 @@ import {
 } from '../server/repositories/catalog-repository';
 import { getPublishedReviewAggregates } from '../server/repositories/review-repository';
 import { buildReviewTargetKey } from '../lib/reviews/validation';
+import { buildCanonicalAlternates } from '../lib/seo/schema';
 import {
   toCatalogCardDTO,
   type PublicBookDTO,
@@ -21,6 +23,10 @@ import { ErrorState } from '../components/ui/state-blocks';
 import { HomeComplianceSection } from '../components/legal/home-compliance-section';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = {
+  alternates: buildCanonicalAlternates('/', { includeRssFeed: true }),
+};
 
 const HOME_LIST_LIMIT = 5;
 
@@ -41,14 +47,21 @@ export default async function HomePage() {
   let reviewAggregates = new Map<string, ReviewAggregateBadge>();
 
   try {
-    [booksPage, examsPage, booksTotalCount, examsTotalCount, reviewAggregates] =
+    [booksPage, examsPage, booksTotalCount, examsTotalCount] =
       await Promise.all([
         getLiveBooksPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
         getLiveExamsPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
         getLiveCollectionCount('books'),
         getLiveCollectionCount('ExamPackDocument'),
-        getPublishedReviewAggregates(),
       ]);
+
+    const visibleKeys = [
+      ...booksPage.items.map((b) => buildReviewTargetKey('books', b.id)),
+      ...examsPage.items.map((e) =>
+        buildReviewTargetKey('ExamPackDocument', e.id)
+      ),
+    ];
+    reviewAggregates = await getPublishedReviewAggregates(visibleKeys);
   } catch (error) {
     fetchError =
       error instanceof Error
@@ -67,13 +80,6 @@ export default async function HomePage() {
     examsTotalCount !== null
       ? Math.max(exams.length, examsTotalCount)
       : exams.length;
-
-  const totalMocks = exams.reduce((acc, e) => acc + e.totalMocktest, 0);
-  const potentialSavings =
-    books.reduce((acc, b) => acc + Math.max(0, b.listPrice - b.buyPrice), 0) +
-    exams.reduce((acc, e) => acc + Math.max(0, e.listPrice - e.buyPrice), 0);
-  const primaryCurrency =
-    books[0]?.currency || exams[0]?.currency || 'INR';
 
   const slimBooks = books.map((b) =>
     toCatalogCardDTO(b, reviewAggregates.get(buildReviewTargetKey('books', b.id)))
@@ -99,13 +105,7 @@ export default async function HomePage() {
         <InstallAppCallout variant="home" className="mt-3.5 max-md:mt-3" />
       </div>
 
-      <KpiStrip
-        totalCatalogBooks={displayBookCount}
-        totalCatalogExams={displayExamCount}
-        totalCatalogMocks={totalMocks}
-        catalogPotentialSavings={potentialSavings}
-        primaryCurrency={primaryCurrency}
-      />
+      <KpiStrip />
 
       {fetchError ? (
         <div className="ed-container py-10">

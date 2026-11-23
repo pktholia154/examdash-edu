@@ -4,6 +4,7 @@ import './globals.css';
 import { AppProviders } from '../features/shell/providers';
 import {
   buildSiteGraphJsonLd,
+  buildSiteOgUrl,
   getCanonicalOrigin,
   serializeSafeJsonLd,
 } from '../lib/seo/schema';
@@ -37,7 +38,7 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
   interactiveWidget: 'resizes-content',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F5F5F5' },
+    { media: '(prefers-color-scheme: light)', color: '#F0F0F0' },
     { media: '(prefers-color-scheme: dark)', color: '#141514' },
   ],
 };
@@ -54,7 +55,9 @@ export const metadata: Metadata = {
   },
   description: SITE_DESC,
   alternates: {
-    canonical: getCanonicalOrigin(),
+    types: {
+      'application/rss+xml': `${getCanonicalOrigin()}/feed.xml`,
+    },
   },
   robots: {
     index: true,
@@ -120,10 +123,11 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: `${getCanonicalOrigin()}/app-icons/icon-512.png?v=ef0c6c39`,
-        width: 512,
-        height: 512,
-        alt: 'ExamDash',
+        url: buildSiteOgUrl('home'),
+        width: 1200,
+        height: 675,
+        alt: 'ExamDash — Verified Books, Question Banks & Mock Exam Packs',
+        type: 'image/png',
       },
     ],
   },
@@ -131,7 +135,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: SITE_TITLE,
     description: SITE_DESC,
-    images: [`${getCanonicalOrigin()}/app-icons/icon-512.png?v=ef0c6c39`],
+    images: [buildSiteOgUrl('home')],
   },
 };
 
@@ -151,7 +155,11 @@ const SPECULATION_RULES_JSON = JSON.stringify({
           { not: { href_matches: '/search*' } },
           { not: { href_matches: '/read/*' } },
           { not: { href_matches: '/attempt/*' } },
+          { not: { href_matches: '/admin/*' } },
+          { not: { href_matches: '/account/*' } },
+          { not: { href_matches: '/checkout/*' } },
           { not: { selector_matches: '[target="_blank"]' } },
+          { not: { selector_matches: '[rel~="nofollow"]' } },
         ],
       },
       eagerness: 'conservative',

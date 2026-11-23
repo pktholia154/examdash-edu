@@ -6,7 +6,9 @@ import type {
 } from '../types/catalog';
 
 export function getCanonicalOrigin(): string {
-  const explicitOrigin = process.env.CANONICAL_ORIGIN?.trim();
+  const explicitOrigin = (
+    process.env.CANONICAL_ORIGIN || process.env.APP_URL
+  )?.trim();
   if (
     explicitOrigin &&
     explicitOrigin.startsWith('https://') &&
@@ -16,6 +18,42 @@ export function getCanonicalOrigin(): string {
     return explicitOrigin.replace(/\/+$/, '');
   }
   return 'https://exam-dash.com';
+}
+
+export function buildSiteOgUrl(
+  slug: 'home' | 'books' | 'exams' | 'legal' = 'home'
+): string {
+  return `${getCanonicalOrigin()}/thumbs/og/site/${slug}.png?v=1`;
+}
+
+export function buildCanonicalAlternates(
+  pathWithOptionalQuery: string,
+  options?: { includeRssFeed?: boolean }
+) {
+  const origin = getCanonicalOrigin();
+  const cleanRel =
+    !pathWithOptionalQuery || pathWithOptionalQuery === '/'
+      ? ''
+      : pathWithOptionalQuery.startsWith('/')
+      ? pathWithOptionalQuery
+      : `/${pathWithOptionalQuery}`;
+  const fullUrl = `${origin}${cleanRel}`;
+
+  return {
+    canonical: fullUrl,
+    languages: {
+      'en-IN': fullUrl,
+      en: fullUrl,
+      'x-default': fullUrl,
+    },
+    ...(options?.includeRssFeed
+      ? {
+          types: {
+            'application/rss+xml': `${origin}/feed.xml`,
+          },
+        }
+      : {}),
+  };
 }
 
 /**
@@ -343,6 +381,7 @@ export function buildExamDetailJsonLd(
         },
         inLanguage: normalizeSchemaLanguageTag(exam.language),
         category: exam.type || 'Mock Exam Series',
+        releaseDate: exam.publishAtIso,
         offers: buildDigitalProductOffer({
           origin,
           pageUrl,
@@ -350,6 +389,93 @@ export function buildExamDetailJsonLd(
           currency: exam.currency,
         }),
         ...buildVerifiedReviewSchemaProps(reviewSummary),
+      },
+    ],
+  };
+}
+
+export function buildCollectionHubJsonLd(params: {
+  collection: 'books' | 'exams';
+  title: string;
+  description: string;
+  pageNum: number;
+  items: Array<{
+    title: string;
+    urlSlug: string;
+    updatedAtIso?: string;
+  }>;
+}) {
+  const origin = getCanonicalOrigin();
+  const basePath = params.collection === 'books' ? '/books' : '/exams';
+  const baseLabel = params.collection === 'books' ? 'Books' : 'Exams';
+  const pageUrl =
+    params.pageNum > 1
+      ? `${origin}${basePath}?page=${params.pageNum}`
+      : `${origin}${basePath}`;
+
+  const latestItemIso = params.items
+    .map((i) => i.updatedAtIso || '')
+    .filter(Boolean)
+    .sort()
+    .pop();
+
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: origin },
+          ...(params.pageNum > 1
+            ? [
+                {
+                  '@type': 'ListItem',
+                  position: 2,
+                  name: baseLabel,
+                  item: `${origin}${basePath}`,
+                },
+                {
+                  '@type': 'ListItem',
+                  position: 3,
+                  name: `Page ${params.pageNum}`,
+                  item: pageUrl,
+                },
+              ]
+            : [
+                {
+                  '@type': 'ListItem',
+                  position: 2,
+                  name: baseLabel,
+                  item: pageUrl,
+                },
+              ]),
+        ],
+      },
+      {
+        '@type': 'CollectionPage',
+        '@id': `${pageUrl}#collection`,
+        url: pageUrl,
+        name: params.title,
+        description: params.description,
+        inLanguage: 'en-IN',
+        isPartOf: { '@id': `${origin}/#website` },
+        publisher: { '@id': `${origin}/#organization` },
+        ...(latestItemIso ? { dateModified: latestItemIso } : {}),
+        ...(params.items.length > 0
+          ? {
+              mainEntity: {
+                '@type': 'ItemList',
+                numberOfItems: params.items.length,
+                itemListOrder: 'https://schema.org/ItemListOrderDescending',
+                itemListElement: params.items.map((item, idx) => ({
+                  '@type': 'ListItem',
+                  position: (params.pageNum - 1) * 20 + idx + 1,
+                  name: item.title,
+                  url: `${origin}${basePath}/${item.urlSlug}`,
+                })),
+              },
+            }
+          : {}),
       },
     ],
   };

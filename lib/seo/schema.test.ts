@@ -2,14 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildBookDetailJsonLd,
+  buildCanonicalAlternates,
+  buildCollectionHubJsonLd,
   buildExamDetailJsonLd,
   buildThumbUrls,
   normalizeSchemaLanguageTag,
   serializeSafeJsonLd,
 } from './schema';
+import {
+  buildCatalogRssFeedXml,
+  buildSitemapIndexXml,
+  buildSitemapManifest,
+  resolveSitemapShardXml,
+  SITEMAP_BATCH_SIZE,
+  SITEMAP_RECENT_UPDATES_LIMIT,
+} from './sitemaps';
+import { sanitizeCanonicalUrlBatch } from './indexnow';
+import {
+  buildPaginationHref,
+  buildVisiblePageNumbers,
+} from '../../components/ui/server-pagination';
 import { prepareEditorialMarkdown } from '../../components/editorial/description-markdown';
 import { apiUrl } from '../platform/api-base';
 import { toCatalogCardDTO, type PublicBookDTO, type PublicExamDTO } from '../types/catalog';
+import type { SitemapCatalogEntry } from '../../server/repositories/catalog-repository';
 
 const SAMPLE_BOOK: PublicBookDTO = {
   id: 'book_101',
@@ -124,6 +140,7 @@ test('buildBookDetailJsonLd and buildExamDetailJsonLd include 1:1 AggregateRatin
   });
   const [, emptyExamProduct] = examNoReviews['@graph'];
   assert.deepEqual(emptyExamProduct.brand, { '@type': 'Brand', name: 'ExamDash' });
+  assert.equal(emptyExamProduct.releaseDate, '2026-01-10T00:00:00.000Z');
   assert.equal('aggregateRating' in emptyExamProduct, false);
   assert.equal('review' in emptyExamProduct, false);
 
@@ -227,3 +244,167 @@ test('normalizeSchemaLanguageTag normalizes prose language labels to standard BC
   assert.equal(normalizeSchemaLanguageTag('en-IN'), 'en-IN');
   assert.equal(normalizeSchemaLanguageTag(''), 'en');
 });
+
+test('batched sitemaps organize 3,900+ products into 1,000-URL shards with isolated per-batch lastmod and zero priority/changefreq', () => {
+  const makeEntry = (
+    collectionName: 'books' | 'ExamPackDocument',
+    idx: number,
+    updatedIso: string
+  ): SitemapCatalogEntry => ({
+    id: `${collectionName}_${idx}`,
+    collectionName,
+    title: `${collectionName === 'books' ? 'Book' : 'Exam'} #${idx}`,
+    urlSlug: `${collectionName === 'books' ? 'book' : 'exam'}-slug-${idx}`,
+    seoDescription: `Verified resource #${idx}`,
+    type: collectionName === 'books' ? 'Ebook' : 'Exam',
+    authorName: 'ExamDash Editorial',
+    currency: 'INR',
+    buyPrice: 99,
+    publishAtIso: '2026-01-01T00:00:00.000Z',
+    updatedAtIso: updatedIso,
+  });
+
+  // 2,500 books -> 3 shards (1000, 1000, 500)
+  const books: SitemapCatalogEntry[] = [];
+  for (let i = 1; i <= 2500; i++) {
+    const batchIso =
+      i <= 1000
+        ? '2026-03-01T00:00:00.000Z'
+        : i === 1500
+        ? '2026-11-22T18:00:00.000Z' // Substantive edit inside batch 2!
+        : '2026-06-01T00:00:00.000Z';
+    books.push(makeEntry('books', i, batchIso));
+  }
+
+  // 1,400 exams -> 2 shards (1000, 400)
+  const exams: SitemapCatalogEntry[] = [];
+  for (let i = 1; i <= 1400; i++) {
+    exams.push(
+      makeEntry(
+        'ExamPackDocument',
+        i,
+        i > 1000 ? '2026-11-20T10:00:00.000Z' : '2026-04-01T00:00:00.000Z'
+      )
+    );
+  }
+
+  assert.equal(SITEMAP_BATCH_SIZE, 1000);
+  assert.equal(SITEMAP_RECENT_UPDATES_LIMIT, 200);
+
+  const manifest = buildSitemapManifest({
+    books,
+    exams,
+    origin: 'https://exam-dash.com',
+  });
+
+  // pages.xml + updates.xml + books-1..3 + exams-1..2 = 7 shards
+  assert.deepEqual(
+    manifest.shards.map((s) => s.shardName),
+    [
+      'pages.xml',
+      'updates.xml',
+      'books-1.xml',
+      'books-2.xml',
+      'books-3.xml',
+      'exams-1.xml',
+      'exams-2.xml',
+    ]
+  );
+
+  // Batch 1 lastmod remains untouched while Batch 2 & updates.xml reflect the newest edit!
+  const shardByName = new Map(manifest.shards.map((s) => [s.shardName, s]));
+  assert.equal(shardByName.get('books-1.xml')?.lastmod, '2026-03-01T00:00:00.000Z');
+  assert.equal(shardByName.get('books-2.xml')?.lastmod, '2026-11-22T18:00:00.000Z');
+  assert.equal(shardByName.get('books-3.xml')?.lastmod, '2026-06-01T00:00:00.000Z');
+  assert.equal(shardByName.get('exams-1.xml')?.lastmod, '2026-04-01T00:00:00.000Z');
+  assert.equal(shardByName.get('exams-2.xml')?.lastmod, '2026-11-20T10:00:00.000Z');
+  assert.equal(shardByName.get('updates.xml')?.lastmod, '2026-11-22T18:00:00.000Z');
+
+  const indexXml = buildSitemapIndexXml(manifest.shards);
+  assert.ok(indexXml.includes('<sitemapindex'));
+  assert.ok(indexXml.includes('https://exam-dash.com/sitemaps/books-2.xml'));
+  assert.equal(indexXml.includes('<priority>'), false);
+  assert.equal(indexXml.includes('<changefreq>'), false);
+
+  const books3Xml = resolveSitemapShardXml({
+    rawShardParam: 'books-3.xml',
+    books,
+    exams,
+    origin: 'https://exam-dash.com',
+  });
+  assert.ok(books3Xml);
+  assert.ok(books3Xml.includes('https://exam-dash.com/books/book-slug-2500'));
+  assert.ok(books3Xml.includes('<image:image>'));
+  assert.equal(books3Xml.includes('<priority>'), false);
+  assert.equal(books3Xml.includes('<changefreq>'), false);
+
+  // Out-of-bounds shard returns null (404)
+  assert.equal(
+    resolveSitemapShardXml({
+      rawShardParam: 'books-4.xml',
+      books,
+      exams,
+      origin: 'https://exam-dash.com',
+    }),
+    null
+  );
+
+  // RSS 2.0 + Atom feed puts the freshly updated item (#1500) at position 1
+  const rssXml = buildCatalogRssFeedXml({
+    books,
+    exams,
+    origin: 'https://exam-dash.com',
+    limit: 20,
+  });
+  assert.ok(rssXml.includes('<rss version="2.0"'));
+  assert.ok(rssXml.includes('<atom:updated>2026-11-22T18:00:00.000Z</atom:updated>'));
+  assert.ok(
+    rssXml.indexOf('book-slug-1500') < rssXml.indexOf('exam-slug-1001')
+  );
+});
+
+test('IndexNow batch sanitizer locks URLs strictly to canonical origin and blocks private/trap routes', () => {
+  const sanitized = sanitizeCanonicalUrlBatch(
+    [
+      '/books/upsc-modern-history-101',
+      'https://exam-dash.com/exams/ssc-cgl-tier-1-202#reviews',
+      'https://evil-attacker.example/books/phish',
+      'http://exam-dash.com/books/insecure-http',
+      'https://exam-dash.com/purchased',
+      'https://exam-dash.com/search?q=upsc',
+      'https://exam-dash.com/attempt/ssc-cgl-tier-1-202/set_1',
+      '/books/upsc-modern-history-101', // duplicate
+    ],
+    'https://exam-dash.com'
+  );
+
+  assert.deepEqual(sanitized, [
+    'https://exam-dash.com/books/upsc-modern-history-101',
+    'https://exam-dash.com/exams/ssc-cgl-tier-1-202',
+  ]);
+});
+
+test('ServerPagination and buildCanonicalAlternates enforce ?page=1-free base URLs and CollectionPage JSON-LD', () => {
+  assert.equal(buildPaginationHref('/books', 1), '/books');
+  assert.equal(buildPaginationHref('/books', 2), '/books?page=2');
+
+  const windowTokens = buildVisiblePageNumbers(50, 200);
+  assert.deepEqual(windowTokens, [1, 'ellipsis-start', 49, 50, 51, 'ellipsis-end', 200]);
+
+  const alts = buildCanonicalAlternates('/books?page=3', { includeRssFeed: true });
+  assert.equal(alts.canonical, 'https://exam-dash.com/books?page=3');
+  assert.equal(alts.languages['en-IN'], 'https://exam-dash.com/books?page=3');
+  assert.equal(alts.types?.['application/rss+xml'], 'https://exam-dash.com/feed.xml');
+
+  const hubGraph = buildCollectionHubJsonLd({
+    collection: 'books',
+    title: 'Books Page 2',
+    description: 'Catalog page 2',
+    pageNum: 2,
+    items: [SAMPLE_BOOK],
+  });
+  assert.equal(hubGraph['@graph'].length, 2);
+  assert.equal(hubGraph['@graph'][1]['@type'], 'CollectionPage');
+  assert.equal(hubGraph['@graph'][1].mainEntity?.itemListElement[0].position, 21);
+});
+

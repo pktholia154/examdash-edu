@@ -6,6 +6,7 @@ import {
   type LegalTocItem,
 } from '../../components/legal/legal-document-shell';
 import { BUSINESS_INFO } from '../../lib/legal/business-info';
+import { buildCanonicalAlternates, buildSiteOgUrl } from '../../lib/seo/schema';
 
 const PAGE_TITLE = 'Terms of Service';
 const PAGE_DESC =
@@ -14,9 +15,7 @@ const PAGE_DESC =
 export const metadata: Metadata = {
   title: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
   description: PAGE_DESC,
-  alternates: {
-    canonical: '/terms-of-service',
-  },
+  alternates: buildCanonicalAlternates('/terms-of-service'),
   robots: {
     index: true,
     follow: true,
@@ -26,6 +25,21 @@ export const metadata: Metadata = {
     description: PAGE_DESC,
     url: `${BUSINESS_INFO.officialWebsiteOrigin}/terms-of-service`,
     type: 'website',
+    images: [
+      {
+        url: buildSiteOgUrl('legal'),
+        width: 1200,
+        height: 675,
+        alt: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
+        type: 'image/png',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
+    description: PAGE_DESC,
+    images: [buildSiteOgUrl('legal')],
   },
 };
 

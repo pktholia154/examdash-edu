@@ -12,10 +12,7 @@ import Link from 'next/link';
 import {
   Activity,
   Award,
-  BookOpen,
-  CalendarClock,
   Check,
-  ClipboardCheck,
   Clock,
   Copy,
   Flame,
@@ -25,11 +22,16 @@ import {
   Mail,
   Send,
   Share2,
-  Target,
   Trash2,
   User as UserIcon,
 } from 'lucide-react';
 import { EmptyState } from '../../components/ui/state-blocks';
+import {
+  computeStudyAnalytics,
+  formatShortDate,
+  scanLocalBookReadingProgress,
+  type LocalBookReadRecord,
+} from '../../lib/analytics/study-analytics';
 import { formatDurationCompact } from '../../lib/exam/grading';
 import {
   EXAM_ATTEMPTS_UPDATED_EVENT,
@@ -38,6 +40,7 @@ import {
 } from '../../lib/exam/storage';
 import type { HistoricalExamAttemptRecord } from '../../lib/exam/types';
 import { cn } from '../../lib/utils';
+import { StudyAnalyticsCards } from '../analytics/study-analytics-cards';
 import { useAuth } from '../auth/auth-provider';
 import { CatalogCard } from '../catalog/catalog-card';
 import { useToast } from '../toast/toast-context';
@@ -50,162 +53,6 @@ export interface ProfileBookRef {
   urlSlug: string;
   title: string;
   type: string;
-}
-
-interface LocalBookReadRecord {
-  bookId: string;
-  format: 'pdf' | 'markdown';
-  updatedAt: number;
-  progressLabel: string;
-}
-
-function scanLocalBookReadingProgress(): LocalBookReadRecord[] {
-  if (typeof window === 'undefined') return [];
-  const byBook = new Map<string, LocalBookReadRecord>();
-
-  try {
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      if (!key) continue;
-
-      const isPdf = key.startsWith('ed-pdf-prog-v1:');
-      const isMd = key.startsWith('ed-md-prog-v1:');
-      if (!isPdf && !isMd) continue;
-
-      const parts = key.split(':');
-      const bookId = parts[1];
-      if (!bookId) continue;
-
-      const raw = window.localStorage.getItem(key);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const updatedAt =
-        typeof parsed.updatedAt === 'number' && Number.isFinite(parsed.updatedAt)
-          ? parsed.updatedAt
-          : 0;
-      if (updatedAt <= 0) continue;
-
-      let progressLabel = 'Started reading';
-      if (isPdf && typeof parsed.pageIndex === 'number') {
-        progressLabel = `Page ${Math.max(1, Math.floor(parsed.pageIndex) + 1)}`;
-      } else if (
-        isMd &&
-        typeof parsed.blockProgressRatio === 'number' &&
-        Number.isFinite(parsed.blockProgressRatio)
-      ) {
-        const pct = Math.min(
-          100,
-          Math.max(1, Math.round(parsed.blockProgressRatio * 100))
-        );
-        progressLabel = `${pct}% read`;
-      }
-
-      const prev = byBook.get(bookId);
-      if (!prev || updatedAt > prev.updatedAt) {
-        byBook.set(bookId, {
-          bookId,
-          format: isPdf ? 'pdf' : 'markdown',
-          updatedAt,
-          progressLabel,
-        });
-      }
-    }
-  } catch {
-    // Ignore storage access restrictions
-  }
-
-  return Array.from(byBook.values()).sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-function toDayKey(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-    d.getDate()
-  ).padStart(2, '0')}`;
-}
-
-function computeStreakDays(timestampsMs: number[]): number {
-  if (timestampsMs.length === 0) return 0;
-  const uniqueDays = new Set(timestampsMs.map((ms) => toDayKey(ms)));
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  let cursor = new Date(today);
-  // Allow streak to continue if user was active today or yesterday
-  if (!uniqueDays.has(toDayKey(cursor.getTime()))) {
-    cursor.setDate(cursor.getDate() - 1);
-    if (!uniqueDays.has(toDayKey(cursor.getTime()))) {
-      return 0;
-    }
-  }
-
-  let streak = 0;
-  while (uniqueDays.has(toDayKey(cursor.getTime()))) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
-}
-
-function formatLastActiveAndGap(lastMs: number | null): {
-  headline: string;
-  gapDetail: string;
-} {
-  if (!lastMs || !Number.isFinite(lastMs)) {
-    return {
-      headline: 'No sessions yet',
-      gapDetail: 'Start a book or mock exam to begin tracking',
-    };
-  }
-
-  const now = Date.now();
-  const diffMs = Math.max(0, now - lastMs);
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 5) {
-    return {
-      headline: 'Just now',
-      gapDetail: '0-day gap · Active session',
-    };
-  }
-  if (diffHours < 24 && toDayKey(lastMs) === toDayKey(now)) {
-    return {
-      headline: diffHours < 1 ? `${diffMins}m ago` : `${diffHours}h ago`,
-      gapDetail: '0-day gap · Active today',
-    };
-  }
-  if (diffDays <= 1) {
-    return {
-      headline: 'Yesterday',
-      gapDetail: '1-day gap · Keep momentum going',
-    };
-  }
-  if (diffDays < 7) {
-    return {
-      headline: `${diffDays} days ago`,
-      gapDetail: `${diffDays}-day study gap · Resume today`,
-    };
-  }
-  return {
-    headline: `${diffDays} days ago`,
-    gapDetail: `${diffDays}-day gap · Quick revision recommended`,
-  };
-}
-
-function formatShortDate(isoOrMs: string | number): string {
-  const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs);
-  if (!Number.isFinite(ms) || ms <= 0) return '';
-  try {
-    return new Intl.DateTimeFormat('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }).format(new Date(ms));
-  } catch {
-    return '';
-  }
 }
 
 export function ProfilePageView({
@@ -308,75 +155,15 @@ export function ProfilePageView({
     return map;
   }, [booksCatalog]);
 
-  const analytics = useMemo(() => {
-    const unlockedBooksCount = purchases.filter(
-      (p) => p.collectionName === 'books'
-    ).length;
-    const unlockedExamsCount = purchases.filter(
-      (p) => p.collectionName === 'ExamPackDocument'
-    ).length;
-
-    const totalExamsAttempted = attempts.length;
-    const uniqueSetsAttempted = new Set(
-      attempts.map((a) => `${a.packId || a.examSlug}::${a.setId}`)
-    ).size;
-
-    let totalQuestionsAttempted = 0;
-    let totalCorrect = 0;
-    let totalTimeMs = 0;
-    let bestScorePct = 0;
-
-    const activityTimestamps: number[] = [];
-
-    for (const att of attempts) {
-      totalQuestionsAttempted += att.totalAttempted || 0;
-      totalCorrect += att.totalCorrect || 0;
-      totalTimeMs += att.totalTimeSpentMs || 0;
-      if (typeof att.scorePct === 'number' && att.scorePct > bestScorePct) {
-        bestScorePct = att.scorePct;
-      }
-      const ms = Date.parse(att.completedAtIso);
-      if (Number.isFinite(ms) && ms > 0) {
-        activityTimestamps.push(ms);
-      }
-    }
-
-    for (const br of bookReads) {
-      if (br.updatedAt > 0) {
-        activityTimestamps.push(br.updatedAt);
-      }
-    }
-
-    const weightedAccuracyPct =
-      totalQuestionsAttempted > 0
-        ? (totalCorrect / totalQuestionsAttempted) * 100
-        : totalExamsAttempted > 0
-        ? attempts.reduce((sum, a) => sum + (a.accuracyPct || 0), 0) /
-          totalExamsAttempted
-        : null;
-
-    const lastActiveMs =
-      activityTimestamps.length > 0 ? Math.max(...activityTimestamps) : null;
-    const uniqueActiveDays = new Set(
-      activityTimestamps.map((ms) => toDayKey(ms))
-    ).size;
-    const currentStreak = computeStreakDays(activityTimestamps);
-
-    return {
-      booksReadCount: bookReads.length,
-      unlockedBooksCount,
-      unlockedExamsCount,
-      totalExamsAttempted,
-      uniqueSetsAttempted,
-      totalQuestionsAttempted,
-      weightedAccuracyPct,
-      bestScorePct,
-      totalTimeMs,
-      uniqueActiveDays,
-      currentStreak,
-      lastActive: formatLastActiveAndGap(lastActiveMs),
-    };
-  }, [attempts, bookReads, purchases]);
+  const analytics = useMemo(
+    () =>
+      computeStudyAnalytics({
+        attempts,
+        bookReads,
+        purchases,
+      }),
+    [attempts, bookReads, purchases]
+  );
 
   const userInitials = useMemo(() => {
     const source = user?.displayName || user?.email || 'ED';
@@ -560,65 +347,7 @@ export function ProfilePageView({
         </div>
 
         {/* 4 Primary Metric Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 max-md:gap-2.5 tabular-nums">
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
-            <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
-              <span>Books Read</span>
-              <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
-            </div>
-            <p className="mt-2.5 max-md:mt-2 text-2xl sm:text-3xl max-md:text-xl font-extrabold tracking-tight text-[var(--text-main)]">
-              {analytics.booksReadCount}
-            </p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {analytics.unlockedBooksCount} unlocked in library
-            </p>
-          </div>
-
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
-            <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
-              <span>Exams Attempted</span>
-              <ClipboardCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
-            </div>
-            <p className="mt-2.5 max-md:mt-2 text-2xl sm:text-3xl max-md:text-xl font-extrabold tracking-tight text-[var(--text-main)]">
-              {analytics.totalExamsAttempted}
-            </p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {analytics.uniqueSetsAttempted}{' '}
-              {analytics.uniqueSetsAttempted === 1 ? 'set' : 'sets'} ·{' '}
-              {analytics.unlockedExamsCount} packs owned
-            </p>
-          </div>
-
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
-            <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
-              <span>Overall Accuracy</span>
-              <Target className="w-4 h-4 shrink-0" aria-hidden="true" />
-            </div>
-            <p className="mt-2.5 max-md:mt-2 text-2xl sm:text-3xl max-md:text-xl font-extrabold tracking-tight text-[var(--text-main)]">
-              {analytics.weightedAccuracyPct !== null
-                ? `${analytics.weightedAccuracyPct.toFixed(1)}%`
-                : '—'}
-            </p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {analytics.totalExamsAttempted > 0
-                ? `Best score ${analytics.bestScorePct.toFixed(1)}%`
-                : 'Complete a mock to measure'}
-            </p>
-          </div>
-
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 max-md:p-3.5">
-            <div className="flex items-center justify-between gap-2 text-xs font-medium text-[var(--text-muted)]">
-              <span>Last Active &amp; Gap</span>
-              <CalendarClock className="w-4 h-4 shrink-0" aria-hidden="true" />
-            </div>
-            <p className="mt-2.5 max-md:mt-2 text-lg sm:text-xl max-md:text-base font-extrabold tracking-tight text-[var(--text-main)] leading-snug">
-              {analytics.lastActive.headline}
-            </p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {analytics.lastActive.gapDetail}
-            </p>
-          </div>
-        </div>
+        <StudyAnalyticsCards analytics={analytics} />
 
         {/* Secondary Engagement Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--border-subtle)] max-sm:divide-y-0 max-sm:[&>*:nth-child(n+3)]:border-t max-sm:[&>*:nth-child(even)]:border-s max-sm:[&>*]:border-[var(--border-subtle)] rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] tabular-nums">

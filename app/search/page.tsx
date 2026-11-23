@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import React from 'react';
 import { FullSearchPage } from '../../features/search/full-search-page';
+import { buildReviewTargetKey } from '../../lib/reviews/validation';
 import { toCatalogCardDTO } from '../../lib/types/catalog';
 import {
-  getLiveBooks,
-  getLiveExams,
+  getLiveBooksPage,
+  getLiveExamsPage,
 } from '../../server/repositories/catalog-repository';
 import { getPublishedReviewAggregates } from '../../server/repositories/review-repository';
 
@@ -25,12 +26,28 @@ export default async function SearchRoutePage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
-  const [{ q }, books, exams, reviewAggregates] = await Promise.all([
+  const [{ q }, booksPage, examsPage] = await Promise.all([
     searchParams,
-    getLiveBooks(),
-    getLiveExams(),
-    getPublishedReviewAggregates(),
+    getLiveBooksPage({ limit: 48, offset: 0 }).catch(() => ({
+      items: [],
+      hasMore: false,
+      nextOffset: 0,
+    })),
+    getLiveExamsPage({ limit: 48, offset: 0 }).catch(() => ({
+      items: [],
+      hasMore: false,
+      nextOffset: 0,
+    })),
   ]);
+
+  const books = booksPage.items;
+  const exams = examsPage.items;
+
+  const targetKeys = [
+    ...books.map((b) => buildReviewTargetKey('books', b.id)),
+    ...exams.map((e) => buildReviewTargetKey('ExamPackDocument', e.id)),
+  ];
+  const reviewAggregates = await getPublishedReviewAggregates(targetKeys);
 
   const allItems = [
     ...books.map((b) =>

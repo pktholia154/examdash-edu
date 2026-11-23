@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import React from 'react';
+import React, { cache } from 'react';
 import { Star } from 'lucide-react';
 import { DescriptionMarkdown } from '../../../components/editorial/description-markdown';
 import { Breadcrumbs } from '../../../components/ui/breadcrumbs';
@@ -10,6 +10,7 @@ import { SyllabusTable } from '../../../features/catalog/syllabus-table';
 import { ItemReviewsSection } from '../../../features/reviews/item-reviews-section';
 import { formatPrice } from '../../../lib/registry/content-type-registry';
 import {
+  buildCanonicalAlternates,
   buildExamDetailJsonLd,
   buildThumbUrls,
   getCanonicalOrigin,
@@ -17,12 +18,14 @@ import {
 } from '../../../lib/seo/schema';
 import {
   getExamBySlug,
-  getLiveBooks,
-  getLiveExams,
+  getLiveBooksPage,
+  getLiveExamsPage,
 } from '../../../server/repositories/catalog-repository';
 import { getItemReviewsSummary } from '../../../server/repositories/review-repository';
 
 export const dynamic = 'force-dynamic';
+
+const loadExamBySlug = cache(async (slug: string) => getExamBySlug(slug));
 
 export async function generateMetadata({
   params,
@@ -30,7 +33,7 @@ export async function generateMetadata({
   params: Promise<{ urlSlug: string }>;
 }): Promise<Metadata> {
   const { urlSlug } = await params;
-  const lookup = await getExamBySlug(urlSlug);
+  const lookup = await loadExamBySlug(urlSlug);
 
   if (lookup.status !== 'ok') {
     notFound();
@@ -53,9 +56,7 @@ export async function generateMetadata({
   return {
     title: exam.title,
     description,
-    alternates: {
-      canonical: canonicalUrl,
-    },
+    alternates: buildCanonicalAlternates(`/exams/${exam.urlSlug}`),
     openGraph: {
       title: `${exam.title} | ExamDash`,
       description,
@@ -106,10 +107,18 @@ export default async function ExamDetailPage({
   params: Promise<{ urlSlug: string }>;
 }) {
   const { urlSlug } = await params;
-  const [lookup, allExams, allBooks] = await Promise.all([
-    getExamBySlug(urlSlug),
-    getLiveExams(),
-    getLiveBooks(),
+  const [lookup, examsSample, booksSample] = await Promise.all([
+    loadExamBySlug(urlSlug),
+    getLiveExamsPage({ limit: 4, offset: 0 }).catch(() => ({
+      items: [],
+      hasMore: false,
+      nextOffset: 0,
+    })),
+    getLiveBooksPage({ limit: 3, offset: 0 }).catch(() => ({
+      items: [],
+      hasMore: false,
+      nextOffset: 0,
+    })),
   ]);
 
   if (lookup.status !== 'ok') {
@@ -120,10 +129,10 @@ export default async function ExamDetailPage({
   const reviewSummary = await getItemReviewsSummary('ExamPackDocument', exam.id);
   const jsonLd = serializeSafeJsonLd(buildExamDetailJsonLd(exam, reviewSummary));
 
-  const siblingExams = allExams
+  const siblingExams = examsSample.items
     .filter((e) => e.urlSlug !== exam.urlSlug)
     .slice(0, 3);
-  const companionBooks = allBooks.slice(0, 3);
+  const companionBooks = booksSample.items.slice(0, 3);
 
   const totalQuestionsSum = exam.MocktestTitles.reduce(
     (acc, m) => acc + m.totalQuestions,

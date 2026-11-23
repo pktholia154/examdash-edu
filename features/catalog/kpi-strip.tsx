@@ -1,16 +1,14 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  computeStudyAnalytics,
+  scanLocalBookReadingProgress,
+  type LocalBookReadRecord,
+} from '../../lib/analytics/study-analytics';
+import type { HistoricalExamAttemptRecord } from '../../lib/exam/types';
+import { StudyAnalyticsCards } from '../analytics/study-analytics-cards';
 import { useAuth } from '../auth/auth-provider';
-import { formatPrice } from '../../lib/registry/content-type-registry';
-
-export interface KpiStripProps {
-  totalCatalogBooks: number;
-  totalCatalogExams: number;
-  totalCatalogMocks: number;
-  catalogPotentialSavings: number;
-  primaryCurrency: string;
-}
 
 const ATTEMPT_HISTORY_KEY_PREFIX = 'ed_cbt_attempt_history_';
 
@@ -29,139 +27,115 @@ function hasStoredAttemptHistory(): boolean {
   return false;
 }
 
-export function KpiStrip({
-  totalCatalogBooks,
-  totalCatalogExams,
-  totalCatalogMocks,
-  catalogPotentialSavings,
-  primaryCurrency,
-}: KpiStripProps) {
-  const { user, purchases, isSigningIn, signInWithGoogle } = useAuth();
+export function KpiStrip() {
+  const { user, purchases, isSigningIn, signInWithGoogle, getIdToken } =
+    useAuth();
   const activeUid = user?.uid ?? null;
+  const getIdTokenRef = useRef(getIdToken);
+  useEffect(() => {
+    getIdTokenRef.current = getIdToken;
+  }, [getIdToken]);
+
+  const [bookReads, setBookReads] = useState<LocalBookReadRecord[]>([]);
   const [attemptState, setAttemptState] = useState<{
     uid: string | null;
-    count: number;
-  }>({ uid: null, count: 0 });
+    attempts: HistoricalExamAttemptRecord[];
+  }>({ uid: null, attempts: [] });
 
   useEffect(() => {
+    const syncBookReads = () => {
+      setBookReads(scanLocalBookReadingProgress());
+    };
+    syncBookReads();
+    window.addEventListener('storage', syncBookReads);
+
     if (!activeUid && !hasStoredAttemptHistory()) {
-      return;
+      return () => {
+        window.removeEventListener('storage', syncBookReads);
+      };
     }
 
     let disposed = false;
-    let cleanup: (() => void) | null = null;
+    let cleanupAttempts: (() => void) | null = null;
 
     void import('../../lib/exam/storage').then(
-      ({ EXAM_ATTEMPTS_UPDATED_EVENT, getCompletedAttemptsSync }) => {
+      ({
+        EXAM_ATTEMPTS_UPDATED_EVENT,
+        fetchAndMergeCloudExamAttempts,
+        getHistoricalAttemptsSync,
+      }) => {
         if (disposed) return;
-        const refresh = () =>
+        const refresh = () => {
+          setBookReads(scanLocalBookReadingProgress());
           setAttemptState({
             uid: activeUid,
-            count: getCompletedAttemptsSync(activeUid ?? undefined).length,
+            attempts: activeUid ? getHistoricalAttemptsSync(activeUid) : [],
           });
+        };
         refresh();
         window.addEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
         window.addEventListener('storage', refresh);
-        cleanup = () => {
+        cleanupAttempts = () => {
           window.removeEventListener(EXAM_ATTEMPTS_UPDATED_EVENT, refresh);
           window.removeEventListener('storage', refresh);
         };
+
+        if (
+          activeUid &&
+          (typeof navigator === 'undefined' || navigator.onLine !== false)
+        ) {
+          void (async () => {
+            try {
+              const token = await getIdTokenRef.current();
+              if (!token || disposed) return;
+              const merged = await fetchAndMergeCloudExamAttempts({
+                bearerToken: token,
+                uid: activeUid,
+              });
+              if (!disposed) {
+                setAttemptState({
+                  uid: activeUid,
+                  attempts: merged,
+                });
+              }
+            } catch {
+              // Keep local attempts if offline
+            }
+          })();
+        }
       }
     );
 
     return () => {
       disposed = true;
-      cleanup?.();
+      window.removeEventListener('storage', syncBookReads);
+      cleanupAttempts?.();
     };
   }, [activeUid]);
 
-  const completedCount =
-    attemptState.uid === activeUid ? attemptState.count : 0;
+  const activeAttempts = useMemo(
+    () => (attemptState.uid === activeUid ? attemptState.attempts : []),
+    [activeUid, attemptState]
+  );
 
-  const metrics = useMemo(() => {
-    const ownedBooks = purchases.filter((p) => p.collectionName === 'books').length;
-    const ownedExams = purchases.filter(
-      (p) => p.collectionName === 'ExamPackDocument'
-    ).length;
-    const ownedMocks = purchases.reduce(
-      (acc, p) => acc + (p.totalMocktest ?? 0),
-      0
-    );
-    const savedAmount = purchases.reduce(
-      (acc, p) => acc + Math.max(0, p.listPrice - p.paidPrice),
-      0
-    );
-    const currency = purchases[0]?.currency || primaryCurrency || 'INR';
-
-    return {
-      ownedBooks,
-      ownedExams,
-      ownedMocks,
-      savedAmount,
-      currency,
-    };
-  }, [primaryCurrency, purchases]);
+  const studyAnalytics = useMemo(
+    () =>
+      computeStudyAnalytics({
+        attempts: activeAttempts,
+        bookReads,
+        purchases,
+      }),
+    [activeAttempts, bookReads, purchases]
+  );
 
   return (
     <section aria-label="Study workspace summary" className="ed-container pt-4 sm:pt-5 max-md:pt-3">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 max-md:gap-2.5">
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 sm:p-5 max-md:p-3.5">
-          <p className="text-xs font-medium text-[var(--text-muted)]">
-            Purchased Books
-          </p>
-          <p className="mt-1.5 text-2xl max-md:text-xl font-extrabold text-[var(--text-main)] tabular-nums">
-            {user ? metrics.ownedBooks : 0}
-          </p>
-          <p className="mt-1 text-xs text-[var(--text-muted)] tabular-nums">
-            {totalCatalogBooks} published in catalog
-          </p>
-        </div>
-
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 sm:p-5 max-md:p-3.5">
-          <p className="text-xs font-medium text-[var(--text-muted)]">
-            Purchased Exams
-          </p>
-          <p className="mt-1.5 text-2xl max-md:text-xl font-extrabold text-[var(--text-main)] tabular-nums">
-            {user ? metrics.ownedExams : 0}
-          </p>
-          <p className="mt-1 text-xs text-[var(--text-muted)] tabular-nums">
-            {totalCatalogExams} exam series live
-          </p>
-        </div>
-
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 sm:p-5 max-md:p-3.5">
-          <p className="text-xs font-medium text-[var(--text-muted)]">
-            Mock Tests Available
-          </p>
-          <p className="mt-1.5 text-2xl max-md:text-xl font-extrabold text-[var(--text-main)] tabular-nums">
-            {user && metrics.ownedMocks > 0 ? metrics.ownedMocks : totalCatalogMocks}
-          </p>
-          <p className="mt-1 text-xs text-[var(--text-muted)] tabular-nums">
-            {user
-              ? `${metrics.ownedMocks} unlocked${
-                  completedCount > 0 ? ` · ${completedCount} attempted` : ''
-                }`
-              : `${totalCatalogMocks} sets${
-                  completedCount > 0 ? ` · ${completedCount} attempted` : ''
-                }`}
-          </p>
-        </div>
-
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 sm:p-5 max-md:p-3.5">
-          <p className="text-xs font-medium text-[var(--text-muted)]">
-            Total Savings
-          </p>
-          <p className="mt-1.5 text-2xl max-md:text-xl font-extrabold text-[var(--status-success)] tabular-nums">
-            {formatPrice(
-              user ? metrics.savedAmount : catalogPotentialSavings,
-              metrics.currency
-            )}
-          </p>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">
-            {user ? 'Saved across your purchases' : 'Bundle savings across catalog'}
-          </p>
-        </div>
-      </div>
+      {/* Study Analytics Cards with slightly enlarged icons */}
+      <StudyAnalyticsCards
+        analytics={studyAnalytics}
+        iconClassName="w-5 h-5 shrink-0"
+        cardPaddingClassName="p-4 sm:p-5 max-md:p-3.5"
+      />
 
       {!user && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs text-[var(--text-muted)] max-md:px-3.5 max-md:py-3 max-md:gap-2.5">

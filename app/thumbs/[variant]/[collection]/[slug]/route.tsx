@@ -35,6 +35,56 @@ const IMMUTABLE_PNG_HEADERS: Record<string, string> = {
   Vary: 'Accept-Encoding',
 };
 
+const SITE_HUB_CARDS: Record<
+  string,
+  {
+    title: string;
+    subtitle: string;
+    badgeLabel: string;
+    monogram: string;
+    bgHex: string;
+    inkHex: string;
+    footerRight: string;
+  }
+> = {
+  home: {
+    title: 'Verified Books, Question Banks & Mock Exam Series',
+    subtitle: 'Instant syllabus previews · CBT mock tests · Unified study library',
+    badgeLabel: 'CATALOG',
+    monogram: 'ED',
+    bgHex: '#0F766E',
+    inkHex: '#FFFFFF',
+    footerRight: 'exam-dash.com',
+  },
+  books: {
+    title: 'Exam Books, Question Banks & Revision Guides',
+    subtitle: 'Topic-wise eBooks · Solved papers · Free sample chapters',
+    badgeLabel: 'BOOKS',
+    monogram: 'BK',
+    bgHex: '#1D4ED8',
+    inkHex: '#FFFFFF',
+    footerRight: 'Books Catalog',
+  },
+  exams: {
+    title: 'Full-Length Online Mock Exams & CBT Test Series',
+    subtitle: 'Timed practice sets · Detailed solutions · Performance analytics',
+    badgeLabel: 'EXAMS',
+    monogram: 'EX',
+    bgHex: '#B45309',
+    inkHex: '#FFFFFF',
+    footerRight: 'Exam Series',
+  },
+  legal: {
+    title: 'ExamDash Policies, Licensing & Learner Support',
+    subtitle: 'Verified merchant compliance · Transparent terms & support',
+    badgeLabel: 'POLICY',
+    monogram: 'ED',
+    bgHex: '#334155',
+    inkHex: '#FFFFFF',
+    footerRight: 'Official Policy',
+  },
+};
+
 export async function GET(
   _req: NextRequest,
   context: {
@@ -59,6 +109,218 @@ export async function GET(
   }
 
   const normalizedCollection = collection.trim();
+  if (normalizedCollection === 'site') {
+    const hub = SITE_HUB_CARDS[cleanSlug.toLowerCase()];
+    if (!hub) {
+      return new NextResponse('Not Found', {
+        status: 404,
+        headers: {
+          'Cache-Control': 'public, s-maxage=60',
+          'X-Robots-Tag': 'noindex',
+        },
+      });
+    }
+
+    const fontData = await loadPlusJakartaBoldFont();
+    if (variant === 'sq') {
+      return new ImageResponse(
+        (
+          <div
+            style={{
+              width: '1200px',
+              height: '1200px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              padding: '76px',
+              backgroundColor: hub.bgHex,
+              color: hub.inkHex,
+              fontFamily: 'Plus Jakarta Sans',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+              }}
+            >
+              <div style={{ fontSize: '34px', fontWeight: 700 }}>ExamDash</div>
+              <div
+                style={{
+                  padding: '12px 26px',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(255,255,255,0.18)',
+                  fontSize: '26px',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                }}
+              >
+                {hub.badgeLabel}
+              </div>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: 1,
+              }}
+            >
+              <div style={{ fontSize: '360px', fontWeight: 700, lineHeight: 1 }}>
+                {hub.monogram}
+              </div>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                paddingTop: '36px',
+                borderTop: '3px solid rgba(255,255,255,0.24)',
+              }}
+            >
+              <div style={{ fontSize: '44px', fontWeight: 700, lineHeight: 1.2 }}>
+                {hub.title}
+              </div>
+              <div style={{ fontSize: '26px', fontWeight: 700, opacity: 0.82 }}>
+                {hub.subtitle}
+              </div>
+            </div>
+          </div>
+        ),
+        {
+          width: 1200,
+          height: 1200,
+          headers: IMMUTABLE_PNG_HEADERS,
+          fonts: [
+            {
+              name: 'Plus Jakarta Sans',
+              data: fontData,
+              weight: 700,
+              style: 'normal',
+            },
+          ],
+        }
+      );
+    }
+
+    return new ImageResponse(
+      (
+        <div
+          style={{
+            width: '1200px',
+            height: '675px',
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            backgroundColor: '#0B1120',
+            color: '#F8FAFC',
+            fontFamily: 'Plus Jakarta Sans',
+            padding: '52px',
+            gap: '52px',
+          }}
+        >
+          <div
+            style={{
+              width: '420px',
+              height: '571px',
+              borderRadius: '32px',
+              backgroundColor: hub.bgHex,
+              color: hub.inkHex,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              padding: '36px',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
+              <div
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  fontSize: '20px',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                }}
+              >
+                {hub.badgeLabel}
+              </div>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: 1,
+              }}
+            >
+              <div style={{ fontSize: '188px', fontWeight: 700, lineHeight: 1 }}>
+                {hub.monogram}
+              </div>
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 700, opacity: 0.85 }}>
+              exam-dash.com
+            </div>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              flex: 1,
+              paddingTop: '12px',
+              paddingBottom: '12px',
+            }}
+          >
+            <div style={{ fontSize: '26px', fontWeight: 700, color: '#38BDF8' }}>
+              ExamDash Study Library
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ fontSize: '50px', fontWeight: 700, lineHeight: 1.16 }}>
+                {hub.title}
+              </div>
+              <div style={{ fontSize: '25px', fontWeight: 700, color: '#94A3B8' }}>
+                {hub.subtitle}
+              </div>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingTop: '24px',
+                borderTop: '2px solid #1E293B',
+                fontSize: '22px',
+                fontWeight: 700,
+                color: '#CBD5E1',
+              }}
+            >
+              <span>ExamDash Official Platform</span>
+              <span style={{ color: '#38BDF8' }}>{hub.footerRight}</span>
+            </div>
+          </div>
+        </div>
+      ),
+      {
+        width: 1200,
+        height: 675,
+        headers: IMMUTABLE_PNG_HEADERS,
+        fonts: [
+          {
+            name: 'Plus Jakarta Sans',
+            data: fontData,
+            weight: 700,
+            style: 'normal',
+          },
+        ],
+      }
+    );
+  }
+
   const isBooks = normalizedCollection === 'books';
   const isExams =
     normalizedCollection === 'exams' ||

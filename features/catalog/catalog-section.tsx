@@ -233,7 +233,10 @@ export function CatalogSection({
 
       {/* Button-Driven Filter & Sort Controls (Zero Crawlable Filter Query Links) */}
       {showFilters && loadedItems.length > 0 && (
-        <div className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-6 max-md:mt-3 max-md:pb-4 max-md:gap-2.5">
+        <div
+          data-nosnippet=""
+          className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-6 max-md:mt-3 max-md:pb-4 max-md:gap-2.5"
+        >
           <div className="flex flex-wrap items-center gap-2 max-md:flex-nowrap ed-mobile-scroll-strip max-md:w-full max-md:pb-1">
             <button
               type="button"
@@ -376,7 +379,10 @@ export function CatalogSection({
           </div>
 
           {hasMore && collectionName && (
-            <div className="mt-6 flex flex-col items-center gap-2">
+            <div
+              data-nosnippet=""
+              className="mt-6 flex flex-col items-center gap-2"
+            >
               {loadError && (
                 <p
                   role="alert"

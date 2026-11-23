@@ -133,6 +133,7 @@ export function CatalogCard({ item }: CatalogCardProps) {
         {isOwned ? (
           <a
             href={openSlotHref}
+            rel="nofollow"
             aria-label={`Open ${item.title} in Library`}
             title="Open in Library"
             className="absolute bottom-1.5 right-1.5 z-10 w-8 h-8 rounded-full inline-flex items-center justify-center border border-[var(--status-success)] bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity before:content-[''] before:absolute before:-inset-1.5"
@@ -251,6 +252,7 @@ export function CatalogCard({ item }: CatalogCardProps) {
             {isOwned && (
               <a
                 href={openSlotHref}
+                rel="nofollow"
                 className="text-xs font-semibold text-[var(--status-success)] hover:underline underline-offset-4 whitespace-nowrap max-md:min-h-[44px] max-md:inline-flex max-md:items-center"
               >
                 Open →
