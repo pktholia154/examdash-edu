@@ -12,6 +12,7 @@ import {
   verifyRazorpaySignature,
 } from '../../../../../../server/payments/razorpay';
 import { commitVerifiedPurchasesToFirestore } from '../../../../../../server/payments/purchase-persistence';
+import { resolveValiditySelection } from '../../../../../../lib/validity/pricing';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store' };
 const ORDER_ID_REGEX = /^order_[a-zA-Z0-9]{6,58}$/;
@@ -173,18 +174,42 @@ export async function POST(req: NextRequest) {
     }
 
     const currency = order.currency.toUpperCase();
+    const validityByKey = new Map<string, number>();
+    for (const ctxItem of orderContext.items) {
+      if (typeof ctxItem.validityMonths === 'number') {
+        validityByKey.set(
+          `${ctxItem.collectionName}:${ctxItem.id}`,
+          ctxItem.validityMonths
+        );
+      }
+    }
+
+    const pricedItems = authoritativeItems.map((item) => {
+      const key = `${item.collectionName}:${item.id}`;
+      const requestedMonths = validityByKey.get(key);
+      const resolved = resolveValiditySelection(
+        item.collectionName,
+        item.buyPrice,
+        requestedMonths
+      );
+      return { item, resolved };
+    });
+
     const recomputedDigest = computeItemsDigest(
-      authoritativeItems.map((item) => ({
+      pricedItems.map(({ item, resolved }) => ({
         collectionName: item.collectionName,
         id: item.id,
-        buyPrice: item.buyPrice,
+        buyPrice: resolved.payablePrice,
         currency,
+        validityMonths: resolved.validityMonths,
       }))
     );
 
     const expectedSubunits = Math.round(
-      authoritativeItems.reduce((acc, item) => acc + Math.max(0, item.buyPrice), 0) *
-        100
+      pricedItems.reduce(
+        (acc, entry) => acc + Math.max(0, entry.resolved.payablePrice),
+        0
+      ) * 100
     );
 
     if (
@@ -200,6 +225,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const validityMonthsByItem: Record<string, number> = {};
+    for (const { item, resolved } of pricedItems) {
+      validityMonthsByItem[`${item.collectionName}:${item.id}`] =
+        resolved.validityMonths;
+    }
+
     // Layer 5: Atomically commit all purchased Books & Exam Packs to Firestore `/users/{uid}/purchases`
     const purchases = await commitVerifiedPurchasesToFirestore({
       userId: decoded.uid,
@@ -208,6 +239,7 @@ export async function POST(req: NextRequest) {
       userPhotoUrl: typeof decoded.picture === 'string' ? decoded.picture : null,
       bearerIdToken: rawBearerToken,
       items: authoritativeItems,
+      validityMonthsByItem,
       razorpayOrderId: order.id,
       razorpayPaymentId: payment.id,
     });

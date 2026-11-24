@@ -39,14 +39,21 @@ test('Dirty Dozen: Verified email, strict key allowlists, temporal integrity, an
   assert.match(rules, /existsAfter\(\/databases\/\$\(database\)\/documents\/users\/\$\(userId\)\)/);
 });
 
-test('Dirty Dozen: Completed purchases enforce terminal state immutability and Razorpay payment metadata', () => {
+test('Dirty Dozen: Completed purchases enforce validity bounds, expiry-gated renewal/deletion, and Razorpay payment metadata', () => {
   const rules = readRules();
   assert.match(rules, /match\s+\/purchases\/\{purchaseId\}/);
   assert.match(rules, /data\.status\s*==\s*'completed'/);
   assert.match(rules, /data\.paymentProvider\s*==\s*'razorpay'/);
   assert.match(rules, /\^order_\[a-zA-Z0-9\]\+\$/);
   assert.match(rules, /\^pay_\[a-zA-Z0-9\]\+\$/);
-  assert.match(rules, /allow\s+update,\s*delete:\s*if\s+false;/);
+  assert.match(rules, /function\s+isValidPurchaseExpiryWindow\(data\)/);
+  assert.match(rules, /function\s+isPurchaseExpired\(docData\)/);
+  assert.match(rules, /data\.validityMonths\s*==\s*1/);
+  assert.match(rules, /data\.validityMonths\s*==\s*6/);
+  assert.match(rules, /data\.validityMonths\s*==\s*3/);
+  assert.match(rules, /data\.validityMonths\s*==\s*24/);
+  assert.match(rules, /allow\s+update:\s*if\s*\([\s\S]*isPurchaseExpired\(existing\(\)\)/);
+  assert.match(rules, /allow\s+delete:\s*if[\s\S]*isPurchaseExpired\(existing\(\)\)/);
 });
 
 test('Dirty Dozen: ItemReview rules enforce deterministic 1-review-per-user ID, 1..5 integer rating, zero PII, and verified purchase proof', () => {

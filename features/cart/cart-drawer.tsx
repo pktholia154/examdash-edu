@@ -139,6 +139,7 @@ export function CartDrawer() {
                     </a>
                     <p className="mt-0.5 text-xs text-[var(--text-muted)] truncate">
                       {item.authorName} · {item.language}
+                      {item.validityLabel ? ` · ${item.validityLabel}` : ''}
                     </p>
                     <div className="mt-2 flex items-baseline gap-2 tabular-nums">
                       <span className="text-sm font-bold text-[var(--text-main)]">
@@ -173,7 +174,7 @@ export function CartDrawer() {
           <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-6 py-5 max-md:px-4 max-md:py-4 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] space-y-3">
             <div className="space-y-1.5 text-sm tabular-nums">
               <div className="flex items-center justify-between text-[var(--text-muted)]">
-                <span>List Total ({activeCurrency})</span>
+                <span>Regular Total ({activeCurrency})</span>
                 <span>{formatPrice(summary.listTotal, activeCurrency)}</span>
               </div>
               {summary.totalSavings > 0 && (

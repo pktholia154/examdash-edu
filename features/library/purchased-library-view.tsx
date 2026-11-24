@@ -15,6 +15,7 @@ import {
   BarChart3,
   Check,
   ChevronDown,
+  Clock,
   Download,
   HardDrive,
   Loader2,
@@ -54,6 +55,10 @@ import type {
   MocktestTitleItem,
   UserPurchaseRecord,
 } from '../../lib/types/catalog';
+import {
+  filterActivePurchases,
+  resolvePurchaseExpiryMeta,
+} from '../../lib/validity/pricing';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../auth/auth-provider';
 import { useToast } from '../toast/toast-context';
@@ -283,14 +288,22 @@ export function PurchasedLibraryView({
     return { manifestByPack, shardsByPack };
   }, [offlineAssets]);
 
-  const bookPurchases = useMemo(
-    () => purchases.filter((p) => p.collectionName === 'books'),
+  const activeLibraryPurchases = useMemo(
+    () => filterActivePurchases(purchases).active,
     [purchases]
   );
 
+  const bookPurchases = useMemo(
+    () => activeLibraryPurchases.filter((p) => p.collectionName === 'books'),
+    [activeLibraryPurchases]
+  );
+
   const examPurchases = useMemo(
-    () => purchases.filter((p) => p.collectionName === 'ExamPackDocument'),
-    [purchases]
+    () =>
+      activeLibraryPurchases.filter(
+        (p) => p.collectionName === 'ExamPackDocument'
+      ),
+    [activeLibraryPurchases]
   );
 
   // Resolve 0ms Book rows with full format & offline bundle awareness
@@ -1226,12 +1239,34 @@ export function PurchasedLibraryView({
                   </Link>
 
                   <div className="min-w-0 flex-1 space-y-1 md:space-y-1.5">
-                    <Link
-                      href={`/books/${record.urlSlug}`}
-                      className="text-base md:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug block"
-                    >
-                      {record.title}
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                      <Link
+                        href={`/books/${record.urlSlug}`}
+                        className="text-base md:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug"
+                      >
+                        {record.title}
+                      </Link>
+                      {(() => {
+                        const expiryMeta = resolvePurchaseExpiryMeta(record);
+                        return (
+                          <span
+                            title={`Valid until ${expiryMeta.formattedExpiryDate}`}
+                            className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold tabular-nums whitespace-nowrap shrink-0',
+                              expiryMeta.isExpiringSoon
+                                ? 'border-[var(--status-warning)]/40 bg-[var(--status-warning-bg)] text-[var(--status-warning)]'
+                                : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-main)]'
+                            )}
+                          >
+                            <Clock
+                              className="w-3 h-3 shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span>{expiryMeta.chipLabel}</span>
+                          </span>
+                        );
+                      })()}
+                    </div>
 
                     {/* Clean Unboxed Metadata (Zero-Pill) */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-muted)]">
@@ -1634,12 +1669,34 @@ export function PurchasedLibraryView({
                     </Link>
 
                     <div className="min-w-0 flex-1 space-y-1 md:space-y-1.5">
-                      <Link
-                        href={`/exams/${record.urlSlug}`}
-                        className="text-base md:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug block"
-                      >
-                        {record.title}
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                        <Link
+                          href={`/exams/${record.urlSlug}`}
+                          className="text-base md:text-lg font-bold text-[var(--text-main)] hover:underline line-clamp-2 leading-snug"
+                        >
+                          {record.title}
+                        </Link>
+                        {(() => {
+                          const expiryMeta = resolvePurchaseExpiryMeta(record);
+                          return (
+                            <span
+                              title={`Valid until ${expiryMeta.formattedExpiryDate}`}
+                              className={cn(
+                                'inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold tabular-nums whitespace-nowrap shrink-0',
+                                expiryMeta.isExpiringSoon
+                                  ? 'border-[var(--status-warning)]/40 bg-[var(--status-warning-bg)] text-[var(--status-warning)]'
+                                  : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-main)]'
+                              )}
+                            >
+                              <Clock
+                                className="w-3 h-3 shrink-0"
+                                aria-hidden="true"
+                              />
+                              <span>{expiryMeta.chipLabel}</span>
+                            </span>
+                          );
+                        })()}
+                      </div>
 
                       {/* Clean Unboxed Metadata (Zero-Pill) */}
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-muted)]">

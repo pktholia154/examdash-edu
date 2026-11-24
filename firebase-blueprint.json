@@ -133,6 +133,9 @@
         "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
         "listPrice": { "type": "number" },
         "paidPrice": { "type": "number" },
+        "validityMonths": { "type": "number", "description": "Validity duration in months (1 or 6 for exams; 3 or 24 for books)" },
+        "validityLabel": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "expiresAt": { "type": "string", "format": "date-time" },
         "totalMocktest": { "type": "number" },
         "paymentProvider": { "type": "string", "enum": ["razorpay", "free"], "maxLength": 16 },
         "razorpayOrderId": { "type": "string", "minLength": 10, "maxLength": 64, "pattern": "^order_[a-zA-Z0-9]+$" },
@@ -172,6 +175,9 @@
         "currency": { "type": "string", "minLength": 3, "maxLength": 3, "pattern": "^[A-Z]{3}$" },
         "listPrice": { "type": "number" },
         "buyPrice": { "type": "number" },
+        "baseBuyPrice": { "type": "number" },
+        "validityMonths": { "type": "number" },
+        "validityLabel": { "type": "string", "minLength": 1, "maxLength": 32 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -362,7 +368,7 @@
     },
     "/users/{userId}/purchases/{purchaseId}": {
       "schema": { "$ref": "#/entities/UserPurchase" },
-      "description": "Immutable completed entitlement records owned by the user."
+      "description": "Time-bound completed entitlement records owned by the user; immutable while active, removable or renewable once expired."
     },
     "/users/{userId}/cart/{cartKey}": {
       "schema": { "$ref": "#/entities/UserCartItem" },

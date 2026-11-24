@@ -102,6 +102,44 @@ service cloud.firestore {
       );
     }
 
+    function isValidValidityMonthsForCollection(collectionName, months) {
+      return months is int
+        && (
+          (collectionName == 'ExamPackDocument' && (months == 1 || months == 6))
+          || (collectionName == 'books' && (months == 3 || months == 24))
+        );
+    }
+
+    function isValidPurchaseExpiryWindow(data) {
+      return !('expiresAt' in data)
+        || (
+          data.expiresAt is timestamp
+          && data.expiresAt > data.createdAt
+          && 'validityMonths' in data
+          && data.validityMonths is int
+          && (
+            (data.collectionName == 'ExamPackDocument' && data.validityMonths == 1 && data.expiresAt <= data.createdAt + duration.value(33, 'd'))
+            || (data.collectionName == 'ExamPackDocument' && data.validityMonths == 6 && data.expiresAt <= data.createdAt + duration.value(188, 'd'))
+            || (data.collectionName == 'books' && data.validityMonths == 3 && data.expiresAt <= data.createdAt + duration.value(95, 'd'))
+            || (data.collectionName == 'books' && data.validityMonths == 24 && data.expiresAt <= data.createdAt + duration.value(735, 'd'))
+          )
+        );
+    }
+
+    function isPurchaseExpired(docData) {
+      return (
+        ('expiresAt' in docData && docData.expiresAt is timestamp && docData.expiresAt <= request.time)
+        || (
+          !('expiresAt' in docData)
+          && docData.createdAt is timestamp
+          && (
+            (docData.collectionName == 'ExamPackDocument' && docData.createdAt + duration.value(180, 'd') <= request.time)
+            || (docData.collectionName == 'books' && docData.createdAt + duration.value(730, 'd') <= request.time)
+          )
+        )
+      );
+    }
+
     function isValidUserPurchase(data, purchaseId) {
       return data.keys().hasAll([
           'purchaseId',
@@ -130,6 +168,9 @@ service cloud.firestore {
           'currency',
           'listPrice',
           'paidPrice',
+          'validityMonths',
+          'validityLabel',
+          'expiresAt',
           'totalMocktest',
           'paymentProvider',
           'razorpayOrderId',
@@ -174,6 +215,9 @@ service cloud.firestore {
         && (data.paidPrice is int || data.paidPrice is float)
         && data.paidPrice >= 0
         && data.listPrice >= data.paidPrice
+        && (!('validityMonths' in data) || isValidValidityMonthsForCollection(data.collectionName, data.validityMonths))
+        && (!('validityLabel' in data) || (data.validityLabel is string && data.validityLabel.size() >= 1 && data.validityLabel.size() <= 32))
+        && isValidPurchaseExpiryWindow(data)
         && (!('totalMocktest' in data) || (data.totalMocktest is int && data.totalMocktest >= 0))
         && isValidPaymentProof(data)
         && data.status is string
@@ -210,6 +254,9 @@ service cloud.firestore {
           'currency',
           'listPrice',
           'buyPrice',
+          'baseBuyPrice',
+          'validityMonths',
+          'validityLabel',
           'createdAt',
           'updatedAt'
         ])
@@ -249,6 +296,9 @@ service cloud.firestore {
         && data.listPrice >= 0
         && (data.buyPrice is int || data.buyPrice is float)
         && data.buyPrice >= 0
+        && (!('baseBuyPrice' in data) || ((data.baseBuyPrice is int || data.baseBuyPrice is float) && data.baseBuyPrice >= 0))
+        && (!('validityMonths' in data) || isValidValidityMonthsForCollection(data.collectionName, data.validityMonths))
+        && (!('validityLabel' in data) || (data.validityLabel is string && data.validityLabel.size() >= 1 && data.validityLabel.size() <= 32))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -777,7 +827,7 @@ service cloud.firestore {
           && isValidId(infoId);
       }
 
-      // Immutable Entitlement Records (Terminal State Locked)
+      // Validity-Bound Entitlement Records (Immutable while active; removable/renewable once expired)
       match /purchases/{purchaseId} {
         allow get: if isSignedIn()
           && isValidId(userId)
@@ -797,7 +847,48 @@ service cloud.firestore {
           && incoming().createdAt == request.time
           && hasParentUser(userId);
 
-        allow update, delete: if false;
+        allow update: if (
+          isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(purchaseId)
+          && existing().userId == request.auth.uid
+          && isPurchaseExpired(existing())
+          && isValidUserPurchase(incoming(), purchaseId)
+          && incoming().purchaseId == existing().purchaseId
+          && incoming().userId == existing().userId
+          && incoming().itemId == existing().itemId
+          && incoming().collectionName == existing().collectionName
+          && incoming().status == existing().status
+          && incoming().createdAt == request.time
+          && (
+            // Action: RenewExpiredPurchase
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'urlSlug',
+              'title',
+              'type',
+              'authorName',
+              'language',
+              'currency',
+              'listPrice',
+              'paidPrice',
+              'validityMonths',
+              'validityLabel',
+              'expiresAt',
+              'totalMocktest',
+              'paymentProvider',
+              'razorpayOrderId',
+              'razorpayPaymentId',
+              'createdAt'
+            ])
+          )
+          && exists(/databases/$(database)/documents/users/$(userId))
+        );
+
+        allow delete: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(purchaseId)
+          && existing().userId == request.auth.uid
+          && isPurchaseExpired(existing());
       }
 
       // Active Shopping Cart Sync
@@ -832,7 +923,15 @@ service cloud.firestore {
           && incoming().collectionName == existing().collectionName
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['listPrice', 'buyPrice', 'title', 'updatedAt'])
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'listPrice',
+            'buyPrice',
+            'baseBuyPrice',
+            'validityMonths',
+            'validityLabel',
+            'title',
+            'updatedAt'
+          ])
           && exists(/databases/$(database)/documents/users/$(userId))
         );
 

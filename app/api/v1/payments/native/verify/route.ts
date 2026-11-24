@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyBearerIdToken } from '../../../../../../server/firebase/verify-auth';
 import { getCatalogItemsByRefs } from '../../../../../../server/repositories/catalog-repository';
 import type { CollectionName } from '../../../../../../lib/types/catalog';
+import {
+  computePurchaseExpiryIso,
+  resolveValiditySelection,
+} from '../../../../../../lib/validity/pricing';
 
 /**
  * Capacitor Native StoreKit 2 / Google Play Billing Receipt Sync Endpoint
@@ -22,7 +26,11 @@ export async function POST(req: NextRequest) {
     platform?: 'ios' | 'android';
     receiptToken?: string;
     transactionId?: string;
-    items?: Array<{ collectionName: CollectionName; id: string }>;
+    items?: Array<{
+      collectionName: CollectionName;
+      id: string;
+      validityMonths?: number;
+    }>;
   };
 
   if (
@@ -60,25 +68,45 @@ export async function POST(req: NextRequest) {
   }
 
   const nowIso = new Date().toISOString();
-  const purchases = resolved.map((item) => ({
-    purchaseId: `${item.collectionName}_${item.id}`.slice(0, 120),
-    userId: decoded.uid,
-    itemId: item.id,
-    collectionName: item.collectionName,
-    urlSlug: item.urlSlug,
-    title: item.title,
-    type: item.type,
-    authorName: item.authorName,
-    language: item.language,
-    currency: item.currency,
-    listPrice: item.listPrice,
-    paidPrice: item.buyPrice,
-    ...(item.collectionName === 'ExamPackDocument'
-      ? { totalMocktest: item.totalMocktest }
-      : {}),
-    status: 'completed' as const,
-    createdAtIso: nowIso,
-  }));
+  const validityByKey = new Map<string, number>();
+  for (const raw of body.items) {
+    if (typeof raw.validityMonths === 'number') {
+      validityByKey.set(`${raw.collectionName}:${raw.id}`, raw.validityMonths);
+    }
+  }
+
+  const purchases = resolved.map((item) => {
+    const resolvedValidity = resolveValiditySelection(
+      item.collectionName,
+      item.buyPrice,
+      validityByKey.get(`${item.collectionName}:${item.id}`)
+    );
+    return {
+      purchaseId: `${item.collectionName}_${item.id}`.slice(0, 120),
+      userId: decoded.uid,
+      itemId: item.id,
+      collectionName: item.collectionName,
+      urlSlug: item.urlSlug,
+      title: item.title,
+      type: item.type,
+      authorName: item.authorName,
+      language: item.language,
+      currency: item.currency,
+      listPrice: resolvedValidity.fullPrice,
+      paidPrice: resolvedValidity.payablePrice,
+      validityMonths: resolvedValidity.validityMonths,
+      validityLabel: resolvedValidity.label,
+      expiresAtIso: computePurchaseExpiryIso(
+        nowIso,
+        resolvedValidity.validityMonths
+      ),
+      ...(item.collectionName === 'ExamPackDocument'
+        ? { totalMocktest: item.totalMocktest }
+        : {}),
+      status: 'completed' as const,
+      createdAtIso: nowIso,
+    };
+  });
 
   return NextResponse.json(
     { verified: true, purchases },

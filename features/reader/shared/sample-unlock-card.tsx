@@ -4,10 +4,10 @@ import React from 'react';
 import { ExternalLink, Zap } from 'lucide-react';
 import type { PublicBookDTO } from '../../../lib/types/catalog';
 import {
-  computeDiscountPercent,
   formatPrice,
   makeCompositeKey,
 } from '../../../lib/registry/content-type-registry';
+import { getDefaultCatalogPricing } from '../../../lib/validity/pricing';
 import { useAuth } from '../../auth/auth-provider';
 import { useCart } from '../../cart/cart-provider';
 
@@ -28,9 +28,10 @@ export function SampleUnlockCard({
 
   const compositeKey = makeCompositeKey('books', book.id);
   const isOwned = ownedCompositeKeys.has(compositeKey);
-  const isFree = book.buyPrice === 0;
-  const discountPct = computeDiscountPercent(book.listPrice, book.buyPrice);
-  const savings = Math.max(0, book.listPrice - book.buyPrice);
+  const pricing = getDefaultCatalogPricing('books', book.buyPrice);
+  const isFree = pricing.isFree;
+  const discountPct = pricing.discountPct;
+  const savings = pricing.savingsAmount;
 
   const handleBuyUnlock = async () => {
     const ok = await buyNow(book, { redirectToPurchased: true });
@@ -75,11 +76,13 @@ export function SampleUnlockCard({
 
           <div className="mt-3 flex flex-wrap items-baseline gap-2.5 tabular-nums">
             <span className="text-xl font-extrabold text-[var(--reader-ink,var(--text-main))]">
-              {isFree ? 'Free' : formatPrice(book.buyPrice, book.currency)}
+              {isFree
+                ? 'Free'
+                : formatPrice(pricing.discountedPrice, book.currency)}
             </span>
             {discountPct > 0 && (
               <span className="text-sm text-[var(--reader-muted,var(--text-muted))] line-through">
-                {formatPrice(book.listPrice, book.currency)}
+                {formatPrice(pricing.fullPrice, book.currency)}
               </span>
             )}
             {discountPct > 0 && (

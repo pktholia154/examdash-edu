@@ -21,6 +21,7 @@ import {
   buildFirebaseStorageHeaders,
   syncSinglePurchaseToDefaultDb,
 } from '../firebase/default-db-mirror';
+import { resolvePurchaseExpiryMeta } from '../../lib/validity/pricing';
 
 /**
  * Strict server-side Firestore field projections for public queries (Pillar 3).
@@ -1297,8 +1298,112 @@ function getPurchaseDocInDb(params: {
   });
 }
 
+function isRawPurchaseDocActive(
+  doc: Record<string, unknown> | null,
+  collectionName: CollectionName
+): boolean {
+  if (!doc) return false;
+  if (doc.status && doc.status !== 'completed') return false;
+  const validityMonths =
+    typeof doc.validityMonths === 'number' &&
+    Number.isInteger(doc.validityMonths) &&
+    doc.validityMonths > 0
+      ? doc.validityMonths
+      : undefined;
+  const validityLabel =
+    typeof doc.validityLabel === 'string' ? doc.validityLabel : undefined;
+  const expiresAtIso =
+    typeof doc.expiresAt === 'string' ? doc.expiresAt : undefined;
+  const createdAtIso =
+    typeof doc.createdAt === 'string'
+      ? doc.createdAt
+      : typeof doc.purchasedAt === 'string'
+      ? doc.purchasedAt
+      : undefined;
+
+  return !resolvePurchaseExpiryMeta({
+    collectionName,
+    validityMonths,
+    validityLabel,
+    expiresAtIso,
+    createdAtIso,
+  }).isExpired;
+}
+
+export type CallerPurchaseState = 'active' | 'expired' | 'missing';
+
 /**
- * Verifies user purchase record in the provisioned Firestore database AND `(default)` database
+ * Inspects whether a user's purchase record is currently active, expired (document still exists),
+ * or missing so renewal writes can choose Firestore `create` vs `update` accurately.
+ */
+export async function getCallerPurchaseState(
+  userId: string,
+  collectionName: CollectionName,
+  rawItemId: string,
+  bearerIdToken: string
+): Promise<CallerPurchaseState> {
+  if (!userId || !rawItemId || !bearerIdToken) return 'missing';
+  const projectId = firebaseConfig.projectId || 'examdash-ed';
+  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+  const safeItemId = rawItemId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  const purchaseId = `${collectionName}_${safeItemId}`.slice(0, 120);
+
+  const primaryDoc = await getPurchaseDocInDb({
+    projectId,
+    databaseId,
+    userId,
+    purchaseDocId: purchaseId,
+    bearerIdToken,
+  });
+
+  if (primaryDoc) {
+    return isRawPurchaseDocActive(primaryDoc, collectionName)
+      ? 'active'
+      : 'expired';
+  }
+
+  if (databaseId !== '(default)') {
+    const [defaultDoc, defaultRawAliasDoc, defaultExamAliasDoc] =
+      await Promise.all([
+        getPurchaseDocInDb({
+          projectId,
+          databaseId: '(default)',
+          userId,
+          purchaseDocId: purchaseId,
+          bearerIdToken,
+        }),
+        getPurchaseDocInDb({
+          projectId,
+          databaseId: '(default)',
+          userId,
+          purchaseDocId: safeItemId,
+          bearerIdToken,
+        }),
+        collectionName === 'ExamPackDocument'
+          ? getPurchaseDocInDb({
+              projectId,
+              databaseId: '(default)',
+              userId,
+              purchaseDocId: `exams_${safeItemId}`.slice(0, 120),
+              bearerIdToken,
+            })
+          : Promise.resolve(null),
+      ]);
+
+    if (
+      isRawPurchaseDocActive(defaultDoc, collectionName) ||
+      isRawPurchaseDocActive(defaultRawAliasDoc, collectionName) ||
+      isRawPurchaseDocActive(defaultExamAliasDoc, collectionName)
+    ) {
+      return 'active';
+    }
+  }
+
+  return 'missing';
+}
+
+/**
+ * Verifies active (non-expired) user purchase record in the provisioned Firestore database AND `(default)` database
  * using the caller's own Firebase Auth Bearer token (zero Admin SDK IAM required; enforced by firestore.rules).
  * Synchronously backfills missing `(default)` purchase docs using the exact 13-key `(default)` schema
  * so Firebase Storage rules grant immediate read access to `fullPdfStoragePath`, `fullMarkdownStoragePath`,
@@ -1360,59 +1465,68 @@ export async function verifyCallerPurchaseRecord(
         : Promise.resolve(null),
     ]);
 
-  if (
-    primaryDoc &&
-    databaseId !== '(default)' &&
-    (!defaultDoc ||
-      !defaultRawAliasDoc ||
-      (collectionName === 'ExamPackDocument' && !defaultExamAliasDoc))
-  ) {
-    const paidPrice =
-      typeof primaryDoc.paidPrice === 'number'
-        ? primaryDoc.paidPrice
-        : typeof primaryDoc.amountPaid === 'number'
-        ? primaryDoc.amountPaid
-        : Number(
-            primaryDoc.paidPrice ??
-              primaryDoc.amountPaid ??
-              catalogFallback?.buyPrice ??
-              0
-          ) || 0;
+  if (primaryDoc) {
+    if (!isRawPurchaseDocActive(primaryDoc, collectionName)) {
+      return false;
+    }
 
-    await syncSinglePurchaseToDefaultDb({
-      uid: userId,
-      itemId: safeItemId,
-      collectionName,
-      title: String(
-        primaryDoc.title || catalogFallback?.title || 'ExamDash Resource'
-      ),
-      urlSlug: String(
-        primaryDoc.urlSlug || catalogFallback?.urlSlug || safeItemId
-      ),
-      currency: String(
-        primaryDoc.currency || catalogFallback?.currency || 'INR'
-      ),
-      paidPrice,
-      razorpayOrderId:
-        typeof primaryDoc.razorpayOrderId === 'string'
-          ? primaryDoc.razorpayOrderId
-          : undefined,
-      razorpayPaymentId:
-        typeof primaryDoc.razorpayPaymentId === 'string'
-          ? primaryDoc.razorpayPaymentId
-          : undefined,
-      createdAtIso:
-        typeof primaryDoc.createdAt === 'string'
-          ? primaryDoc.createdAt
-          : typeof primaryDoc.purchasedAt === 'string'
-          ? primaryDoc.purchasedAt
-          : undefined,
-      bearerIdToken,
-    });
+    if (
+      databaseId !== '(default)' &&
+      (!defaultDoc ||
+        !defaultRawAliasDoc ||
+        (collectionName === 'ExamPackDocument' && !defaultExamAliasDoc))
+    ) {
+      const paidPrice =
+        typeof primaryDoc.paidPrice === 'number'
+          ? primaryDoc.paidPrice
+          : typeof primaryDoc.amountPaid === 'number'
+          ? primaryDoc.amountPaid
+          : Number(
+              primaryDoc.paidPrice ??
+                primaryDoc.amountPaid ??
+                catalogFallback?.buyPrice ??
+                0
+            ) || 0;
+
+      await syncSinglePurchaseToDefaultDb({
+        uid: userId,
+        itemId: safeItemId,
+        collectionName,
+        title: String(
+          primaryDoc.title || catalogFallback?.title || 'ExamDash Resource'
+        ),
+        urlSlug: String(
+          primaryDoc.urlSlug || catalogFallback?.urlSlug || safeItemId
+        ),
+        currency: String(
+          primaryDoc.currency || catalogFallback?.currency || 'INR'
+        ),
+        paidPrice,
+        razorpayOrderId:
+          typeof primaryDoc.razorpayOrderId === 'string'
+            ? primaryDoc.razorpayOrderId
+            : undefined,
+        razorpayPaymentId:
+          typeof primaryDoc.razorpayPaymentId === 'string'
+            ? primaryDoc.razorpayPaymentId
+            : undefined,
+        createdAtIso:
+          typeof primaryDoc.createdAt === 'string'
+            ? primaryDoc.createdAt
+            : typeof primaryDoc.purchasedAt === 'string'
+            ? primaryDoc.purchasedAt
+            : undefined,
+        bearerIdToken,
+      });
+    }
+
+    return true;
   }
 
-  return Boolean(
-    primaryDoc || defaultDoc || defaultRawAliasDoc || defaultExamAliasDoc
+  return (
+    isRawPurchaseDocActive(defaultDoc, collectionName) ||
+    isRawPurchaseDocActive(defaultRawAliasDoc, collectionName) ||
+    isRawPurchaseDocActive(defaultExamAliasDoc, collectionName)
   );
 }
 

@@ -10,7 +10,7 @@ export interface MarkdownSubheadingItem {
 export interface MarkdownTocItem {
   id: string;
   text: string;
-  level: 1 | 2 | 3;
+  level: 1;
   chapterIndex: number;
   chapterId: string;
   blockId: string;
@@ -24,6 +24,7 @@ export interface MarkdownChapterChunk {
   chapterId: string;
   headingId: string;
   title: string;
+  hasH1Heading: boolean;
   rawHtml: string;
   firstBlockId: string;
   startBlockNum: number;
@@ -256,60 +257,28 @@ function countWordsInText(raw: string): number {
 
 type MdToken = ReturnType<InstanceType<typeof MarkdownIt>['parse']>[number];
 
-function hasSubstantiveBodyTokens(tokens: MdToken[]): boolean {
-  let depth = 0;
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i];
-    if (depth === 0) {
-      if (
-        t.type === 'paragraph_open' ||
-        t.type === 'bullet_list_open' ||
-        t.type === 'ordered_list_open' ||
-        t.type === 'blockquote_open' ||
-        t.type === 'table_open' ||
-        t.type === 'fence' ||
-        t.type === 'code_block'
-      ) {
-        return true;
-      }
-      if (t.type === 'html_block' && t.content.trim().length > 0) {
-        return true;
-      }
-    }
-    if (t.nesting === 1) depth += 1;
-    if (t.nesting === -1) depth = Math.max(0, depth - 1);
-  }
-  return false;
-}
-
-/**
- * Determines the primary chapter heading level so both:
- * 1) Multi-H1 books (`# Chapter 1`, `# Chapter 2`, ...) split on `h1`
- * 2) Single-H1 book title + Multi-H2 chapters (`# Book Title` + `## Chapter 1`, `## Chapter 2`, ...) split on `h2`
- * 3) H2-only or H3-only documents split cleanly at their top-most repeated heading level
- */
-function resolveChapterHeadingLevel(tokens: MdToken[]): 1 | 2 | 3 {
-  let h1Count = 0;
-  let h2Count = 0;
-  let h3Count = 0;
-  let depth = 0;
-
-  for (let i = 0; i < tokens.length; i++) {
-    const tok = tokens[i];
-    if (depth === 0 && tok.type === 'heading_open') {
-      if (tok.tag === 'h1') h1Count += 1;
-      else if (tok.tag === 'h2') h2Count += 1;
-      else if (tok.tag === 'h3') h3Count += 1;
-    }
-    if (tok.nesting === 1) depth += 1;
-    if (tok.nesting === -1) depth = Math.max(0, depth - 1);
-  }
-
-  if (h1Count >= 2) return 1;
-  if (h1Count === 1 && h2Count >= 2) return 2;
-  if (h1Count === 0 && h2Count >= 1) return 2;
-  if (h1Count === 0 && h2Count === 0 && h3Count >= 2) return 3;
-  return 1;
+function extractCleanHeadingText(inlineTok: MdToken | undefined): string {
+  if (!inlineTok) return 'Section';
+  const fromChildren = inlineTok.children?.length
+    ? inlineTok.children
+        .map((child) => {
+          if (child.type === 'text' || child.type === 'code_inline') {
+            return child.content;
+          }
+          if (child.type === 'softbreak' || child.type === 'hardbreak') {
+            return ' ';
+          }
+          return '';
+        })
+        .join('')
+    : '';
+  const raw = fromChildren.trim() ? fromChildren : inlineTok.content || '';
+  return (
+    raw
+      .replace(/@@ED_MATH_(?:BLOCK|INLINE)_math_\d+@@/g, '')
+      .replace(/\s+/g, ' ')
+      .trim() || 'Section'
+  );
 }
 
 export interface BuildMarkdownChaptersOptions {
@@ -372,8 +341,6 @@ export function buildMarkdownChapters({
   };
 
   const tokens = md.parse(mdInput, {});
-  const chapterLevel = resolveChapterHeadingLevel(tokens);
-  const subheadingMaxLevel = Math.min(4, chapterLevel + 1) as 2 | 3 | 4;
 
   const seenSlugs = new Map<string, number>();
   const chapters: MarkdownChapterChunk[] = [];
@@ -381,7 +348,7 @@ export function buildMarkdownChapters({
   let currentTokens: MdToken[] = [];
   let currentTitle = bookTitle?.trim() || 'Introduction';
   let currentHeadingId = '';
-  let currentSubheadings: MarkdownSubheadingItem[] = [];
+  let currentHasH1 = false;
   let currentAnchorIds: string[] = [];
   let currentWordCount = 0;
   let currentStartBlock = 0;
@@ -405,7 +372,7 @@ export function buildMarkdownChapters({
     currentTokens = [];
     currentTitle = nextTitle;
     currentHeadingId = '';
-    currentSubheadings = [];
+    currentHasH1 = false;
     currentAnchorIds = [];
     currentWordCount = 0;
     currentStartBlock = 0;
@@ -413,16 +380,8 @@ export function buildMarkdownChapters({
     currentFirstBlockId = '';
   };
 
-  const flushCurrentChapter = (allowTitleOnly: boolean) => {
+  const flushCurrentChapter = () => {
     if (currentTokens.length === 0) return;
-
-    // If chapterLevel === 2 and the pre-chapter preamble is ONLY a lone `# Book Title`
-    // with zero body paragraphs/lists/tables before `## Chapter 1`, skip the empty title-only stub
-    // so Chapter 1 opens directly with real chapter prose.
-    if (!allowTitleOnly && !hasSubstantiveBodyTokens(currentTokens)) {
-      resetChapterAccumulator('Overview');
-      return;
-    }
 
     let html = md.renderer.render(currentTokens, md.options, {});
     if (!html.trim()) {
@@ -466,12 +425,13 @@ export function buildMarkdownChapters({
       chapterId,
       headingId,
       title: currentTitle || `Chapter ${chapterIndex + 1}`,
+      hasH1Heading: currentHasH1,
       rawHtml: html,
       firstBlockId: currentFirstBlockId || `blk_${currentStartBlock || 1}`,
       startBlockNum: currentStartBlock,
       endBlockNum: currentEndBlock,
       anchorIds: currentAnchorIds,
-      subheadings: currentSubheadings,
+      subheadings: [],
       wordCount: words,
       estimatedReadMinutes,
     });
@@ -482,14 +442,17 @@ export function buildMarkdownChapters({
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
 
-    // Split into a new Chapter at every top-level heading matching `chapterLevel`
+    // Split into a new chapter strictly at top-level `#` (H1) headings.
+    // Any preamble tokens before the first H1 remain attached to Chapter 1 so no prose is lost
+    // and every TOC entry corresponds strictly to an H1 heading from the file.
     if (
       depth === 0 &&
       tok.type === 'heading_open' &&
-      Number(tok.tag.slice(1)) === chapterLevel &&
+      tok.tag === 'h1' &&
+      currentHasH1 &&
       currentTokens.length > 0
     ) {
-      flushCurrentChapter(chapters.length > 0);
+      flushCurrentChapter();
     }
 
     if (tok.type === 'inline' || tok.type === 'fence' || tok.type === 'code_block') {
@@ -499,12 +462,7 @@ export function buildMarkdownChapters({
     if (depth === 0) {
       if (tok.type === 'heading_open') {
         const inlineTok = tokens[i + 1];
-        const headingText =
-          (inlineTok?.content || '')
-            .replace(/@@ED_MATH_(?:BLOCK|INLINE)_math_\d+@@/g, '')
-            .replace(/\s+/g, ' ')
-            .trim() || 'Section';
-        const levelNum = Number(tok.tag.slice(1));
+        const headingText = extractCleanHeadingText(inlineTok);
         const num = ++blockCounter;
         const blockId = `blk_${num}`;
         tok.attrSet('data-block-id', blockId);
@@ -514,20 +472,12 @@ export function buildMarkdownChapters({
         tok.attrSet('id', slug);
         currentAnchorIds.push(slug);
 
-        if (levelNum === chapterLevel) {
+        // Only top-level `#` (H1) headings populate chapter titles and the TOC menu;
+        // lower headings (h2-h6) remain rendered in prose with anchor IDs but are ignored in TOC.
+        if (tok.tag === 'h1') {
           currentTitle = headingText;
           currentHeadingId = slug;
-        } else if (levelNum < chapterLevel && currentTokens.length === 0) {
-          // Preamble H1 before H2 chapters (e.g. `# Book Title` with intro paragraphs)
-          currentTitle = headingText;
-          currentHeadingId = slug;
-        } else if (levelNum > chapterLevel && levelNum <= subheadingMaxLevel) {
-          currentSubheadings.push({
-            id: slug,
-            text: headingText,
-            level: levelNum as 2 | 3 | 4,
-            blockId,
-          });
+          currentHasH1 = true;
         }
       } else if (
         tok.type === 'paragraph_open' ||
@@ -556,20 +506,22 @@ export function buildMarkdownChapters({
     currentTokens.push(tok);
   }
 
-  // Always allow flushing the final chapter even if a tiny document only has headings
-  flushCurrentChapter(true);
+  flushCurrentChapter();
 
-  const toc: MarkdownTocItem[] = chapters.map((ch) => ({
-    id: ch.headingId,
-    text: ch.title,
-    level: chapterLevel,
-    chapterIndex: ch.chapterIndex,
-    chapterId: ch.chapterId,
-    blockId: ch.firstBlockId,
-    wordCount: ch.wordCount,
-    estimatedReadMinutes: ch.estimatedReadMinutes,
-    subheadings: ch.subheadings,
-  }));
+  // Strictly include ONLY `#` (H1) headings extracted from the Markdown file in the TOC menu.
+  const toc: MarkdownTocItem[] = chapters
+    .filter((ch) => ch.hasH1Heading)
+    .map((ch) => ({
+      id: ch.headingId,
+      text: ch.title,
+      level: 1,
+      chapterIndex: ch.chapterIndex,
+      chapterId: ch.chapterId,
+      blockId: ch.firstBlockId,
+      wordCount: ch.wordCount,
+      estimatedReadMinutes: ch.estimatedReadMinutes,
+      subheadings: [],
+    }));
 
   return {
     chapters,

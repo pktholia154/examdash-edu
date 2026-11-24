@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildMarkdownChapters } from './markdown-chapters';
 
-test('splits multi-H1 books into discrete chapters with nested H2 subheadings', () => {
+test('splits multi-H1 books into discrete chapters and includes ONLY H1 headings in TOC (ignores H2-H6)', () => {
   const md = [
     '# Chapter 1: Number Systems',
     '',
@@ -11,6 +11,14 @@ test('splits multi-H1 books into discrete chapters with nested H2 subheadings', 
     '## Divisibility Rules',
     '',
     'Every even integer is divisible by 2.',
+    '',
+    '### Small Primes',
+    '',
+    '2, 3, 5, 7 are the first four primes.',
+    '',
+    '#### Proof Sketch',
+    '',
+    'By contradiction using fundamental theorem of arithmetic.',
     '',
     '## Prime Factorization',
     '',
@@ -36,19 +44,24 @@ test('splits multi-H1 books into discrete chapters with nested H2 subheadings', 
 
   assert.equal(parsed.chapters.length, 3);
   assert.equal(parsed.toc.length, 3);
+  assert.deepEqual(
+    parsed.toc.map((t) => ({ text: t.text, level: t.level, subCount: t.subheadings.length })),
+    [
+      { text: 'Chapter 1: Number Systems', level: 1, subCount: 0 },
+      { text: 'Chapter 2: Linear Equations', level: 1, subCount: 0 },
+      { text: 'Chapter 3: Probability Theory', level: 1, subCount: 0 },
+    ]
+  );
 
-  assert.equal(parsed.chapters[0].title, 'Chapter 1: Number Systems');
-  assert.equal(parsed.chapters[0].subheadings.length, 2);
-  assert.equal(parsed.chapters[0].subheadings[0].text, 'Divisibility Rules');
-  assert.equal(parsed.chapters[0].subheadings[1].text, 'Prime Factorization');
-
-  // Verify Chapter 1 HTML contains ONLY Chapter 1 prose and not Chapter 2/3 prose
-  assert.ok(parsed.chapters[0].rawHtml.includes('Chapter 1: Number Systems'));
+  // Lower headings are still rendered inside chapter HTML and anchored, but never added to TOC/subheadings
+  assert.equal(parsed.chapters[0].subheadings.length, 0);
+  assert.ok(parsed.chapters[0].rawHtml.includes('Divisibility Rules'));
+  assert.ok(parsed.chapters[0].rawHtml.includes('Small Primes'));
   assert.ok(!parsed.chapters[0].rawHtml.includes('Chapter 2: Linear Equations'));
+  assert.ok(parsed.chapters[0].anchorIds.includes('divisibility-rules'));
 
   assert.equal(parsed.chapters[1].title, 'Chapter 2: Linear Equations');
-  assert.equal(parsed.chapters[1].subheadings.length, 1);
-  assert.equal(parsed.chapters[1].subheadings[0].text, 'Gaussian Elimination');
+  assert.equal(parsed.chapters[1].subheadings.length, 0);
   assert.ok(parsed.chapters[1].rawHtml.includes('Gaussian Elimination'));
   assert.ok(!parsed.chapters[1].rawHtml.includes('Probability Theory'));
 
@@ -60,7 +73,7 @@ test('splits multi-H1 books into discrete chapters with nested H2 subheadings', 
   assert.ok(parsed.chapters[2].startBlockNum > parsed.chapters[1].endBlockNum);
 });
 
-test('splits single-H1 book title + multi-H2 chapters cleanly without empty title stub', () => {
+test('single-H1 sample with multiple H2/H3 headings fetches ONLY the H1 heading in TOC', () => {
   const md = [
     '# Modern Indian History Masterguide',
     '',
@@ -82,38 +95,75 @@ test('splits single-H1 book title + multi-H2 chapters cleanly without empty titl
     bookTitle: 'Modern Indian History Masterguide',
   });
 
-  assert.equal(parsed.chapters.length, 2);
-  assert.equal(parsed.chapters[0].title, 'Advent of Europeans');
-  assert.equal(parsed.chapters[0].subheadings.length, 1);
-  assert.equal(parsed.chapters[0].subheadings[0].text, 'Trade Monopolies');
-  assert.equal(parsed.chapters[1].title, 'Eighteenth Century Polities');
+  assert.equal(parsed.chapters.length, 1);
+  assert.equal(parsed.toc.length, 1);
+  assert.equal(parsed.toc[0].text, 'Modern Indian History Masterguide');
+  assert.equal(parsed.toc[0].level, 1);
+  assert.equal(parsed.toc[0].subheadings.length, 0);
+  assert.ok(parsed.chapters[0].rawHtml.includes('Advent of Europeans'));
+  assert.ok(parsed.chapters[0].rawHtml.includes('Eighteenth Century Polities'));
 });
 
-test('preserves single-H1 preface chapter when substantive intro paragraphs precede H2 chapters', () => {
+test('documents with only lower headings (H2/H3/H4) render prose cleanly with an empty TOC', () => {
   const md = [
-    '# Organic Chemistry Companion',
+    '## Section One: Kinematics',
     '',
-    'This preface outlines how reaction mechanisms and stereochemistry are organized across this book.',
+    'Motion in one dimension is governed by constant acceleration equations.',
     '',
-    '## Chapter 1: Structure and Bonding',
+    '### Instantaneous Velocity',
     '',
-    'Hybridization explains tetrahedral, trigonal planar, and linear molecular geometries.',
+    'Velocity is the time derivative of displacement.',
     '',
-    '## Chapter 2: Nucleophilic Substitution',
+    '## Section Two: Dynamics',
     '',
-    'SN1 and SN2 pathways differ in carbocation intermediate formation and stereochemical inversion.',
+    'Force equals mass times acceleration.',
   ].join('\n');
 
   const parsed = buildMarkdownChapters({
     rawMarkdown: md,
-    bookTitle: 'Organic Chemistry Companion',
+    bookTitle: 'Physics Notes',
   });
 
-  assert.equal(parsed.chapters.length, 3);
-  assert.equal(parsed.chapters[0].title, 'Organic Chemistry Companion');
-  assert.ok(parsed.chapters[0].rawHtml.includes('This preface outlines'));
-  assert.equal(parsed.chapters[1].title, 'Chapter 1: Structure and Bonding');
-  assert.equal(parsed.chapters[2].title, 'Chapter 2: Nucleophilic Substitution');
+  assert.equal(parsed.chapters.length, 1);
+  assert.equal(parsed.chapters[0].hasH1Heading, false);
+  assert.equal(parsed.toc.length, 0);
+  assert.ok(parsed.chapters[0].rawHtml.includes('Section One: Kinematics'));
+  assert.ok(parsed.chapters[0].rawHtml.includes('Section Two: Dynamics'));
+});
+
+test('keeps preamble text with Chapter 1 and ignores H1 syntax inside code fences or blockquotes', () => {
+  const md = [
+    'Preface note before the first chapter.',
+    '',
+    '# **Chapter 1**: Foundations',
+    '',
+    '> # Quoted heading is not a top-level H1',
+    '',
+    '```bash',
+    '# Shell comment is not a heading',
+    'echo "hello"',
+    '```',
+    '',
+    '## Lower Heading Ignored',
+    '',
+    '# Chapter 2: Practice',
+    '',
+    'Second chapter prose.',
+  ].join('\n');
+
+  const parsed = buildMarkdownChapters({
+    rawMarkdown: md,
+    bookTitle: 'Study Guide',
+  });
+
+  assert.equal(parsed.chapters.length, 2);
+  assert.equal(parsed.toc.length, 2);
+  assert.deepEqual(
+    parsed.toc.map((t) => t.text),
+    ['Chapter 1: Foundations', 'Chapter 2: Practice']
+  );
+  assert.ok(parsed.chapters[0].rawHtml.includes('Preface note before the first chapter.'));
+  assert.ok(parsed.chapters[1].rawHtml.includes('Second chapter prose.'));
 });
 
 test('preserves KaTeX placeholders, GFM callouts, tables, and cross-chapter anchorIds', () => {
@@ -146,6 +196,7 @@ test('preserves KaTeX placeholders, GFM callouts, tables, and cross-chapter anch
 
   assert.equal(parsed.hasMath, true);
   assert.equal(parsed.chapters.length, 2);
+  assert.equal(parsed.toc.length, 2);
   assert.ok(Object.keys(parsed.mathMap).length >= 3);
 
   assert.ok(parsed.chapters[0].rawHtml.includes('data-katex-id="math_'));
@@ -154,4 +205,5 @@ test('preserves KaTeX placeholders, GFM callouts, tables, and cross-chapter anch
 
   assert.ok(parsed.chapters[1].rawHtml.includes('class="md-scroll-x"'));
   assert.ok(parsed.chapters[1].anchorIds.includes('dielectric-slab-insertion'));
+  assert.equal(parsed.toc[1].subheadings.length, 0);
 });

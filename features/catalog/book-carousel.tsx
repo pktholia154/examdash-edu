@@ -13,10 +13,10 @@ import {
 import { CatalogThumbnail } from '../../components/ui/catalog-thumbnail';
 import type { CatalogCardDTO } from '../../lib/types/catalog';
 import {
-  computeDiscountPercent,
   formatPrice,
   makeCompositeKey,
 } from '../../lib/registry/content-type-registry';
+import { getDefaultCatalogPricing } from '../../lib/validity/pricing';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
 import { useWishlist } from '../wishlist/wishlist-provider';
@@ -47,8 +47,9 @@ function CarouselBookCard({ item, priority = false }: CarouselBookCardProps) {
   const isOwned = ownedCompositeKeys.has(compositeKey);
   const inCart = isInCart(compositeKey);
   const wishlisted = isWishlisted(compositeKey);
-  const isFree = item.buyPrice === 0;
-  const discountPct = computeDiscountPercent(item.listPrice, item.buyPrice);
+  const pricing = getDefaultCatalogPricing(item.collectionName, item.buyPrice);
+  const isFree = pricing.isFree;
+  const discountPct = pricing.discountPct;
 
   const hasRealRating =
     typeof item.reviewCount === 'number' &&
@@ -90,7 +91,12 @@ function CarouselBookCard({ item, priority = false }: CarouselBookCardProps) {
         <a
           href={detailHref}
           aria-label={`View ${item.title}`}
-          className="block w-full h-full rounded-[var(--radius-thumb)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-primary)]"
+          className={cn(
+            'block w-full h-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand-primary)]',
+            item.collectionName === 'books'
+              ? 'rounded-none'
+              : 'rounded-[var(--radius-thumb)]'
+          )}
         >
           <CatalogThumbnail
             title={item.title}
@@ -181,14 +187,14 @@ function CarouselBookCard({ item, priority = false }: CarouselBookCardProps) {
 
       {/* Compact Editorial Metadata Stack (Zero-Pill Discipline) */}
       <div className="mt-2 flex flex-col gap-0.5 min-w-0">
-        {/* Price + MRP + Discount */}
+        {/* Price + Higher Validity Reference + Discount (no validity label shown) */}
         <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0 tabular-nums leading-tight">
           <span className="text-[13px] sm:text-sm font-extrabold text-[var(--text-main)]">
-            {isFree ? 'Free' : formatPrice(item.buyPrice, item.currency)}
+            {isFree ? 'Free' : formatPrice(pricing.discountedPrice, item.currency)}
           </span>
           {discountPct > 0 && (
             <span className="text-[10.5px] sm:text-xs text-[var(--text-muted)] line-through">
-              {formatPrice(item.listPrice, item.currency)}
+              {formatPrice(pricing.fullPrice, item.currency)}
             </span>
           )}
           {discountPct > 0 && (

@@ -158,4 +158,12 @@ test('computeItemsDigest is order-independent and price-sensitive', () => {
 
   assert.equal(d1, d2);
   assert.notEqual(d1, d3);
+
+  const vShort = computeItemsDigest([
+    { collectionName: 'ExamPackDocument', id: 'e1', buyPrice: 250, currency: 'INR', validityMonths: 1 },
+  ]);
+  const vLong = computeItemsDigest([
+    { collectionName: 'ExamPackDocument', id: 'e1', buyPrice: 250, currency: 'INR', validityMonths: 6 },
+  ]);
+  assert.notEqual(vShort, vLong);
 });

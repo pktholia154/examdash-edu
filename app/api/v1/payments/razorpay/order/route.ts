@@ -12,6 +12,10 @@ import {
   RazorpayConfigError,
   signOrderContextToken,
 } from '../../../../../../server/payments/razorpay';
+import {
+  isValidValidityMonthsForCollection,
+  resolveValiditySelection,
+} from '../../../../../../lib/validity/pricing';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store' };
 const ITEM_ID_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -20,6 +24,7 @@ interface CreateOrderBody {
   items?: Array<{
     collectionName?: string;
     id?: string;
+    validityMonths?: number;
   }>;
 }
 
@@ -68,6 +73,7 @@ export async function POST(req: NextRequest) {
   }
 
   const refs: CatalogItemRef[] = [];
+  const requestedValidityByKey = new Map<string, number>();
   for (const rawItem of body.items) {
     const col =
       rawItem?.collectionName === 'books'
@@ -81,6 +87,18 @@ export async function POST(req: NextRequest) {
         { error: 'One or more catalog item references are invalid.' },
         { status: 400, headers: NO_STORE_HEADERS }
       );
+    }
+    if (
+      rawItem?.validityMonths !== undefined &&
+      !isValidValidityMonthsForCollection(col, rawItem.validityMonths)
+    ) {
+      return NextResponse.json(
+        { error: 'One or more selected validity periods are invalid.' },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
+    if (typeof rawItem?.validityMonths === 'number') {
+      requestedValidityByKey.set(`${col}:${id}`, rawItem.validityMonths);
     }
     refs.push({ collectionName: col, id });
   }
@@ -131,8 +149,19 @@ export async function POST(req: NextRequest) {
     }
 
     const currency = Array.from(currencies)[0] || 'INR';
-    const totalBuyPrice = unownedItems.reduce(
-      (sum, item) => sum + Math.max(0, item.buyPrice),
+    const pricedItems = unownedItems.map((item) => {
+      const compositeKey = `${item.collectionName}:${item.id}`;
+      const requestedMonths = requestedValidityByKey.get(compositeKey);
+      const resolved = resolveValiditySelection(
+        item.collectionName,
+        item.buyPrice,
+        requestedMonths
+      );
+      return { item, resolved };
+    });
+
+    const totalBuyPrice = pricedItems.reduce(
+      (sum, entry) => sum + Math.max(0, entry.resolved.payablePrice),
       0
     );
     const amountSubunits = Math.round(totalBuyPrice * 100);
@@ -155,11 +184,12 @@ export async function POST(req: NextRequest) {
     }
 
     const itemsDigest = computeItemsDigest(
-      unownedItems.map((item) => ({
+      pricedItems.map(({ item, resolved }) => ({
         collectionName: item.collectionName,
         id: item.id,
-        buyPrice: item.buyPrice,
+        buyPrice: resolved.payablePrice,
         currency,
+        validityMonths: resolved.validityMonths,
       }))
     );
 
@@ -168,7 +198,10 @@ export async function POST(req: NextRequest) {
       currency,
       userId: decoded.uid,
       itemsDigest,
-      itemKeys: unownedItems.map((i) => `${i.collectionName}:${i.id}`),
+      itemKeys: pricedItems.map(
+        ({ item, resolved }) =>
+          `${item.collectionName}:${item.id}:${resolved.validityMonths}m`
+      ),
     });
 
     const orderToken = signOrderContextToken({
@@ -176,17 +209,18 @@ export async function POST(req: NextRequest) {
       userId: decoded.uid,
       currency: order.currency,
       amountSubunits: order.amount,
-      items: unownedItems.map((i) => ({
-        collectionName: i.collectionName,
-        id: i.id,
+      items: pricedItems.map(({ item, resolved }) => ({
+        collectionName: item.collectionName,
+        id: item.id,
+        validityMonths: resolved.validityMonths,
       })),
       expMs: Date.now() + 30 * 60 * 1000, // 30 minutes
     });
 
     const description =
-      unownedItems.length === 1
-        ? unownedItems[0].title.slice(0, 140)
-        : `${unownedItems.length} ExamDash Study Resources`;
+      pricedItems.length === 1
+        ? `${pricedItems[0].item.title} (${pricedItems[0].resolved.label})`.slice(0, 140)
+        : `${pricedItems.length} ExamDash Study Resources`;
 
     return NextResponse.json(
       {

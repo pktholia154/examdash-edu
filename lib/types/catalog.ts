@@ -217,6 +217,9 @@ export interface CartItem {
   currency: string;
   listPrice: number;
   buyPrice: number;
+  baseBuyPrice?: number;
+  validityMonths?: number;
+  validityLabel?: string;
   imageUrl?: string;
   imageAlt?: string;
 }
@@ -234,6 +237,9 @@ export interface UserPurchaseRecord {
   currency: string;
   listPrice: number;
   paidPrice: number;
+  validityMonths?: number;
+  validityLabel?: string;
+  expiresAtIso?: string;
   totalMocktest?: number;
   paymentProvider?: 'razorpay' | 'free' | 'apple_iap' | 'google_play';
   razorpayOrderId?: string;

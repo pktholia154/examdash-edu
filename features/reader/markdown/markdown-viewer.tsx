@@ -203,7 +203,6 @@ export function MarkdownViewer({
   const [toc, setToc] = useState<MarkdownTocItem[]>([]);
   const [mathMap, setMathMap] = useState<Record<string, string>>({});
   const [activeChapterIndex, setActiveChapterIndex] = useState<number>(0);
-  const [activeSubheadingId, setActiveSubheadingId] = useState<string>('');
   const [chapterScrollRatio, setChapterScrollRatio] = useState<number>(0);
 
   const [tocOpen, setTocOpen] = useState(false);
@@ -488,10 +487,8 @@ export function MarkdownViewer({
 
       if (nextIdx === activeChapterIndexRef.current) {
         if (anchorId && anchorId !== targetChapter?.headingId) {
-          setActiveSubheadingId(anchorId);
           scrollToHeadingInCurrentChapter(anchorId, 'smooth');
         } else {
-          setActiveSubheadingId('');
           setChapterScrollRatio(0);
           scrollerRef.current?.scrollTo({ top: 0, behavior: 'instant' });
         }
@@ -502,7 +499,6 @@ export function MarkdownViewer({
       skipNextChapterResetScrollRef.current = false;
       pendingAnchorRef.current =
         anchorId && anchorId !== targetChapter?.headingId ? anchorId : null;
-      setActiveSubheadingId(pendingAnchorRef.current || '');
       setChapterScrollRatio(0);
       activeChapterIndexRef.current = nextIdx;
       setActiveChapterIndex(nextIdx);
@@ -922,9 +918,8 @@ export function MarkdownViewer({
 
           setMathMap(data.mathMap);
           setChapters(data.chapters);
-          setToc(data.toc);
+          setToc(data.toc.filter((item) => item.level === 1));
           setActiveChapterIndex(initialIdx);
-          setActiveSubheadingId('');
           setChapterScrollRatio(0);
           setLoadingState('ready');
         };
@@ -1020,39 +1015,18 @@ export function MarkdownViewer({
     });
   }, [chapters.length, loadingState, savedInitial]);
 
-  // Scroll listener -> Subheading tracking within active chapter + Scroll progress + Persistence
+  // Scroll listener -> Scroll progress + Persistence
   const handleScroll = useCallback(() => {
     const scroller = scrollerRef.current;
-    const prose = proseRef.current;
-    if (!scroller || !prose) return;
+    if (!scroller) return;
 
     const maxScroll = scroller.scrollHeight - scroller.clientHeight;
     const ratio =
       maxScroll > 4 ? Math.min(1, Math.max(0, scroller.scrollTop / maxScroll)) : 1;
     setChapterScrollRatio(ratio);
 
-    const subs = activeChapter?.subheadings;
-    if (subs && subs.length > 0) {
-      const scrollerTop = scroller.getBoundingClientRect().top;
-      let currentSub = '';
-      for (let i = 0; i < subs.length; i++) {
-        const el = prose.querySelector<HTMLElement>(
-          `#${CSS.escape(subs[i].id)}`
-        );
-        if (el) {
-          const topRel = el.getBoundingClientRect().top - scrollerTop;
-          if (topRel <= 108) {
-            currentSub = subs[i].id;
-          } else {
-            break;
-          }
-        }
-      }
-      setActiveSubheadingId(currentSub);
-    }
-
     scheduleProgressSave();
-  }, [activeChapter, scheduleProgressSave]);
+  }, [scheduleProgressSave]);
 
   // Delegated Click / Cross-Chapter Anchor / Image Lightbox Interceptor
   const handleProseClick = useCallback(
@@ -1113,39 +1087,16 @@ export function MarkdownViewer({
   );
 
   const normalizedTocQuery = tocQuery.trim().toLowerCase();
-  const showTocSearch = useMemo(() => {
-    if (toc.length >= 5) return true;
-    const totalSubs = toc.reduce((acc, item) => acc + item.subheadings.length, 0);
-    return totalSubs >= 6;
-  }, [toc]);
+  const showTocSearch = toc.length >= 5;
 
   const filteredToc = useMemo(() => {
     if (!normalizedTocQuery) {
-      return toc.map((entry) => ({
-        entry,
-        matchingSubs: entry.subheadings,
-      }));
+      return toc;
     }
 
-    const results: Array<{
-      entry: MarkdownTocItem;
-      matchingSubs: MarkdownTocItem['subheadings'];
-    }> = [];
-
-    for (const entry of toc) {
-      const titleMatches = entry.text.toLowerCase().includes(normalizedTocQuery);
-      const subMatches = entry.subheadings.filter((sub) =>
-        sub.text.toLowerCase().includes(normalizedTocQuery)
-      );
-      if (titleMatches || subMatches.length > 0) {
-        results.push({
-          entry,
-          matchingSubs: titleMatches && subMatches.length === 0 ? entry.subheadings : subMatches,
-        });
-      }
-    }
-
-    return results;
+    return toc.filter((entry) =>
+      entry.text.toLowerCase().includes(normalizedTocQuery)
+    );
   }, [normalizedTocQuery, toc]);
 
   const displayedScalePct = Math.round((livePinchScale ?? mdScale) * 100);
@@ -1410,8 +1361,8 @@ export function MarkdownViewer({
                       type="search"
                       value={tocQuery}
                       onChange={(e) => setTocQuery(e.target.value)}
-                      placeholder="Filter chapters or topics..."
-                      aria-label="Filter chapters or topics"
+                      placeholder="Filter chapters..."
+                      aria-label="Filter chapters"
                       className="w-full h-10 ps-9 pe-9 rounded-md border border-[var(--reader-border)] bg-[var(--reader-surface)] text-base sm:text-sm text-[var(--reader-ink)] placeholder:text-[var(--reader-muted)] focus:outline-none focus:border-[var(--reader-border-strong)]"
                     />
                     {tocQuery && (
@@ -1444,18 +1395,15 @@ export function MarkdownViewer({
                     No chapters match &ldquo;{tocQuery.trim()}&rdquo;.
                   </p>
                 ) : (
-                  filteredToc.map(({ entry, matchingSubs }) => {
+                  filteredToc.map((entry) => {
                     const isActive = entry.chapterIndex === safeChapterIndex;
-                    const showSubs =
-                      matchingSubs.length > 0 &&
-                      (isActive || Boolean(normalizedTocQuery));
                     const chapterNumLabel = String(entry.chapterIndex + 1).padStart(
                       2,
                       '0'
                     );
 
                     return (
-                      <div key={entry.chapterId} className="space-y-0.5">
+                      <div key={entry.chapterId}>
                         <button
                           type="button"
                           data-toc-active={isActive ? 'true' : undefined}
@@ -1482,36 +1430,6 @@ export function MarkdownViewer({
                             {entry.estimatedReadMinutes}m
                           </span>
                         </button>
-
-                        {showSubs && (
-                          <div className="ps-6 pe-1 py-0.5 space-y-0.5">
-                            {matchingSubs.map((sub) => {
-                              const isSubActive =
-                                isActive && activeSubheadingId === sub.id;
-                              return (
-                                <button
-                                  key={sub.id}
-                                  type="button"
-                                  onClick={() =>
-                                    selectChapter(entry.chapterIndex, {
-                                      anchorId: sub.id,
-                                      closeToc: true,
-                                    })
-                                  }
-                                  className={cn(
-                                    'w-full text-start min-h-[38px] px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center',
-                                    sub.level >= 4 && 'ps-5',
-                                    isSubActive
-                                      ? 'bg-[var(--reader-surface)] font-semibold text-[var(--reader-ink)]'
-                                      : 'text-[var(--reader-muted)] hover:bg-[var(--reader-surface)] hover:text-[var(--reader-ink)]'
-                                  )}
-                                >
-                                  <span className="line-clamp-1">{sub.text}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
                       </div>
                     );
                   })

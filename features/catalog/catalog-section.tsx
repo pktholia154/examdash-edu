@@ -11,6 +11,7 @@ import type {
 import { EmptyState } from '../../components/ui/state-blocks';
 import { CatalogCard } from './catalog-card';
 import { apiUrl } from '../../lib/platform/api-base';
+import { getDefaultCatalogPricing } from '../../lib/validity/pricing';
 import { cn } from '../../lib/utils';
 
 export interface CatalogSectionProps {
@@ -100,8 +101,18 @@ export function CatalogSection({
     });
 
     filtered.sort((a, b) => {
-      if (sortBy === 'price_asc') return a.buyPrice - b.buyPrice;
-      if (sortBy === 'price_desc') return b.buyPrice - a.buyPrice;
+      if (sortBy === 'price_asc') {
+        return (
+          getDefaultCatalogPricing(a.collectionName, a.buyPrice).discountedPrice -
+          getDefaultCatalogPricing(b.collectionName, b.buyPrice).discountedPrice
+        );
+      }
+      if (sortBy === 'price_desc') {
+        return (
+          getDefaultCatalogPricing(b.collectionName, b.buyPrice).discountedPrice -
+          getDefaultCatalogPricing(a.collectionName, a.buyPrice).discountedPrice
+        );
+      }
       if (sortBy === 'publishAt_asc') {
         return (
           new Date(a.publishAtIso).getTime() - new Date(b.publishAtIso).getTime()

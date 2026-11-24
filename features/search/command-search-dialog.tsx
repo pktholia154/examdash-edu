@@ -12,6 +12,7 @@ import { ArrowUpRight, Search, X } from 'lucide-react';
 import { CatalogThumbnail } from '../../components/ui/catalog-thumbnail';
 import { apiUrl } from '../../lib/platform/api-base';
 import { formatPrice } from '../../lib/registry/content-type-registry';
+import { getDefaultCatalogPricing } from '../../lib/validity/pricing';
 import type { CatalogCardDTO } from '../../lib/types/catalog';
 import { cn } from '../../lib/utils';
 
@@ -81,19 +82,22 @@ export function CommandSearchDialog({
     }> = [];
 
     for (const b of books) {
+      const pricing = getDefaultCatalogPricing('books', b.buyPrice);
       entries.push({
         key: `books:${b.id}`,
         href: `/books/${b.urlSlug}`,
         title: b.title,
         subtitle: `${b.authorName} · ${b.language}`,
-        priceLabel:
-          b.buyPrice === 0 ? 'Free' : formatPrice(b.buyPrice, b.currency),
+        priceLabel: pricing.isFree
+          ? 'Free'
+          : formatPrice(pricing.discountedPrice, b.currency),
         type: b.type,
         collectionName: 'books',
       });
     }
 
     for (const ex of exams) {
+      const pricing = getDefaultCatalogPricing('ExamPackDocument', ex.buyPrice);
       entries.push({
         key: `ExamPackDocument:${ex.id}`,
         href: `/exams/${ex.urlSlug}`,
@@ -101,8 +105,9 @@ export function CommandSearchDialog({
         subtitle: `${ex.authorName} · ${ex.totalMocktest} Mock ${
           ex.totalMocktest === 1 ? 'Test' : 'Tests'
         }`,
-        priceLabel:
-          ex.buyPrice === 0 ? 'Free' : formatPrice(ex.buyPrice, ex.currency),
+        priceLabel: pricing.isFree
+          ? 'Free'
+          : formatPrice(pricing.discountedPrice, ex.currency),
         type: ex.type,
         collectionName: 'ExamPackDocument',
       });
@@ -248,11 +253,31 @@ export function CommandSearchDialog({
                               {b.authorName} · {b.language} · {b.type}
                             </p>
                           </div>
-                          <span className="text-sm font-bold text-[var(--text-main)] tabular-nums shrink-0">
-                            {b.buyPrice === 0
-                              ? 'Free'
-                              : formatPrice(b.buyPrice, b.currency)}
-                          </span>
+                          <div className="flex items-baseline gap-1.5 tabular-nums shrink-0">
+                            {(() => {
+                              const pricing = getDefaultCatalogPricing(
+                                'books',
+                                b.buyPrice
+                              );
+                              return (
+                                <>
+                                  <span className="text-sm font-bold text-[var(--text-main)]">
+                                    {pricing.isFree
+                                      ? 'Free'
+                                      : formatPrice(
+                                          pricing.discountedPrice,
+                                          b.currency
+                                        )}
+                                  </span>
+                                  {pricing.discountPct > 0 && (
+                                    <span className="text-[11px] font-semibold text-[var(--status-success)]">
+                                      {pricing.discountPct}% OFF
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
                           <ArrowUpRight
                             className="w-4 h-4 text-[var(--text-muted)] shrink-0"
                             aria-hidden="true"
@@ -303,11 +328,31 @@ export function CommandSearchDialog({
                               {ex.totalMocktest === 1 ? 'Test' : 'Tests'} · {ex.language}
                             </p>
                           </div>
-                          <span className="text-sm font-bold text-[var(--text-main)] tabular-nums shrink-0">
-                            {ex.buyPrice === 0
-                              ? 'Free'
-                              : formatPrice(ex.buyPrice, ex.currency)}
-                          </span>
+                          <div className="flex items-baseline gap-1.5 tabular-nums shrink-0">
+                            {(() => {
+                              const pricing = getDefaultCatalogPricing(
+                                'ExamPackDocument',
+                                ex.buyPrice
+                              );
+                              return (
+                                <>
+                                  <span className="text-sm font-bold text-[var(--text-main)]">
+                                    {pricing.isFree
+                                      ? 'Free'
+                                      : formatPrice(
+                                          pricing.discountedPrice,
+                                          ex.currency
+                                        )}
+                                  </span>
+                                  {pricing.discountPct > 0 && (
+                                    <span className="text-[11px] font-semibold text-[var(--status-success)]">
+                                      {pricing.discountPct}% OFF
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
                           <ArrowUpRight
                             className="w-4 h-4 text-[var(--text-muted)] shrink-0"
                             aria-hidden="true"

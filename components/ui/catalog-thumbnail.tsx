@@ -75,7 +75,10 @@ export function CatalogThumbnail({
   return (
     <div
       className={cn(
-        'relative shrink-0 overflow-hidden aspect-[3/4] rounded-[var(--radius-thumb)] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] select-none',
+        'relative shrink-0 overflow-hidden aspect-[3/4] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] select-none',
+        collectionName === 'books'
+          ? 'rounded-none'
+          : 'rounded-[var(--radius-thumb)]',
         SIZE_CLASSES[size],
         className
       )}

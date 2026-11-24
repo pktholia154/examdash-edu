@@ -180,18 +180,21 @@ export interface OrderItemDigestInput {
   id: string;
   buyPrice: number;
   currency: string;
+  validityMonths?: number;
 }
 
 /**
- * Deterministic SHA-256 digest anchoring the exact catalog items and authoritative prices
- * stored in Razorpay order notes to prevent post-order item swapping.
+ * Deterministic SHA-256 digest anchoring the exact catalog items, selected validity periods,
+ * and authoritative prices stored in Razorpay order notes to prevent post-order tampering.
  */
 export function computeItemsDigest(items: OrderItemDigestInput[]): string {
   const canonical = items
-    .map(
-      (i) =>
-        `${i.collectionName}:${i.id}:${Math.round(i.buyPrice * 100)}:${i.currency.toUpperCase()}`
-    )
+    .map((i) => {
+      const base = `${i.collectionName}:${i.id}:${Math.round(i.buyPrice * 100)}:${i.currency.toUpperCase()}`;
+      return typeof i.validityMonths === 'number'
+        ? `${base}:v${i.validityMonths}`
+        : base;
+    })
     .sort()
     .join('|');
 
@@ -314,6 +317,7 @@ export interface SignedOrderContextPayload {
   items: Array<{
     collectionName: CollectionName;
     id: string;
+    validityMonths?: number;
   }>;
   expMs: number;
 }

@@ -9,6 +9,7 @@ import { BookChaptersList } from '../../../features/catalog/book-chapters-list';
 import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
 import { ItemReviewsSection } from '../../../features/reviews/item-reviews-section';
 import { formatPrice } from '../../../lib/registry/content-type-registry';
+import { getDefaultCatalogPricing } from '../../../lib/validity/pricing';
 import {
   buildBookDetailJsonLd,
   buildCanonicalAlternates,
@@ -315,59 +316,74 @@ export default async function BookDetailPage({
               Related Books & Companion Exam Packs
             </h2>
             <div className="flex flex-col gap-2.5">
-              {siblingBooks.map((rel) => (
-                <a
-                  key={`rel-book-${rel.id}`}
-                  href={`/books/${rel.urlSlug}`}
-                  className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
-                >
-                  <CatalogThumbnail
-                    title={rel.title}
-                    collectionName="books"
-                    imageUrl={rel.imageUrl}
-                    imageMeta={rel.imageMeta}
-                    size="xs"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-[var(--text-main)] truncate">
-                      {rel.title}
-                    </p>
-                    <p className="text-xs text-[var(--text-muted)] tabular-nums">
-                      {rel.type} ·{' '}
-                      {rel.buyPrice === 0
-                        ? 'Free'
-                        : formatPrice(rel.buyPrice, rel.currency)}
-                    </p>
-                  </div>
-                </a>
-              ))}
+              {siblingBooks.map((rel) => {
+                const relPricing = getDefaultCatalogPricing('books', rel.buyPrice);
+                return (
+                  <a
+                    key={`rel-book-${rel.id}`}
+                    href={`/books/${rel.urlSlug}`}
+                    className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
+                  >
+                    <CatalogThumbnail
+                      title={rel.title}
+                      collectionName="books"
+                      imageUrl={rel.imageUrl}
+                      imageMeta={rel.imageMeta}
+                      size="xs"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[var(--text-main)] truncate">
+                        {rel.title}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] tabular-nums">
+                        {rel.type} ·{' '}
+                        {relPricing.isFree
+                          ? 'Free'
+                          : formatPrice(relPricing.discountedPrice, rel.currency)}
+                        {relPricing.discountPct > 0
+                          ? ` (${relPricing.discountPct}% OFF)`
+                          : ''}
+                      </p>
+                    </div>
+                  </a>
+                );
+              })}
 
-              {relatedExams.map((relEx) => (
-                <a
-                  key={`rel-exam-${relEx.id}`}
-                  href={`/exams/${relEx.urlSlug}`}
-                  className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
-                >
-                  <CatalogThumbnail
-                    title={relEx.title}
-                    collectionName="ExamPackDocument"
-                    imageUrl={relEx.imageUrl}
-                    imageMeta={relEx.imageMeta}
-                    size="xs"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-[var(--text-main)] truncate">
-                      {relEx.title}
-                    </p>
-                    <p className="text-xs text-[var(--text-muted)] tabular-nums">
-                      {relEx.totalMocktest} Mock Tests ·{' '}
-                      {relEx.buyPrice === 0
-                        ? 'Free'
-                        : formatPrice(relEx.buyPrice, relEx.currency)}
-                    </p>
-                  </div>
-                </a>
-              ))}
+              {relatedExams.map((relEx) => {
+                const relPricing = getDefaultCatalogPricing(
+                  'ExamPackDocument',
+                  relEx.buyPrice
+                );
+                return (
+                  <a
+                    key={`rel-exam-${relEx.id}`}
+                    href={`/exams/${relEx.urlSlug}`}
+                    className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
+                  >
+                    <CatalogThumbnail
+                      title={relEx.title}
+                      collectionName="ExamPackDocument"
+                      imageUrl={relEx.imageUrl}
+                      imageMeta={relEx.imageMeta}
+                      size="xs"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[var(--text-main)] truncate">
+                        {relEx.title}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] tabular-nums">
+                        {relEx.totalMocktest} Mock Tests ·{' '}
+                        {relPricing.isFree
+                          ? 'Free'
+                          : formatPrice(relPricing.discountedPrice, relEx.currency)}
+                        {relPricing.discountPct > 0
+                          ? ` (${relPricing.discountPct}% OFF)`
+                          : ''}
+                      </p>
+                    </div>
+                  </a>
+                );
+              })}
             </div>
           </section>
         )}

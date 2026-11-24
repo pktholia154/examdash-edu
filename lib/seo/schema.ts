@@ -1,4 +1,5 @@
 import { BUSINESS_INFO } from '../legal/business-info';
+import { getDefaultCatalogPricing } from '../validity/pricing';
 import type {
   ImageMetaDTO,
   ItemReviewSummaryDTO,
@@ -394,7 +395,7 @@ export function buildBookDetailJsonLd(
         offers: buildDigitalProductOffer({
           origin,
           pageUrl,
-          buyPrice: book.buyPrice,
+          buyPrice: getDefaultCatalogPricing('books', book.buyPrice).discountedPrice,
           currency: book.currency,
         }),
         ...buildVerifiedReviewSchemaProps(reviewSummary, pageUrl),
@@ -450,7 +451,7 @@ export function buildExamDetailJsonLd(
         offers: buildDigitalProductOffer({
           origin,
           pageUrl,
-          buyPrice: exam.buyPrice,
+          buyPrice: getDefaultCatalogPricing('ExamPackDocument', exam.buyPrice).discountedPrice,
           currency: exam.currency,
         }),
         ...buildVerifiedReviewSchemaProps(reviewSummary, pageUrl),

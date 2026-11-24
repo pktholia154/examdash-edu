@@ -7,10 +7,16 @@ import type {
 } from '../../lib/types/catalog';
 import { makeFirestoreSafeCartKey } from '../../lib/registry/content-type-registry';
 import {
+  computePurchaseExpiryIso,
+  filterActivePurchases,
+  resolvePurchaseExpiryMeta,
+  resolveValiditySelection,
+} from '../../lib/validity/pricing';
+import {
   ensureDefaultDbUserDocument,
   syncSinglePurchaseToDefaultDb,
 } from '../firebase/default-db-mirror';
-import { verifyCallerPurchaseRecord } from '../repositories/catalog-repository';
+import { getCallerPurchaseState } from '../repositories/catalog-repository';
 
 function sanitizeBoundedString(
   val: string | null | undefined,
@@ -171,15 +177,16 @@ export interface CommitPurchasesInput {
   userPhotoUrl?: string | null;
   bearerIdToken: string;
   items: CatalogItemDTO[];
+  validityMonthsByItem?: Record<string, number>;
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
 }
 
 /**
  * Atomically persists verified book & exam pack entitlements into
- * `/users/{userId}/purchases/{purchaseId}` and cleans up `/users/{userId}/cart/{cartKey}`
+ * `/users/{userId}/purchases/{purchaseId}` with server-computed validity and expiry,
+ * renews previously expired records when repurchased, and cleans up `/users/{userId}/cart/{cartKey}`
  * via Firestore REST `documents:commit` using the caller's verified Firebase Bearer ID token.
- * Enforced by `firestore.rules` (REQUEST_TIME timestamps, Razorpay proof, immutable entitlements).
  */
 export async function commitVerifiedPurchasesToFirestore(
   input: CommitPurchasesInput
@@ -187,11 +194,11 @@ export async function commitVerifiedPurchasesToFirestore(
   const { docPrefix, restBase } = getFirestoreDbResourceRoot();
   const uid = input.userId;
 
-  const [parentExists, ownershipFlags] = await Promise.all([
+  const [parentExists, purchaseStates] = await Promise.all([
     checkParentUserExists(uid, input.bearerIdToken),
     Promise.all(
       input.items.map((item) =>
-        verifyCallerPurchaseRecord(
+        getCallerPurchaseState(
           uid,
           item.collectionName,
           item.id,
@@ -246,8 +253,20 @@ export async function commitVerifiedPurchasesToFirestore(
         .replace(/[^a-z0-9-]/g, '-')
         .slice(0, 200) || 'item';
 
-    const paidPrice = Math.max(0, Number(item.buyPrice) || 0);
-    const listPrice = Math.max(paidPrice, Number(item.listPrice) || paidPrice);
+    const compositeKey = `${item.collectionName}:${item.id}`;
+    const requestedValidityMonths = input.validityMonthsByItem?.[compositeKey];
+    const resolvedValidity = resolveValiditySelection(
+      item.collectionName,
+      item.buyPrice,
+      requestedValidityMonths
+    );
+
+    const paidPrice = Math.max(0, resolvedValidity.payablePrice);
+    const listPrice = Math.max(paidPrice, resolvedValidity.fullPrice);
+    const validityMonths = resolvedValidity.validityMonths;
+    const validityLabel = resolvedValidity.label;
+    const expiresAtIso = computePurchaseExpiryIso(nowIso, validityMonths);
+
     const currency = /^[A-Z]{3}$/.test((item.currency || '').toUpperCase())
       ? item.currency.toUpperCase()
       : 'INR';
@@ -272,6 +291,9 @@ export async function commitVerifiedPurchasesToFirestore(
       currency,
       listPrice,
       paidPrice,
+      validityMonths,
+      validityLabel,
+      expiresAtIso,
       ...(item.collectionName === 'ExamPackDocument' &&
       typeof item.totalMocktest === 'number' &&
       item.totalMocktest >= 0
@@ -290,8 +312,9 @@ export async function commitVerifiedPurchasesToFirestore(
 
     committedRecords.push(record);
 
-    // Idempotency: skip Firestore create if the immutable purchase doc already exists
-    if (!ownershipFlags[index]) {
+    const purchaseState = purchaseStates[index];
+    // Idempotency: skip write if an active entitlement already exists; create if missing; update if expired
+    if (purchaseState !== 'active') {
       const fields: Record<string, unknown> = {
         purchaseId: { stringValue: purchaseId },
         userId: { stringValue: uid },
@@ -305,6 +328,9 @@ export async function commitVerifiedPurchasesToFirestore(
         currency: { stringValue: currency },
         listPrice: { doubleValue: listPrice },
         paidPrice: { doubleValue: paidPrice },
+        validityMonths: { integerValue: String(validityMonths) },
+        validityLabel: { stringValue: validityLabel },
+        expiresAt: { timestampValue: expiresAtIso },
         paymentProvider: { stringValue: paymentProvider },
         status: { stringValue: 'completed' },
       };
@@ -329,7 +355,7 @@ export async function commitVerifiedPurchasesToFirestore(
           name: `${docPrefix}/users/${uid}/purchases/${purchaseId}`,
           fields,
         },
-        currentDocument: { exists: false },
+        currentDocument: { exists: purchaseState === 'expired' },
         updateTransforms: [
           { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
         ],
@@ -461,6 +487,29 @@ function parsePurchaseDocRow(
       ? d.listPrice
       : Math.max(paidPrice, Number(d.listPrice) || paidPrice);
 
+  const rawValidityMonths =
+    typeof d.validityMonths === 'number' &&
+    Number.isInteger(d.validityMonths) &&
+    d.validityMonths > 0
+      ? d.validityMonths
+      : undefined;
+  const rawValidityLabel =
+    typeof d.validityLabel === 'string' && d.validityLabel.trim().length > 0
+      ? d.validityLabel.trim()
+      : undefined;
+  const rawExpiresIso =
+    typeof d.expiresAt === 'string' && d.expiresAt.trim().length > 0
+      ? new Date(d.expiresAt).toISOString()
+      : undefined;
+
+  const expiryMeta = resolvePurchaseExpiryMeta({
+    collectionName,
+    createdAtIso: createdIso,
+    validityMonths: rawValidityMonths,
+    validityLabel: rawValidityLabel,
+    expiresAtIso: rawExpiresIso,
+  });
+
   return {
     purchaseId: canonicalPurchaseId,
     userId: String(d.userId || d.uid || fallbackUserId),
@@ -476,6 +525,9 @@ function parsePurchaseDocRow(
     currency: String(d.currency || 'INR'),
     listPrice,
     paidPrice,
+    validityMonths: expiryMeta.validityMonths,
+    validityLabel: expiryMeta.validityLabel,
+    expiresAtIso: expiryMeta.expiresAtIso,
     ...(typeof d.totalMocktest === 'number'
       ? { totalMocktest: d.totalMocktest }
       : {}),
@@ -496,12 +548,17 @@ function parsePurchaseDocRow(
   };
 }
 
+interface QueriedPurchaseEntry {
+  docName: string;
+  record: UserPurchaseRecord;
+}
+
 async function queryPurchasesInDatabase(
   databaseId: string,
   userId: string,
   bearerIdToken: string,
   ownerField: 'userId' | 'uid' | 'none'
-): Promise<UserPurchaseRecord[]> {
+): Promise<QueriedPurchaseEntry[]> {
   const { restBase } = getFirestoreDbResourceRoot(databaseId);
   const structuredQuery: Record<string, unknown> = {
     from: [{ collectionId: 'purchases' }],
@@ -541,7 +598,7 @@ async function queryPurchasesInDatabase(
     return [];
   }
 
-  const out: UserPurchaseRecord[] = [];
+  const out: QueriedPurchaseEntry[] = [];
   for (const row of queryRes.data) {
     if (!row?.document?.name) continue;
     const parsed = parsePurchaseDocRow(
@@ -550,16 +607,34 @@ async function queryPurchasesInDatabase(
       userId
     );
     if (parsed && parsed.userId === userId) {
-      out.push(parsed);
+      out.push({ docName: row.document.name, record: parsed });
     }
   }
   return out;
 }
 
+async function deleteExpiredPurchaseDocsInDb(
+  databaseId: string,
+  docNames: string[],
+  bearerIdToken: string
+): Promise<void> {
+  if (docNames.length === 0) return;
+  const { restBase } = getFirestoreDbResourceRoot(databaseId);
+  const uniqueNames = Array.from(new Set(docNames)).slice(0, 450);
+  await firestoreRestRequest({
+    method: 'POST',
+    path: `${restBase}:commit`,
+    bearerIdToken,
+    body: {
+      writes: uniqueNames.map((name) => ({ delete: name })),
+    },
+  }).catch(() => {});
+}
+
 /**
  * One-shot server query for `/users/{userId}/purchases` across both the provisioned database
  * and `(default)` database in `examdash-ed` using the caller's verified Bearer ID token.
- * Automatically backfills missing `(default)` purchase docs so Firebase Storage rules grant full file access.
+ * Automatically deletes expired purchase documents from Firestore and returns only active purchases.
  */
 export async function listUserPurchasesFromFirestore(
   userId: string,
@@ -567,40 +642,73 @@ export async function listUserPurchasesFromFirestore(
 ): Promise<UserPurchaseRecord[]> {
   const configuredDb = firebaseConfig.firestoreDatabaseId || '(default)';
 
-  const [primaryList, defaultList] = await Promise.all([
+  const [primaryEntries, defaultEntries] = await Promise.all([
     queryPurchasesInDatabase(configuredDb, userId, bearerIdToken, 'userId'),
     configuredDb !== '(default)'
       ? queryPurchasesInDatabase('(default)', userId, bearerIdToken, 'none')
-      : Promise.resolve([] as UserPurchaseRecord[]),
+      : Promise.resolve([] as QueriedPurchaseEntry[]),
   ]);
 
-  const defaultKeys = new Set(defaultList.map((r) => r.purchaseId));
-  const missingInDefault = primaryList.filter(
-    (r) => !defaultKeys.has(r.purchaseId)
+  const byKey = new Map<string, UserPurchaseRecord>();
+  for (const entry of defaultEntries) {
+    byKey.set(entry.record.purchaseId, entry.record);
+  }
+  for (const entry of primaryEntries) {
+    byKey.set(entry.record.purchaseId, entry.record);
+  }
+
+  const nowMs = Date.now();
+  const { active, expired } = filterActivePurchases(
+    Array.from(byKey.values()),
+    nowMs
   );
 
-  if (missingInDefault.length > 0 && configuredDb !== '(default)') {
+  // Automatically delete expired purchase records from Firestore
+  if (expired.length > 0) {
+    const expiredIds = new Set(expired.map((e) => e.purchaseId));
+    const primaryDocsToDelete = primaryEntries
+      .filter((e) => expiredIds.has(e.record.purchaseId))
+      .map((e) => e.docName);
+    const defaultDocsToDelete = defaultEntries
+      .filter((e) => expiredIds.has(e.record.purchaseId))
+      .map((e) => e.docName);
+
+    await Promise.all([
+      deleteExpiredPurchaseDocsInDb(
+        configuredDb,
+        primaryDocsToDelete,
+        bearerIdToken
+      ),
+      configuredDb !== '(default)'
+        ? deleteExpiredPurchaseDocsInDb(
+            '(default)',
+            defaultDocsToDelete,
+            bearerIdToken
+          )
+        : Promise.resolve(),
+    ]);
+  }
+
+  // Backfill only active primary purchases missing from `(default)` DB
+  const activeIds = new Set(active.map((r) => r.purchaseId));
+  const defaultKeys = new Set(defaultEntries.map((e) => e.record.purchaseId));
+  const missingActiveInDefault = primaryEntries
+    .map((e) => e.record)
+    .filter((r) => activeIds.has(r.purchaseId) && !defaultKeys.has(r.purchaseId));
+
+  if (missingActiveInDefault.length > 0 && configuredDb !== '(default)') {
     await mirrorVerifiedPurchasesToDefaultDb(
       userId,
-      missingInDefault,
+      missingActiveInDefault,
       bearerIdToken
     );
   }
 
-  const byKey = new Map<string, UserPurchaseRecord>();
-  for (const item of defaultList) {
-    byKey.set(item.purchaseId, item);
-  }
-  for (const item of primaryList) {
-    byKey.set(item.purchaseId, item);
-  }
-
-  const list = Array.from(byKey.values());
-  list.sort(
+  active.sort(
     (a, b) =>
       new Date(b.createdAtIso).getTime() - new Date(a.createdAtIso).getTime()
   );
-  return list;
+  return active;
 }
 
 export async function syncUserProfileInFirestore(params: {

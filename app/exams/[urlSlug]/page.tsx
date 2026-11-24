@@ -9,6 +9,7 @@ import { DetailBuyCard } from '../../../features/catalog/detail-buy-card';
 import { SyllabusTable } from '../../../features/catalog/syllabus-table';
 import { ItemReviewsSection } from '../../../features/reviews/item-reviews-section';
 import { formatPrice } from '../../../lib/registry/content-type-registry';
+import { getDefaultCatalogPricing } from '../../../lib/validity/pricing';
 import {
   buildCanonicalAlternates,
   buildExamDetailJsonLd,
@@ -335,59 +336,74 @@ export default async function ExamDetailPage({
               Companion Study Books & Related Series
             </h2>
             <div className="flex flex-col gap-2.5">
-              {companionBooks.map((b) => (
-                <a
-                  key={`comp-book-${b.id}`}
-                  href={`/books/${b.urlSlug}`}
-                  className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
-                >
-                  <CatalogThumbnail
-                    title={b.title}
-                    collectionName="books"
-                    imageUrl={b.imageUrl}
-                    imageMeta={b.imageMeta}
-                    size="xs"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-[var(--text-main)] truncate">
-                      {b.title}
-                    </p>
-                    <p className="text-xs text-[var(--text-muted)] tabular-nums">
-                      {b.type} ·{' '}
-                      {b.buyPrice === 0
-                        ? 'Free'
-                        : formatPrice(b.buyPrice, b.currency)}
-                    </p>
-                  </div>
-                </a>
-              ))}
+              {companionBooks.map((b) => {
+                const relPricing = getDefaultCatalogPricing('books', b.buyPrice);
+                return (
+                  <a
+                    key={`comp-book-${b.id}`}
+                    href={`/books/${b.urlSlug}`}
+                    className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
+                  >
+                    <CatalogThumbnail
+                      title={b.title}
+                      collectionName="books"
+                      imageUrl={b.imageUrl}
+                      imageMeta={b.imageMeta}
+                      size="xs"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[var(--text-main)] truncate">
+                        {b.title}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] tabular-nums">
+                        {b.type} ·{' '}
+                        {relPricing.isFree
+                          ? 'Free'
+                          : formatPrice(relPricing.discountedPrice, b.currency)}
+                        {relPricing.discountPct > 0
+                          ? ` (${relPricing.discountPct}% OFF)`
+                          : ''}
+                      </p>
+                    </div>
+                  </a>
+                );
+              })}
 
-              {siblingExams.map((ex) => (
-                <a
-                  key={`sib-exam-${ex.id}`}
-                  href={`/exams/${ex.urlSlug}`}
-                  className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
-                >
-                  <CatalogThumbnail
-                    title={ex.title}
-                    collectionName="ExamPackDocument"
-                    imageUrl={ex.imageUrl}
-                    imageMeta={ex.imageMeta}
-                    size="xs"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-[var(--text-main)] truncate">
-                      {ex.title}
-                    </p>
-                    <p className="text-xs text-[var(--text-muted)] tabular-nums">
-                      {ex.totalMocktest} Mock Tests ·{' '}
-                      {ex.buyPrice === 0
-                        ? 'Free'
-                        : formatPrice(ex.buyPrice, ex.currency)}
-                    </p>
-                  </div>
-                </a>
-              ))}
+              {siblingExams.map((ex) => {
+                const relPricing = getDefaultCatalogPricing(
+                  'ExamPackDocument',
+                  ex.buyPrice
+                );
+                return (
+                  <a
+                    key={`sib-exam-${ex.id}`}
+                    href={`/exams/${ex.urlSlug}`}
+                    className="flex items-center gap-3.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-strong)] transition-colors"
+                  >
+                    <CatalogThumbnail
+                      title={ex.title}
+                      collectionName="ExamPackDocument"
+                      imageUrl={ex.imageUrl}
+                      imageMeta={ex.imageMeta}
+                      size="xs"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[var(--text-main)] truncate">
+                        {ex.title}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] tabular-nums">
+                        {ex.totalMocktest} Mock Tests ·{' '}
+                        {relPricing.isFree
+                          ? 'Free'
+                          : formatPrice(relPricing.discountedPrice, ex.currency)}
+                        {relPricing.discountPct > 0
+                          ? ` (${relPricing.discountPct}% OFF)`
+                          : ''}
+                      </p>
+                    </div>
+                  </a>
+                );
+              })}
             </div>
           </section>
         )}

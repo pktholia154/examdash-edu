@@ -14,10 +14,13 @@ import {
   Zap,
 } from 'lucide-react';
 import {
-  computeDiscountPercent,
   formatPrice,
   makeCompositeKey,
 } from '../../lib/registry/content-type-registry';
+import {
+  getValidityOptions,
+  resolveValiditySelection,
+} from '../../lib/validity/pricing';
 import type { CollectionName } from '../../lib/types/catalog';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../auth/auth-provider';
@@ -74,10 +77,14 @@ export function DetailBuyCard({
   sampleJsonUrl,
 }: DetailBuyCardProps) {
   const { ownedCompositeKeys } = useAuth();
-  const { buyNow, addItem, isInCart, openCart, isCheckingOut } = useCart();
+  const { buyNow, addItem, getCartItem, openCart, isCheckingOut } = useCart();
   const { isWishlisted, toggleWishlist } = useWishlist();
   const { showToast } = useToast();
 
+  const validityOptions = getValidityOptions(collectionName, buyPrice);
+  const [selectedValidityMonths, setSelectedValidityMonths] = useState<number>(
+    () => (buyPrice <= 0 ? validityOptions[1].validityMonths : validityOptions[0].validityMonths)
+  );
   const [copiedLink, setCopiedLink] = useState(false);
   const [inlineSampleState, setInlineSampleState] = useState<{
     open: boolean;
@@ -110,11 +117,21 @@ export function DetailBuyCard({
 
   const compositeKey = makeCompositeKey(collectionName, id);
   const isOwned = ownedCompositeKeys.has(compositeKey);
-  const inCart = isInCart(compositeKey);
+  const cartEntry = getCartItem(compositeKey);
   const wishlisted = isWishlisted(compositeKey);
-  const isFree = buyPrice === 0;
-  const discountPct = computeDiscountPercent(listPrice, buyPrice);
-  const savingsAmount = Math.max(0, listPrice - buyPrice);
+  const isFree = buyPrice <= 0;
+  const activeValidity = resolveValiditySelection(
+    collectionName,
+    buyPrice,
+    selectedValidityMonths
+  );
+  const inCartSameValidity =
+    Boolean(cartEntry) &&
+    (isFree || cartEntry?.validityMonths === activeValidity.validityMonths);
+  const inCartDifferentValidity =
+    Boolean(cartEntry) &&
+    !isFree &&
+    cartEntry?.validityMonths !== activeValidity.validityMonths;
 
   const itemPayload = {
     id,
@@ -126,8 +143,11 @@ export function DetailBuyCard({
     authorName: authorName || 'ExamDash',
     language: language || 'English',
     currency,
-    buyPrice,
-    listPrice,
+    baseBuyPrice: buyPrice,
+    buyPrice: activeValidity.payablePrice,
+    listPrice: activeValidity.fullPrice,
+    validityMonths: activeValidity.validityMonths,
+    validityLabel: activeValidity.label,
     ...(imageUrl ? { imageUrl } : {}),
     ...(imageAlt ? { imageAlt } : {}),
     ...(typeof totalMocktest === 'number' ? { totalMocktest } : {}),
@@ -178,7 +198,7 @@ export function DetailBuyCard({
   };
 
   const handleAddToCartAction = () => {
-    if (inCart) {
+    if (inCartSameValidity) {
       openCart();
       return;
     }
@@ -202,109 +222,188 @@ export function DetailBuyCard({
 
   return (
     <>
-      {/* Dedicated Utility Action Bar directly ABOVE Price & Buy Now Bar */}
+      {/* Minimal Single-Row Circular Icon Action Bar */}
       <div
         data-nosnippet=""
         role="toolbar"
         aria-label="Quick item actions"
-        className={cn(
-          'py-3 border-b border-[var(--border-subtle)] flex flex-wrap items-center gap-2 max-md:grid max-md:gap-2',
-          !isOwned ? 'max-md:grid-cols-2' : 'max-md:grid-cols-3'
-        )}
+        className="pt-3.5 pb-0.5 flex flex-row flex-nowrap items-center gap-3.5 sm:gap-4"
       >
         <button
           type="button"
+          aria-label={wishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
+          title={wishlisted ? 'Wishlisted' : 'Wishlist'}
           aria-pressed={wishlisted}
           onClick={() => toggleWishlist(itemPayload)}
           className={cn(
-            'inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 min-w-0',
+            'inline-flex items-center justify-center w-11 h-11 rounded-full shrink-0 active:scale-95 transition-[background-color,color,transform]',
             wishlisted
-              ? 'border-[var(--status-wishlist)] bg-[var(--status-wishlist-bg)] text-[var(--status-wishlist)]'
-              : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]'
+              ? 'bg-[var(--status-wishlist-bg)] text-[var(--status-wishlist)]'
+              : 'bg-[var(--bg-elevated)] text-[var(--text-main)] hover:bg-[var(--border-subtle)]'
           )}
         >
           <Heart
-            className={cn('w-4 h-4 shrink-0', wishlisted && 'fill-current')}
+            className={cn('w-[18px] h-[18px] shrink-0', wishlisted && 'fill-current')}
             aria-hidden="true"
           />
-          <span className="truncate">{wishlisted ? 'Wishlisted' : 'Wishlist'}</span>
         </button>
 
         {!isOwned && (
           <button
             type="button"
-            aria-pressed={inCart}
+            aria-label={
+              inCartSameValidity
+                ? 'In cart — open cart'
+                : inCartDifferentValidity
+                ? 'Update cart with selected validity'
+                : 'Add to cart'
+            }
+            title={
+              inCartSameValidity
+                ? 'In Cart'
+                : inCartDifferentValidity
+                ? 'Update Cart'
+                : 'Add to Cart'
+            }
+            aria-pressed={inCartSameValidity}
             onClick={handleAddToCartAction}
             className={cn(
-              'inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 min-w-0',
-              inCart
-                ? 'border-[var(--status-success)] bg-[var(--status-success-bg)] text-[var(--status-success)]'
-                : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]'
+              'inline-flex items-center justify-center w-11 h-11 rounded-full shrink-0 active:scale-95 transition-[background-color,color,transform]',
+              inCartSameValidity
+                ? 'bg-[var(--status-success-bg)] text-[var(--status-success)]'
+                : inCartDifferentValidity
+                ? 'bg-[var(--bg-elevated)] text-[var(--brand-primary)] hover:bg-[var(--border-subtle)]'
+                : 'bg-[var(--bg-elevated)] text-[var(--text-main)] hover:bg-[var(--border-subtle)]'
             )}
           >
-            {inCart ? (
-              <>
-                <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">In Cart</span>
-              </>
+            {inCartSameValidity ? (
+              <Check className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
             ) : (
-              <>
-                <ShoppingCart className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">Add to Cart</span>
-              </>
+              <ShoppingCart
+                className="w-[18px] h-[18px] shrink-0"
+                aria-hidden="true"
+              />
             )}
           </button>
         )}
 
         <button
           type="button"
+          aria-label="Share"
+          title="Share"
           onClick={() => void handleShare()}
-          className="inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0 min-w-0"
+          className="inline-flex items-center justify-center w-11 h-11 rounded-full shrink-0 bg-[var(--bg-elevated)] text-[var(--text-main)] hover:bg-[var(--border-subtle)] active:scale-95 transition-[background-color,color,transform]"
         >
-          <Share2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-          <span className="truncate">Share</span>
+          <Share2 className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
         </button>
 
         <button
           type="button"
+          aria-label={copiedLink ? 'Link copied' : 'Copy link'}
+          title={copiedLink ? 'Copied' : 'Copy Link'}
           onClick={() => void handleCopyLink()}
-          className="inline-flex items-center justify-center gap-2 min-h-[44px] max-md:w-full px-3.5 max-md:px-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0 min-w-0"
+          className={cn(
+            'inline-flex items-center justify-center w-11 h-11 rounded-full shrink-0 active:scale-95 transition-[background-color,color,transform]',
+            copiedLink
+              ? 'bg-[var(--status-success-bg)] text-[var(--status-success)]'
+              : 'bg-[var(--bg-elevated)] text-[var(--text-main)] hover:bg-[var(--border-subtle)]'
+          )}
         >
           {copiedLink ? (
-            <>
-              <Check
-                className="w-4 h-4 text-[var(--status-success)] shrink-0"
-                aria-hidden="true"
-              />
-              <span className="truncate">Copied</span>
-            </>
+            <Check className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
           ) : (
-            <>
-              <Link2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">Copy Link</span>
-            </>
+            <Link2 className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
           )}
         </button>
       </div>
 
-      {/* Price & Buy Now / Sample Bar */}
+      {/* Price, Validity Selector & Buy Now / Sample Bar */}
       <div
         aria-label="Purchase and sample options"
-        className="py-5 max-md:py-4 border-b border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 max-md:gap-3.5"
+        className="py-5 max-md:py-4 border-b border-[var(--border-subtle)] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 max-md:gap-3.5"
       >
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 tabular-nums">
-          <span className="text-2xl font-extrabold text-[var(--text-main)] leading-none">
-            {isFree ? 'Free' : formatPrice(buyPrice, currency)}
-          </span>
-          {discountPct > 0 && (
-            <span className="text-sm text-[var(--text-muted)] line-through">
-              {formatPrice(listPrice, currency)}
+        <div className="flex flex-row flex-wrap items-center gap-x-4 gap-y-2.5 min-w-0">
+          {/* Dynamic Price Readout */}
+          <div className="flex items-baseline tabular-nums shrink-0">
+            <span className="text-[35px] font-extrabold text-[var(--text-main)] leading-none">
+              {isFree
+                ? 'Free'
+                : formatPrice(activeValidity.payablePrice, currency)}
             </span>
-          )}
-          {discountPct > 0 && (
-            <span className="text-xs font-semibold text-[var(--status-success)]">
-              {discountPct}% OFF · Save {formatPrice(savingsAmount, currency)}
-            </span>
+          </div>
+
+          {/* Compact Single-Select Validity Checkboxes right next to Price */}
+          {!isFree && !isOwned && (
+            <div
+              role="group"
+              aria-label="Select access validity"
+              className="flex flex-wrap items-center gap-2"
+            >
+              {validityOptions.map((option) => {
+                const isSelected =
+                  activeValidity.validityMonths === option.validityMonths;
+                const shouldEntice = option.isLongValidity && !isSelected;
+
+                return (
+                  <label
+                    key={option.validityMonths}
+                    className={cn(
+                      'relative inline-flex items-center gap-2 min-h-[44px] px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-colors shrink-0',
+                      isSelected
+                        ? 'border-[var(--brand-primary)] bg-[var(--bg-elevated)] text-[var(--text-main)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-main)]',
+                      shouldEntice && 'ed-validity-entice'
+                    )}
+                  >
+                    {shouldEntice && (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]"
+                      >
+                        <span className="ed-validity-entice-sheen" />
+                      </span>
+                    )}
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() =>
+                        setSelectedValidityMonths(option.validityMonths)
+                      }
+                      aria-label={`Validity ${option.label}`}
+                      className="sr-only peer"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'relative z-10 inline-flex items-center justify-center w-5 h-5 rounded-[5px] border-[1.5px] transition-colors shrink-0 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--brand-primary)]',
+                        isSelected
+                          ? 'border-[var(--brand-primary)] bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
+                          : 'border-[var(--border-strong)] bg-[var(--bg-surface)]'
+                      )}
+                    >
+                      {isSelected && (
+                        <Check className="w-3.5 h-3.5 stroke-[3]" aria-hidden="true" />
+                      )}
+                    </span>
+                    <span className="relative z-10 flex flex-col leading-none gap-0.5 whitespace-nowrap">
+                      <span className="text-[10px] font-medium text-[var(--text-muted)] leading-none">
+                        Validity
+                      </span>
+                      <span
+                        className={cn(
+                          'text-xs font-bold leading-tight',
+                          isSelected || option.isLongValidity
+                            ? 'text-[var(--text-main)]'
+                            : 'text-[var(--text-muted)]'
+                        )}
+                      >
+                        {option.label}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
           )}
         </div>
 
@@ -329,7 +428,7 @@ export function DetailBuyCard({
               type="button"
               disabled={isCheckingOut}
               onClick={() => void handlePrimaryAction()}
-              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-6 max-md:px-4 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap min-w-0"
+              className="inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-6 max-md:px-4 rounded-lg border-2 border-solid border-black dark:border-[var(--brand-primary)] bg-[var(--bg-canvas)] text-black dark:text-[var(--text-main)] text-sm font-semibold hover:bg-[var(--bg-elevated)] disabled:opacity-50 transition-colors whitespace-nowrap min-w-0"
             >
               {isFree ? (
                 <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />

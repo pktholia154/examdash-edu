@@ -14,8 +14,10 @@
 5. **PII Split-Collection Isolation**:
    - `/users/{userId}` forbids storing `email`, `phone`, or `address`.
    - `/users/{userId}/private/{infoId}` (only `infoId == 'contact'`) stores `email` and is readable/writable strictly by the verified owner (`request.auth.uid == userId`).
-6. **Terminal State, Payment Proof & Immutable Entitlements (`purchases`)**:
-   - `/users/{userId}/purchases/{purchaseId}` requires `status == 'completed'`, `createdAt == request.time`, `paidPrice >= 0`, `listPrice >= paidPrice`, and forbids ALL `update` and `delete` operations (`allow update, delete: if false`) so completed entitlements cannot be tampered with.
+6. **Validity-Bound Entitlements, Payment Proof & Expiry-Gated Lifecycle (`purchases`)**:
+   - `/users/{userId}/purchases/{purchaseId}` requires `status == 'completed'`, `createdAt == request.time`, `paidPrice >= 0`, `listPrice >= paidPrice`, and optional validity fields (`validityMonths` restricted to `[1, 6]` for `ExamPackDocument` and `[3, 24]` for `books`, `validityLabel` 1–32 chars, and `expiresAt` strictly bounded to `> createdAt` and within the collection's validity window).
+   - While active (`!isPurchaseExpired(existing())`), `update` and `delete` are strictly forbidden so active entitlements cannot be tampered with or extended.
+   - Once expired (`isPurchaseExpired(existing())` — either `expiresAt <= request.time` or legacy fallback `180d` for exams / `730d` for books), the verified owner may `delete` the expired record or `update` (renew) it with a fresh `createdAt == request.time`, valid payment proof, and bounded `expiresAt` while keeping `purchaseId`, `userId`, `itemId`, `collectionName`, and `status` immutable.
    - Paid entitlements (`paidPrice > 0`) MUST include `paymentProvider == 'razorpay'`, `razorpayOrderId` matching `^order_[a-zA-Z0-9]+$` (10–64 chars), and `razorpayPaymentId` matching `^pay_[a-zA-Z0-9]+$` (10–64 chars).
    - Free entitlements (`paidPrice == 0`) MUST have `paymentProvider == 'free'` (or omitted) and must NOT carry forged Razorpay IDs.
 7. **Public Non-PII Ratings & Reviews (`/reviews/{reviewId}`)**:
@@ -40,7 +42,7 @@
 8. **ID Poisoning / Denial-of-Wallet**: Attacker passes a 500-character document ID or 100KB `displayName` -> `PERMISSION_DENIED`.
 9. **Orphaned Subcollection Write**: Owner attempts to write `/users/{uid}/cart/books_B1` or `/users/{uid}/examAttempts/a1` when `/users/{uid}` neither `exists()` nor `existsAfter()` -> `PERMISSION_DENIED`.
 10. **Identity Spoofing in Payload**: User A writes `/users/{userA}/purchases/p1` with `userId: "userB"` -> `PERMISSION_DENIED`.
-11. **Terminal Purchase Mutation**: User A attempts `update` on `/users/{userA}/purchases/p1` (`status == 'completed'`) to alter `itemId` -> `PERMISSION_DENIED`.
+11. **Active Purchase Mutation / Forged Expiry**: User A attempts `update` or `delete` on an active `/users/{userA}/purchases/p1`, or writes a 1-month exam purchase with `expiresAt` set 5 years ahead -> `PERMISSION_DENIED`.
 12. **Client-Forged Timestamp**: User A creates `/users/{userA}` with a past/future `createdAt` (`!= request.time`) -> `PERMISSION_DENIED`.
 13. **Paid Purchase Without Razorpay Proof**: User A writes `/users/{userA}/purchases/p2` with `paidPrice: 499` and omits `razorpayOrderId` / `razorpayPaymentId` or sends malformed IDs -> `PERMISSION_DENIED`.
 14. **Spoofed Verified Purchase Review**: User A creates `/reviews/books_B1_userA` with `verifiedPurchase: true` without owning `/users/userA/purchases/books_B1` -> `PERMISSION_DENIED`.
@@ -48,3 +50,4 @@
 16. **Historical Score Tampering on Update**: User A attempts `update` on `/users/{userA}/examAttempts/att_1` to inflate `totalScore` or alter `responses` -> `PERMISSION_DENIED` (`SaveAttemptFeedback` `affectedKeys().hasOnly(...)` & score immutability gates reject).
 17. **Cross-User Attempt Telemetry Scraping**: User B attempts `list` or `get` on `/users/{userA}/examAttempts` -> `PERMISSION_DENIED` (`request.auth.uid == userId && resource.data.userId == request.auth.uid`).
 18. **Unbounded Array / Map Resource Exhaustion in Exam Attempt**: Attacker submits `questionBreakdown` with 2,000 items or `reflectionNote` of 50KB -> `PERMISSION_DENIED`.
+19. **Invalid Validity Tier Injection**: User A submits `validityMonths: 12` for an exam pack or `validityMonths: 99` for a book -> `PERMISSION_DENIED`.

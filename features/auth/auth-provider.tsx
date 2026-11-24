@@ -25,6 +25,10 @@ import {
 } from '../../lib/platform/capacitor-bridge';
 import { makeCompositeKey } from '../../lib/registry/content-type-registry';
 import type { UserPurchaseRecord } from '../../lib/types/catalog';
+import {
+  filterActivePurchases,
+  resolvePurchaseExpiryMeta,
+} from '../../lib/validity/pricing';
 import { useToast } from '../toast/toast-context';
 
 interface AuthContextValue {
@@ -73,23 +77,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const authUnsubRef = useRef<(() => void) | null>(null);
   const fetchedUidRef = useRef<string | null>(null);
 
+  const purgeExpiredPurchasesLocally = useCallback(
+    async (uid: string, expiredRecords: UserPurchaseRecord[]) => {
+      if (!uid || expiredRecords.length === 0) return;
+      try {
+        const { deleteBookAllFormatsOffline, deleteExamPackOffline } =
+          await import('../../lib/offline/offline-vault');
+        await Promise.allSettled(
+          expiredRecords.map((rec) =>
+            rec.collectionName === 'books'
+              ? deleteBookAllFormatsOffline(uid, rec.itemId)
+              : deleteExamPackOffline(uid, rec.itemId)
+          )
+        );
+      } catch {
+        // Non-blocking cleanup
+      }
+    },
+    []
+  );
+
   const fetchOneShotLibraryEntitlements = useCallback(
     async (activeUser: AppAuthUser, syncProfile: boolean = false) => {
       try {
         const { readCachedUserEntitlements, writeCachedUserEntitlements } =
           await import('../../lib/offline/offline-vault');
 
-        // 1. Hydrate local cached entitlements immediately for instant offline / zero-CLS UX
+        // 1. Hydrate local cached entitlements immediately, stripping & purging any expired items
         const cached = await readCachedUserEntitlements(activeUser.uid);
-        if (cached.length > 0) {
-          setPurchases((prev) => (prev.length > 0 ? prev : cached));
+        const { active: activeCached, expired: expiredCached } =
+          filterActivePurchases(cached);
+        if (expiredCached.length > 0) {
+          await writeCachedUserEntitlements(activeUser.uid, activeCached);
+          void purgeExpiredPurchasesLocally(activeUser.uid, expiredCached);
+        }
+        if (activeCached.length > 0) {
+          setPurchases((prev) => (prev.length > 0 ? prev : activeCached));
         }
 
         if (typeof navigator !== 'undefined' && navigator.onLine === false) {
           return;
         }
 
-        // 2. One-shot authenticated GET /api/v1/library (replaces Firestore Listen/channel XHR)
+        // 2. One-shot authenticated GET /api/v1/library (server also deletes expired Firestore docs)
         const token = await activeUser.getIdToken();
         const endpoint = syncProfile
           ? apiUrl('/api/v1/library?syncProfile=1')
@@ -111,21 +141,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
 
         if (Array.isArray(data.purchases)) {
-          const sorted = [...data.purchases].sort(
+          const { active: activeServer, expired: expiredServer } =
+            filterActivePurchases(data.purchases);
+          const sorted = [...activeServer].sort(
             (a, b) =>
               new Date(b.createdAtIso).getTime() -
               new Date(a.createdAtIso).getTime()
           );
           setPurchases(sorted);
           await writeCachedUserEntitlements(activeUser.uid, sorted);
+
+          // Also purge offline vault for any previously cached item that is no longer active
+          const activeIds = new Set(sorted.map((p) => p.purchaseId));
+          const disappearedCached = activeCached.filter(
+            (p) => !activeIds.has(p.purchaseId)
+          );
+          const toPurge = [...expiredServer, ...disappearedCached];
+          if (toPurge.length > 0) {
+            void purgeExpiredPurchasesLocally(activeUser.uid, toPurge);
+          }
         }
       } catch {
-        // Offline or transient network issue — cached entitlements remain active
+        // Offline or transient network issue — cached active entitlements remain
       } finally {
         setIsEntitlementsReady(true);
       }
     },
-    []
+    [purgeExpiredPurchasesLocally]
   );
 
   const attachLazyAuthSubscription = useCallback(async () => {
@@ -287,7 +329,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         for (const item of incomingRecords) {
           byId.set(item.purchaseId, item);
         }
-        const merged = Array.from(byId.values());
+        const { active: merged, expired } = filterActivePurchases(
+          Array.from(byId.values())
+        );
         merged.sort(
           (a, b) =>
             new Date(b.createdAtIso).getTime() -
@@ -298,12 +342,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             ({ writeCachedUserEntitlements }) =>
               writeCachedUserEntitlements(targetUid, merged)
           );
+          if (expired.length > 0) {
+            void purgeExpiredPurchasesLocally(targetUid, expired);
+          }
         }
         return merged;
       });
     },
-    [user?.uid]
+    [purgeExpiredPurchasesLocally, user?.uid]
   );
+
+  // Reactive expiry timer: removes products immediately when their validity expires
+  const soonestExpiryMs = useMemo(() => {
+    if (!user || purchases.length === 0) return null;
+    let soonest = Number.POSITIVE_INFINITY;
+    for (const p of purchases) {
+      const meta = resolvePurchaseExpiryMeta(p);
+      if (meta.expiresAtMs < soonest) {
+        soonest = meta.expiresAtMs;
+      }
+    }
+    return Number.isFinite(soonest) ? soonest : null;
+  }, [purchases, user]);
+
+  useEffect(() => {
+    if (!user || soonestExpiryMs === null) return;
+    const delayMs = Math.max(
+      1000,
+      Math.min(soonestExpiryMs - Date.now() + 500, 2_147_483_000)
+    );
+    const activeUser = user;
+    const timer = window.setTimeout(() => {
+      let removedExpired: UserPurchaseRecord[] = [];
+      let nextActive: UserPurchaseRecord[] = [];
+      setPurchases((prev) => {
+        const partitioned = filterActivePurchases(prev, Date.now());
+        removedExpired = partitioned.expired;
+        nextActive = partitioned.active;
+        return partitioned.expired.length > 0 ? partitioned.active : prev;
+      });
+      if (removedExpired.length > 0) {
+        void import('../../lib/offline/offline-vault').then(
+          ({ writeCachedUserEntitlements }) =>
+            writeCachedUserEntitlements(activeUser.uid, nextActive)
+        );
+        void purgeExpiredPurchasesLocally(activeUser.uid, removedExpired);
+        if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+          void fetchOneShotLibraryEntitlements(activeUser, false);
+        }
+      }
+    }, delayMs);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    fetchOneShotLibraryEntitlements,
+    purgeExpiredPurchasesLocally,
+    soonestExpiryMs,
+    user,
+  ]);
 
   const refreshLibraryEntitlements = useCallback(async () => {
     if (!user) return;

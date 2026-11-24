@@ -18,6 +18,7 @@ import type { CollectionName, UserPurchaseRecord } from '../types/catalog';
 export interface CheckoutItemRef {
   collectionName: CollectionName;
   id: string;
+  validityMonths?: number;
 }
 
 export type CheckoutOutcome =
@@ -121,7 +122,11 @@ export async function purchasePaidThroughCheckoutAdapter(params: {
       };
     }
 
-    const primarySku = `ed_${params.refs[0].collectionName.toLowerCase()}_${params.refs[0].id}`
+    const validitySuffix =
+      typeof params.refs[0].validityMonths === 'number'
+        ? `_v${params.refs[0].validityMonths}m`
+        : '';
+    const primarySku = `ed_${params.refs[0].collectionName.toLowerCase()}_${params.refs[0].id}${validitySuffix}`
       .replace(/[^a-zA-Z0-9._]/g, '_')
       .slice(0, 100);
 

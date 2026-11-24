@@ -21,6 +21,8 @@ import type {
   CatalogItemDTO,
   CollectionName,
 } from '../../lib/types/catalog';
+import type { CheckoutItemRef } from '../../lib/payments/checkout-adapter';
+import { resolveValiditySelection } from '../../lib/validity/pricing';
 import { useAuth } from '../auth/auth-provider';
 import { useToast } from '../toast/toast-context';
 
@@ -36,6 +38,9 @@ export interface BuyTargetItem {
   currency: string;
   buyPrice: number;
   listPrice: number;
+  baseBuyPrice?: number;
+  validityMonths?: number;
+  validityLabel?: string;
   type?: string;
   authorName?: string;
   language?: string;
@@ -55,6 +60,7 @@ interface CartContextValue {
   openCart: () => void;
   closeCart: () => void;
   isInCart: (compositeKey: string) => boolean;
+  getCartItem: (compositeKey: string) => CartItem | undefined;
   addItem: (catalogItem: CatalogItemDTO | BuyTargetItem) => void;
   removeItem: (compositeKey: string) => void;
   clearCart: () => void;
@@ -81,6 +87,7 @@ const CartContext = createContext<CartContextValue>({
   openCart: () => {},
   closeCart: () => {},
   isInCart: () => false,
+  getCartItem: () => undefined,
   addItem: () => {},
   removeItem: () => {},
   clearCart: () => {},
@@ -149,7 +156,31 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const storedItems = useMemo<CartItem[]>(() => {
     try {
       const parsed = JSON.parse(cartStore.raw);
-      return Array.isArray(parsed) ? (parsed as CartItem[]) : [];
+      if (!Array.isArray(parsed)) return [];
+      return (parsed as CartItem[]).map((item) => {
+        if (
+          typeof item.validityMonths === 'number' &&
+          typeof item.validityLabel === 'string' &&
+          typeof item.baseBuyPrice === 'number'
+        ) {
+          return item;
+        }
+        const basePrice =
+          typeof item.baseBuyPrice === 'number' ? item.baseBuyPrice : item.buyPrice;
+        const resolved = resolveValiditySelection(
+          item.collectionName,
+          basePrice,
+          item.validityMonths
+        );
+        return {
+          ...item,
+          baseBuyPrice: basePrice,
+          listPrice: resolved.fullPrice,
+          buyPrice: resolved.payablePrice,
+          validityMonths: resolved.validityMonths,
+          validityLabel: resolved.label,
+        };
+      });
     } catch {
       return [];
     }
@@ -194,6 +225,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [items]
   );
 
+  const getCartItem = useCallback(
+    (compositeKey: string) =>
+      items.find((i) => i.compositeKey === compositeKey),
+    [items]
+  );
+
   const addItem = useCallback(
     (catalogItem: CatalogItemDTO | BuyTargetItem) => {
       const compositeKey = makeCompositeKey(
@@ -206,8 +243,51 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      if (items.some((existing) => existing.compositeKey === compositeKey)) {
-        openCart();
+      const rawBaseBuyPrice =
+        'baseBuyPrice' in catalogItem &&
+        typeof catalogItem.baseBuyPrice === 'number'
+          ? catalogItem.baseBuyPrice
+          : catalogItem.buyPrice;
+      const requestedValidityMonths =
+        'validityMonths' in catalogItem &&
+        typeof catalogItem.validityMonths === 'number'
+          ? catalogItem.validityMonths
+          : undefined;
+
+      const resolved = resolveValiditySelection(
+        catalogItem.collectionName,
+        rawBaseBuyPrice,
+        requestedValidityMonths
+      );
+
+      const existingItem = items.find(
+        (existing) => existing.compositeKey === compositeKey
+      );
+      if (existingItem) {
+        if (
+          existingItem.validityMonths === resolved.validityMonths &&
+          existingItem.buyPrice === resolved.payablePrice
+        ) {
+          openCart();
+          return;
+        }
+        const updatedItems = items.map((entry) =>
+          entry.compositeKey === compositeKey
+            ? {
+                ...entry,
+                baseBuyPrice: rawBaseBuyPrice,
+                listPrice: resolved.fullPrice,
+                buyPrice: resolved.payablePrice,
+                validityMonths: resolved.validityMonths,
+                validityLabel: resolved.label,
+              }
+            : entry
+        );
+        writeCartStorage(updatedItems);
+        showToast(
+          `Updated "${catalogItem.title}" (${resolved.label}) in cart`,
+          'success'
+        );
         return;
       }
 
@@ -224,11 +304,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       }
 
       const resolvedImageUrl =
-        'imageUrl' in catalogItem && typeof catalogItem.imageUrl === 'string' && catalogItem.imageUrl.trim()
+        'imageUrl' in catalogItem &&
+        typeof catalogItem.imageUrl === 'string' &&
+        catalogItem.imageUrl.trim()
           ? catalogItem.imageUrl.trim()
           : undefined;
       const resolvedImageAlt =
-        'imageAlt' in catalogItem && typeof catalogItem.imageAlt === 'string' && catalogItem.imageAlt.trim()
+        'imageAlt' in catalogItem &&
+        typeof catalogItem.imageAlt === 'string' &&
+        catalogItem.imageAlt.trim()
           ? catalogItem.imageAlt.trim()
           : 'imageMeta' in catalogItem && catalogItem.imageMeta?.alt
           ? catalogItem.imageMeta.alt
@@ -250,8 +334,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           catalogItem.type ||
           (catalogItem.collectionName === 'ExamPackDocument' ? 'Exam' : 'Ebook'),
         currency: incomingCurrency,
-        listPrice: catalogItem.listPrice,
-        buyPrice: catalogItem.buyPrice,
+        baseBuyPrice: rawBaseBuyPrice,
+        listPrice: resolved.fullPrice,
+        buyPrice: resolved.payablePrice,
+        validityMonths: resolved.validityMonths,
+        validityLabel: resolved.label,
         ...(resolvedImageUrl ? { imageUrl: resolvedImageUrl } : {}),
         ...(resolvedImageAlt ? { imageAlt: resolvedImageAlt } : {}),
       };
@@ -299,7 +386,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const executeFreeClaim = useCallback(
     async (
-      refs: Array<{ collectionName: CollectionName; id: string }>,
+      refs: CheckoutItemRef[],
       options?: { redirectToPurchased?: boolean; closeDrawer?: boolean }
     ): Promise<boolean> => {
       const session = await ensureAuthenticatedToken();
@@ -359,7 +446,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const executePaidPurchase = useCallback(
     async (
-      refs: Array<{ collectionName: CollectionName; id: string }>,
+      refs: CheckoutItemRef[],
       options?: { redirectToPurchased?: boolean; closeDrawer?: boolean }
     ): Promise<boolean> => {
       const session = await ensureAuthenticatedToken();
@@ -439,7 +526,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       if (ownedCompositeKeys.has(compositeKey)) return true;
 
       return executeFreeClaim(
-        [{ collectionName: targetItem.collectionName, id: targetItem.id }],
+        [
+          {
+            collectionName: targetItem.collectionName,
+            id: targetItem.id,
+            ...(typeof targetItem.validityMonths === 'number'
+              ? { validityMonths: targetItem.validityMonths }
+              : {}),
+          },
+        ],
         { redirectToPurchased: false, closeDrawer: false }
       );
     },
@@ -462,20 +557,29 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return true;
       }
 
-      if (targetItem.buyPrice === 0) {
-        return executeFreeClaim(
-          [{ collectionName: targetItem.collectionName, id: targetItem.id }],
-          { redirectToPurchased: options?.redirectToPurchased === true }
-        );
+      const rawBasePrice =
+        typeof targetItem.baseBuyPrice === 'number'
+          ? targetItem.baseBuyPrice
+          : targetItem.buyPrice;
+
+      const ref: CheckoutItemRef = {
+        collectionName: targetItem.collectionName,
+        id: targetItem.id,
+        ...(typeof targetItem.validityMonths === 'number'
+          ? { validityMonths: targetItem.validityMonths }
+          : {}),
+      };
+
+      if (rawBasePrice === 0) {
+        return executeFreeClaim([ref], {
+          redirectToPurchased: options?.redirectToPurchased === true,
+        });
       }
 
-      return executePaidPurchase(
-        [{ collectionName: targetItem.collectionName, id: targetItem.id }],
-        {
-          redirectToPurchased: options?.redirectToPurchased !== false,
-          closeDrawer: false,
-        }
-      );
+      return executePaidPurchase([ref], {
+        redirectToPurchased: options?.redirectToPurchased !== false,
+        closeDrawer: false,
+      });
     },
     [executeFreeClaim, executePaidPurchase, ownedCompositeKeys, router]
   );
@@ -491,9 +595,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
 
-    const refs = items.map((i) => ({
+    const refs: CheckoutItemRef[] = items.map((i) => ({
       collectionName: i.collectionName,
       id: i.id,
+      ...(typeof i.validityMonths === 'number'
+        ? { validityMonths: i.validityMonths }
+        : {}),
     }));
 
     if (summaryCheck.buyTotal <= 0) {
@@ -521,6 +628,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         openCart,
         closeCart,
         isInCart,
+        getCartItem,
         addItem,
         removeItem,
         clearCart,

@@ -143,7 +143,7 @@ test('buildBookDetailJsonLd emits ["Product", "Book"] with Brand @type, complete
   assert.equal(product.publisher['@type'], 'Organization');
 
   assert.equal(product.offers['@type'], 'Offer');
-  assert.equal(product.offers.price, '199.00');
+  assert.equal(product.offers.price, '119.00');
   assert.equal(product.offers.priceCurrency, 'INR');
   assert.equal(product.offers.availability, 'https://schema.org/InStock');
   assert.equal(product.offers.itemCondition, 'https://schema.org/NewCondition');
@@ -223,7 +223,7 @@ test('buildBookDetailJsonLd and buildExamDetailJsonLd include 1:1 AggregateRatin
   assert.equal(breadcrumb['@type'], 'BreadcrumbList');
   assert.equal(ratedProduct['@type'], 'Product');
   assert.equal(ratedProduct.sku, 'exam_202');
-  assert.equal(ratedProduct.offers.price, '249.00');
+  assert.equal(ratedProduct.offers.price, '125.00');
   assert.equal(ratedProduct.url, breadcrumb.itemListElement[2].item);
   assert.equal(ratedProduct.url.endsWith('/'), false);
 
