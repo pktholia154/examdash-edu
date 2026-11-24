@@ -177,12 +177,12 @@ export default async function BookDetailPage({
           </figure>
 
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-[var(--text-muted)] break-words">
-              {book.type} · {book.language} · Published by {book.publisher}
-            </p>
-            <h1 className="mt-1.5 max-md:mt-1 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
+            <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
               {book.title}
             </h1>
+            <p className="mt-1.5 max-md:mt-1 text-xs font-medium text-[var(--text-muted)] break-words">
+              {book.type} · {book.language} · Published by {book.publisher}
+            </p>
           </div>
         </div>
 
@@ -204,21 +204,45 @@ export default async function BookDetailPage({
           sampleMarkdownUrl={book.sampleMarkdownUrl || undefined}
         />
 
-        {/* Summary, Author/Date Metadata & Topics below Install App Banner */}
-        <div className="mt-5 max-md:mt-4 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
-          {book.seoDescription && (
+        {/* Summary below Install App Banner */}
+        {book.seoDescription && (
+          <div className="mt-5 max-md:mt-4 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
             <p className="text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
               {book.seoDescription}
             </p>
-          )}
+          </div>
+        )}
 
-          <div
-            className={
-              book.seoDescription
-                ? 'mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
-                : 'flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
-            }
+        {/* Book Chapters List directly above About This Book & Coverage */}
+        <BookChaptersList
+          bookId={book.id}
+          urlSlug={book.urlSlug}
+          chapters={book.bookChapters}
+        />
+
+        {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
+        <section aria-labelledby="book-description-heading" className="mt-8 max-md:mt-6">
+          <h2
+            id="book-description-heading"
+            className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5"
           >
+            About This Book & Coverage
+          </h2>
+          <div className="text-sm sm:text-base leading-relaxed text-[var(--text-main)]">
+            <DescriptionMarkdown
+              markdown={
+                book.fullDescription ||
+                book.seoDescription ||
+                'Comprehensive digital study material curated for exam preparation.'
+              }
+              heroTitle={book.title}
+            />
+          </div>
+        </section>
+
+        {/* Author, Date Metadata & Topics placed just above Ratings & Learner Reviews */}
+        <div className="mt-7 pt-5 max-md:mt-5 max-md:pt-4 border-t border-[var(--border-subtle)]">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums">
             <span>
               Author:{' '}
               <strong className="font-semibold text-[var(--text-main)]">
@@ -266,33 +290,6 @@ export default async function BookDetailPage({
             </p>
           )}
         </div>
-
-        {/* Book Chapters List directly above About This Book & Coverage */}
-        <BookChaptersList
-          bookId={book.id}
-          urlSlug={book.urlSlug}
-          chapters={book.bookChapters}
-        />
-
-        {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
-        <section aria-labelledby="book-description-heading" className="mt-8 max-md:mt-6">
-          <h2
-            id="book-description-heading"
-            className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5"
-          >
-            About This Book & Coverage
-          </h2>
-          <div className="text-sm sm:text-base leading-relaxed text-[var(--text-main)]">
-            <DescriptionMarkdown
-              markdown={
-                book.fullDescription ||
-                book.seoDescription ||
-                'Comprehensive digital study material curated for exam preparation.'
-              }
-              heroTitle={book.title}
-            />
-          </div>
-        </section>
 
         {/* Real Learner Ratings & Reviews (SSR-Hydrated + Capacitor-Ready API) */}
         <ItemReviewsSection

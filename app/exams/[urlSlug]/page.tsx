@@ -180,12 +180,12 @@ export default async function ExamDetailPage({
           </figure>
 
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-[var(--text-muted)] break-words">
-              {exam.type} · {exam.language} · Published by {exam.publisher}
-            </p>
-            <h1 className="mt-1.5 max-md:mt-1 text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
+            <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
               {exam.title}
             </h1>
+            <p className="mt-1.5 max-md:mt-1 text-xs font-medium text-[var(--text-muted)] break-words">
+              {exam.type} · {exam.language} · Published by {exam.publisher}
+            </p>
           </div>
         </div>
 
@@ -207,21 +207,45 @@ export default async function ExamDetailPage({
           sampleJsonUrl={sampleTrialHref}
         />
 
-        {/* Summary, Faculty/Stats Metadata & Topics below Install App Banner */}
-        <div className="mt-5 max-md:mt-4 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
-          {exam.seoDescription && (
+        {/* Summary below Install App Banner */}
+        {exam.seoDescription && (
+          <div className="mt-5 max-md:mt-4 pb-5 max-md:pb-4 border-b border-[var(--border-subtle)]">
             <p className="text-base max-md:text-sm text-[var(--text-muted)] leading-relaxed break-words">
               {exam.seoDescription}
             </p>
-          )}
+          </div>
+        )}
 
-          <div
-            className={
-              exam.seoDescription
-                ? 'mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
-                : 'flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums'
-            }
+        {/* Sortable MocktestTitles Syllabus Table */}
+        <SyllabusTable
+          items={exam.MocktestTitles}
+          totalMocktest={exam.totalMocktest}
+          hasSample={Boolean(exam.sampleJsonStoragePath)}
+        />
+
+        {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
+        <section aria-labelledby="exam-description-heading" className="mt-10 max-md:mt-7">
+          <h2
+            id="exam-description-heading"
+            className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5"
           >
+            Exam Series Overview & Instructions
+          </h2>
+          <div className="text-sm sm:text-base leading-relaxed text-[var(--text-main)]">
+            <DescriptionMarkdown
+              markdown={
+                exam.fullDescription ||
+                exam.seoDescription ||
+                'Full-length mock test pack aligned with latest exam pattern.'
+              }
+              heroTitle={exam.title}
+            />
+          </div>
+        </section>
+
+        {/* Faculty, Stats Metadata & Topics placed just above Ratings & Learner Reviews */}
+        <div className="mt-7 pt-5 max-md:mt-5 max-md:pt-4 border-t border-[var(--border-subtle)]">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--text-muted)] tabular-nums">
             <span>
               Faculty:{' '}
               <strong className="font-semibold text-[var(--text-main)]">
@@ -286,33 +310,6 @@ export default async function ExamDetailPage({
             </p>
           )}
         </div>
-
-        {/* Sortable MocktestTitles Syllabus Table */}
-        <SyllabusTable
-          items={exam.MocktestTitles}
-          totalMocktest={exam.totalMocktest}
-          hasSample={Boolean(exam.sampleJsonStoragePath)}
-        />
-
-        {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}
-        <section aria-labelledby="exam-description-heading" className="mt-10 max-md:mt-7">
-          <h2
-            id="exam-description-heading"
-            className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5"
-          >
-            Exam Series Overview & Instructions
-          </h2>
-          <div className="text-sm sm:text-base leading-relaxed text-[var(--text-main)]">
-            <DescriptionMarkdown
-              markdown={
-                exam.fullDescription ||
-                exam.seoDescription ||
-                'Full-length mock test pack aligned with latest exam pattern.'
-              }
-              heroTitle={exam.title}
-            />
-          </div>
-        </section>
 
         {/* Real Learner Ratings & Reviews (SSR-Hydrated + Capacitor-Ready API) */}
         <ItemReviewsSection

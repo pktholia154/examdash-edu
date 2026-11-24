@@ -796,8 +796,8 @@ select,
 }
 
 .ed-validity-entice {
-  border-color: color-mix(in srgb, var(--brand-primary) 38%, var(--border-subtle));
-  background-color: color-mix(in srgb, var(--brand-primary) 4%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--brand-primary) 12%, var(--border-subtle));
+  background-color: color-mix(in srgb, var(--brand-primary) 3%, var(--bg-surface));
   animation: ed-validity-nudge 3.4s var(--ease-out-quart) infinite;
 }
 

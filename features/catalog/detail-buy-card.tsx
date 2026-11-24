@@ -325,7 +325,7 @@ export function DetailBuyCard({
         <div className="flex flex-row flex-wrap items-center gap-x-4 gap-y-2.5 min-w-0">
           {/* Dynamic Price Readout */}
           <div className="flex items-baseline tabular-nums shrink-0">
-            <span className="text-[35px] font-extrabold text-[var(--text-main)] leading-none">
+            <span className="text-[26px] font-extrabold text-[var(--text-main)] leading-none">
               {isFree
                 ? 'Free'
                 : formatPrice(activeValidity.payablePrice, currency)}
@@ -350,7 +350,7 @@ export function DetailBuyCard({
                     className={cn(
                       'relative inline-flex items-center gap-2 min-h-[44px] px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-colors shrink-0',
                       isSelected
-                        ? 'border-[var(--brand-primary)] bg-[var(--bg-elevated)] text-[var(--text-main)]'
+                        ? 'border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-main)]'
                         : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-main)]',
                       shouldEntice && 'ed-validity-entice'
                     )}
@@ -375,24 +375,24 @@ export function DetailBuyCard({
                     <span
                       aria-hidden="true"
                       className={cn(
-                        'relative z-10 inline-flex items-center justify-center w-5 h-5 rounded-[5px] border-[1.5px] transition-colors shrink-0 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--brand-primary)]',
+                        'relative z-10 inline-flex items-center justify-center w-5 h-5 rounded-[5px] border transition-colors shrink-0 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--brand-primary)]',
                         isSelected
                           ? 'border-[var(--brand-primary)] bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
-                          : 'border-[var(--border-strong)] bg-[var(--bg-surface)]'
+                          : 'border-[var(--border-subtle)] bg-[var(--bg-surface)]'
                       )}
                     >
                       {isSelected && (
-                        <Check className="w-3.5 h-3.5 stroke-[3]" aria-hidden="true" />
+                        <Check className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
                       )}
                     </span>
                     <span className="relative z-10 flex flex-col leading-none gap-0.5 whitespace-nowrap">
-                      <span className="text-[10px] font-medium text-[var(--text-muted)] leading-none">
+                      <span className="text-[10px] font-normal text-[var(--text-muted)] leading-none">
                         Validity
                       </span>
                       <span
                         className={cn(
-                          'text-xs font-bold leading-tight',
-                          isSelected || option.isLongValidity
+                          'text-xs font-medium leading-tight',
+                          isSelected
                             ? 'text-[var(--text-main)]'
                             : 'text-[var(--text-muted)]'
                         )}
@@ -409,7 +409,7 @@ export function DetailBuyCard({
 
         <div
           className={cn(
-            'flex flex-wrap items-center gap-2.5 max-md:w-full max-md:grid max-md:gap-2.5',
+            'max-lg:mt-2 flex flex-wrap items-center gap-2.5 max-md:w-full max-md:grid max-md:gap-2.5',
             hasBookSample || (hasExamSample && Boolean(sampleJsonUrl))
               ? 'max-md:grid-cols-2'
               : 'max-md:grid-cols-1'

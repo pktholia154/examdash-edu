@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Plus_Jakarta_Sans, JetBrains_Mono, Source_Serif_4 } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 import { AppProviders } from '../features/shell/providers';
 import {
@@ -9,27 +9,34 @@ import {
   serializeSafeJsonLd,
 } from '../lib/seo/schema';
 
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ['latin'],
+const plusJakarta = localFont({
+  src: '../assets/fonts/PlusJakartaSans-Variable.woff2',
   display: 'swap',
+  preload: true,
   variable: '--font-sans',
-  weight: ['400', '500', '600', '700', '800'],
+  weight: '400 800',
+  adjustFontFallback: 'Arial',
+  fallback: ['system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
 });
 
-const sourceSerif = Source_Serif_4({
-  subsets: ['latin'],
+const sourceSerif = localFont({
+  src: '../assets/fonts/SourceSerif4-Variable.woff2',
   display: 'swap',
   preload: false,
   variable: '--font-serif',
-  weight: ['400', '600', '700'],
+  weight: '400 700',
+  adjustFontFallback: 'Times New Roman',
+  fallback: ['Charter', 'Cambria', 'Georgia', 'serif'],
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
+const jetbrainsMono = localFont({
+  src: '../assets/fonts/JetBrainsMono-Variable.woff2',
   display: 'swap',
   preload: false,
   variable: '--font-mono',
-  weight: ['400', '500', '600'],
+  weight: '400 600',
+  adjustFontFallback: false,
+  fallback: ['ui-monospace', 'SFMono-Regular', 'monospace'],
 });
 
 export const viewport: Viewport = {

@@ -25,6 +25,7 @@ export interface InstallAppCalloutProps {
  * Renders identically on the Home page and on Book/Exam detail pages.
  */
 export function InstallAppCallout({
+  variant = 'home',
   className = '',
 }: InstallAppCalloutProps) {
   const {
@@ -42,10 +43,15 @@ export function InstallAppCallout({
   const showProgressBar =
     status === 'installing' || status === 'installed-success';
 
+  const surfaceBgClass =
+    variant === 'detail' || variant === 'home'
+      ? 'bg-[#e6e6e6]'
+      : 'bg-[var(--bg-surface)]';
+
   return (
     <div
       data-nosnippet=""
-      className={`relative overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2.5 transition-colors ${className}`}
+      className={`relative overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-subtle)] ${surfaceBgClass} px-3.5 py-2.5 transition-colors ${className}`}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">

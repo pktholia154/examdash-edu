@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- Stage 1: Install dependencies ---
-FROM node:20-slim AS deps
+FROM node:22-slim AS deps
 WORKDIR /app
 
 # Copy package manifests
@@ -16,7 +16,7 @@ RUN if [ -f package-lock.json ]; then \
     fi
 
 # --- Stage 2: Build Next.js standalone production bundle ---
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -28,7 +28,7 @@ COPY . .
 RUN npm run build
 
 # --- Stage 3: Minimal production runtime (Cloud Run / Docker) ---
-FROM node:20-slim AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
