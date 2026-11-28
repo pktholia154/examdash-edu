@@ -474,12 +474,20 @@ export async function middleware(req: NextRequest) {
           'public, max-age=0, s-maxage=60, stale-while-revalidate=60'
         );
       } else {
-        const edgeCacheDirective =
-          'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400';
+        const isCatalogHubRoute =
+          pathname === '/' ||
+          pathname === '/books' ||
+          pathname === '/exams' ||
+          pathname.startsWith('/books/category/');
+        const edgeCacheDirective = isCatalogHubRoute
+          ? 'public, max-age=60, s-maxage=120, stale-while-revalidate=600, stale-if-error=86400'
+          : 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600, stale-if-error=86400';
         res.headers.set('Cache-Control', edgeCacheDirective);
         res.headers.set(
           'CDN-Cache-Control',
-          'public, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400'
+          isCatalogHubRoute
+            ? 'public, s-maxage=120, stale-while-revalidate=600, stale-if-error=86400'
+            : 'public, s-maxage=300, stale-while-revalidate=3600, stale-if-error=86400'
         );
       }
       res.headers.set('Vary', PUBLIC_ROUTER_VARY);

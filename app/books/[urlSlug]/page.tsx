@@ -25,7 +25,7 @@ import {
 } from '../../../server/cache/catalog-cache';
 
 export const dynamicParams = true;
-export const revalidate = false;
+export const revalidate = 60;
 
 export async function generateStaticParams() {
   return [];

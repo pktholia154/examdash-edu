@@ -502,13 +502,30 @@ export async function getLiveBooksPage(options?: {
   limit?: number;
   offset?: number;
 }): Promise<CatalogPageResult<PublicBookDTO>> {
-  return runPaginatedCollectionQuery({
-    collectionId: 'books',
-    fields: PUBLIC_BOOK_CARD_FIELDS,
-    limit: options?.limit ?? 10,
-    offset: options?.offset ?? 0,
-    mapper: mapBookToPublicDTO,
-  });
+  const safeLimit = Math.max(1, Math.min(48, Math.floor(options?.limit ?? 10) || 10));
+  const safeOffset = Math.max(0, Math.min(50000, Math.floor(options?.offset ?? 0) || 0));
+
+  const { rows } = await getLiveBooksIndexManifest();
+  const pageSlice =
+    safeOffset < rows.length ? rows.slice(safeOffset, safeOffset + safeLimit) : [];
+  const items = await fetchBookCardsByManifestSlice(pageSlice);
+  const nextOffset = safeOffset + pageSlice.length;
+  const hasMore = nextOffset < rows.length;
+
+  return {
+    items,
+    hasMore,
+    nextOffset,
+  };
+}
+
+/**
+ * Returns the exact live published book count strictly matching `isDocumentLive`
+ * (`isPublished === true`, `isDeleted !== true`, `publishAt <= now`).
+ */
+export async function getLiveBooksExactCount(): Promise<number> {
+  const { rows } = await getLiveBooksIndexManifest();
+  return rows.length;
 }
 
 export async function getLiveExamsPage(options?: {
@@ -788,7 +805,7 @@ export async function getCatalogItemsByRefs(
   return resolved;
 }
 
-const SITEMAP_CACHE_TTL_MS = 60_000;
+const SITEMAP_CACHE_TTL_MS = 30_000;
 
 const sitemapEntriesCache = new Map<
   CollectionName,
@@ -956,8 +973,19 @@ export async function getSitemapCatalogEntries(
     }
   }
 
+  // Deduplicate by canonical urlSlug (retaining newest updatedAtIso) and sort chronologically
+  const bySlug = new Map<string, SitemapCatalogEntry>();
+  for (const entry of entries) {
+    if (!entry.urlSlug) continue;
+    const prev = bySlug.get(entry.urlSlug);
+    if (!prev || entry.updatedAtIso > prev.updatedAtIso) {
+      bySlug.set(entry.urlSlug, entry);
+    }
+  }
+  const dedupedEntries = Array.from(bySlug.values());
+
   // Deterministic chronological sort so existing shard batches never reshuffle when new items publish
-  entries.sort((a, b) => {
+  dedupedEntries.sort((a, b) => {
     const pubDiff =
       new Date(a.publishAtIso).getTime() - new Date(b.publishAtIso).getTime();
     if (pubDiff !== 0) return pubDiff;
@@ -966,10 +994,10 @@ export async function getSitemapCatalogEntries(
 
   sitemapEntriesCache.set(collectionName, {
     expiresAtMs: Date.now() + SITEMAP_CACHE_TTL_MS,
-    entries,
+    entries: dedupedEntries,
   });
 
-  return entries;
+  return dedupedEntries;
 }
 
 /**
@@ -2184,7 +2212,7 @@ interface BookManifestIndexRow {
   categorySlug?: string;
 }
 
-const MANIFEST_MEMORY_TTL_MS = 60_000;
+const MANIFEST_MEMORY_TTL_MS = 30_000;
 
 let liveBooksManifestCache: {
   expiresAtMs: number;
@@ -2758,10 +2786,7 @@ export async function getCategoryBooksHubPage(params: {
   const safePageSize = Math.max(1, Math.min(30, Math.floor(params.pageSize ?? 15)));
   const safePage = Math.max(1, Math.floor(params.page || 1));
 
-  const [manifestResult, aggCount] = await Promise.all([
-    getLiveBooksIndexManifest(),
-    getCategoryPublishedBooksCount(cleanSlug),
-  ]);
+  const [manifestResult] = await Promise.all([getLiveBooksIndexManifest()]);
 
   const categoryRows = manifestResult.rows.filter(
     (row) => row.categorySlug === cleanSlug
@@ -2769,10 +2794,7 @@ export async function getCategoryBooksHubPage(params: {
   const facets = deriveAvailableBookFacets(categoryRows);
   const filteredRows = applyManifestFacetsAndSort(categoryRows, params.filters);
 
-  const unfilteredTotalCount =
-    typeof aggCount === 'number'
-      ? Math.max(aggCount, categoryRows.length)
-      : categoryRows.length;
+  const unfilteredTotalCount = categoryRows.length;
   const totalCount = filteredRows.length;
 
   const sliceStart = (safePage - 1) * safePageSize;
@@ -2827,19 +2849,13 @@ export async function getFilteredBooksCatalogPage(params: {
   const safePageSize = Math.max(1, Math.min(30, Math.floor(params.pageSize ?? 20)));
   const safePage = Math.max(1, Math.floor(params.page || 1));
 
-  const [manifestResult, aggCount] = await Promise.all([
-    getLiveBooksIndexManifest(),
-    getLiveCollectionCount('books'),
-  ]);
+  const manifestResult = await getLiveBooksIndexManifest();
 
   const allBookRows = manifestResult.rows;
   const facets = deriveAvailableBookFacets(allBookRows);
   const filteredRows = applyManifestFacetsAndSort(allBookRows, params.filters);
 
-  const unfilteredTotalCount =
-    typeof aggCount === 'number'
-      ? Math.max(aggCount, allBookRows.length)
-      : allBookRows.length;
+  const unfilteredTotalCount = allBookRows.length;
   const totalCount = filteredRows.length;
 
   const sliceStart = (safePage - 1) * safePageSize;

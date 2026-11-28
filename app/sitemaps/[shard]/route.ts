@@ -52,17 +52,13 @@ export async function GET(
     });
   }
 
-  const isUpdatesShard = shard.trim().toLowerCase() === 'updates.xml';
-
   return new NextResponse(xml, {
     status: 200,
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
       'Cache-Control': isMirrorHost
         ? 'private, no-store'
-        : isUpdatesShard
-        ? 'public, max-age=60, s-maxage=900, stale-while-revalidate=86400, stale-if-error=86400'
-        : 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400',
+        : 'public, max-age=60, s-maxage=120, stale-while-revalidate=600, stale-if-error=86400',
       'X-Robots-Tag': isMirrorHost ? 'noindex, nofollow' : 'noindex, follow',
       ...(isMirrorHost
         ? {}

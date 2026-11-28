@@ -17,6 +17,7 @@ import {
   getCategoryBySlug,
   getExamBySlug,
   getFilteredBooksCatalogPage,
+  getLiveBooksExactCount,
   getLiveBooksPage,
   getLiveCategoryChips,
   getLiveCollectionCount,
@@ -37,48 +38,56 @@ import {
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 /**
- * Infinite Next.js Data Cache (`revalidate: false`) wrappers for server-rendered public routes.
- * Paired with event-driven `revalidatePath()` and `revalidateTag()` in publishing and review routes
- * so public HTML/RSC hits avoid redundant Firestore round-trips while updating immediately on publish.
+ * Bounded ISR Data Cache TTLs (60s) paired with event-driven `revalidatePath()` and `revalidateTag()`
+ * in publishing and review routes. Direct Firebase additions, updates, and deletions automatically
+ * synchronize within <= 60s without manual webhook calls, while minimizing Firestore read costs.
  */
+const CATALOG_REVALIDATE_SECONDS = 60;
+const SITEMAP_REVALIDATE_SECONDS = 60;
+
 const cachedLiveBooksPageProd = unstable_cache(
   async (limit: number, offset: number): Promise<CatalogPageResult<PublicBookDTO>> =>
     getLiveBooksPage({ limit, offset }),
-  ['ed-live-books-page-v1'],
-  { revalidate: false, tags: ['catalog', 'books'] }
+  ['ed-live-books-page-v2'],
+  { revalidate: CATALOG_REVALIDATE_SECONDS, tags: ['catalog', 'books'] }
 );
 
 const cachedLiveExamsPageProd = unstable_cache(
   async (limit: number, offset: number): Promise<CatalogPageResult<PublicExamDTO>> =>
     getLiveExamsPage({ limit, offset }),
-  ['ed-live-exams-page-v1'],
-  { revalidate: false, tags: ['catalog', 'exams'] }
+  ['ed-live-exams-page-v2'],
+  { revalidate: CATALOG_REVALIDATE_SECONDS, tags: ['catalog', 'exams'] }
 );
 
 const cachedCollectionCountProd = unstable_cache(
   async (collectionName: CollectionName): Promise<number | null> =>
-    getLiveCollectionCount(collectionName),
-  ['ed-collection-count-v1'],
-  { revalidate: false, tags: ['catalog', 'books', 'exams'] }
+    collectionName === 'books'
+      ? getLiveBooksExactCount()
+      : getLiveCollectionCount(collectionName),
+  ['ed-collection-count-v2'],
+  { revalidate: CATALOG_REVALIDATE_SECONDS, tags: ['catalog', 'books', 'exams'] }
 );
 
 const cachedSitemapEntriesProd = unstable_cache(
   async (collectionName: CollectionName): Promise<SitemapCatalogEntry[]> =>
     getSitemapCatalogEntries(collectionName),
-  ['ed-sitemap-entries-v1'],
-  { revalidate: false, tags: ['catalog', 'sitemaps'] }
+  ['ed-sitemap-entries-v2'],
+  { revalidate: SITEMAP_REVALIDATE_SECONDS, tags: ['catalog', 'sitemaps'] }
 );
 
 const cachedLiveCategoryChipsProd = unstable_cache(
   async (): Promise<CategoryChipDTO[]> => getLiveCategoryChips(),
-  ['ed-live-category-chips-v1'],
-  { revalidate: false, tags: ['catalog', 'books', 'categories'] }
+  ['ed-live-category-chips-v2'],
+  { revalidate: CATALOG_REVALIDATE_SECONDS, tags: ['catalog', 'books', 'categories'] }
 );
 
 const cachedSitemapCategoryEntriesProd = unstable_cache(
   async (): Promise<SitemapCategoryEntry[]> => getSitemapCategoryEntries(),
-  ['ed-sitemap-category-entries-v1'],
-  { revalidate: false, tags: ['catalog', 'books', 'categories', 'sitemaps'] }
+  ['ed-sitemap-category-entries-v2'],
+  {
+    revalidate: SITEMAP_REVALIDATE_SECONDS,
+    tags: ['catalog', 'books', 'categories', 'sitemaps'],
+  }
 );
 
 export async function getCachedLiveBooksPage(options?: {
@@ -109,7 +118,9 @@ export async function getCachedLiveCollectionCount(
   collectionName: CollectionName
 ): Promise<number | null> {
   if (!IS_PROD) {
-    return getLiveCollectionCount(collectionName);
+    return collectionName === 'books'
+      ? getLiveBooksExactCount()
+      : getLiveCollectionCount(collectionName);
   }
   return cachedCollectionCountProd(collectionName);
 }
@@ -141,9 +152,9 @@ export async function getCachedCategoryBySlug(
   }
   const fn = unstable_cache(
     async () => getCategoryBySlug(cleanSlug, { includeFullDescription: includeFull }),
-    ['ed-category-by-slug-v1', cleanSlug, includeFull ? 'full' : 'slim'],
+    ['ed-category-by-slug-v2', cleanSlug, includeFull ? 'full' : 'slim'],
     {
-      revalidate: false,
+      revalidate: CATALOG_REVALIDATE_SECONDS,
       tags: ['catalog', 'categories', `category:${cleanSlug}`],
     }
   );
@@ -177,9 +188,9 @@ export async function getCachedCategoryBooksHubPage(params: {
         pageSize,
         filters: params.filters,
       }),
-    ['ed-category-books-hub-v1', cleanSlug, String(pageSize), filterKey],
+    ['ed-category-books-hub-v2', cleanSlug, String(pageSize), filterKey],
     {
-      revalidate: false,
+      revalidate: CATALOG_REVALIDATE_SECONDS,
       tags: ['catalog', 'books', 'categories', `category:${cleanSlug}`],
     }
   );
@@ -197,7 +208,7 @@ export async function getCachedFilteredBooksCatalogPage(params: {
   hasMore: boolean;
   facets: BookAvailableFacets;
 }> {
-  const pageSize = params.pageSize ?? 20;
+  const pageSize = params.pageSize ?? 15;
   const filterKey = buildBookFacetQueryString(params.filters ?? {}, params.page);
 
   if (!IS_PROD) {
@@ -215,9 +226,9 @@ export async function getCachedFilteredBooksCatalogPage(params: {
         pageSize,
         filters: params.filters,
       }),
-    ['ed-filtered-books-hub-v1', String(pageSize), filterKey],
+    ['ed-filtered-books-hub-v2', String(pageSize), filterKey],
     {
-      revalidate: false,
+      revalidate: CATALOG_REVALIDATE_SECONDS,
       tags: ['catalog', 'books'],
     }
   );
@@ -233,8 +244,11 @@ export async function getCachedBookBySlug(
   }
   const fn = unstable_cache(
     async () => getBookBySlug(cleanSlug),
-    ['ed-book-by-slug-v1', cleanSlug],
-    { revalidate: false, tags: ['catalog', 'books', `book:${cleanSlug}`] }
+    ['ed-book-by-slug-v2', cleanSlug],
+    {
+      revalidate: CATALOG_REVALIDATE_SECONDS,
+      tags: ['catalog', 'books', `book:${cleanSlug}`],
+    }
   );
   return fn();
 }
@@ -248,8 +262,11 @@ export async function getCachedExamBySlug(
   }
   const fn = unstable_cache(
     async () => getExamBySlug(cleanSlug),
-    ['ed-exam-by-slug-v1', cleanSlug],
-    { revalidate: false, tags: ['catalog', 'exams', `exam:${cleanSlug}`] }
+    ['ed-exam-by-slug-v2', cleanSlug],
+    {
+      revalidate: CATALOG_REVALIDATE_SECONDS,
+      tags: ['catalog', 'exams', `exam:${cleanSlug}`],
+    }
   );
   return fn();
 }
@@ -273,9 +290,9 @@ export async function getCachedItemReviewsSummary(
   }
   const fn = unstable_cache(
     async () => getItemReviewsSummary(collectionName, cleanId),
-    ['ed-item-reviews-v1', collectionName, cleanId],
+    ['ed-item-reviews-v2', collectionName, cleanId],
     {
-      revalidate: false,
+      revalidate: CATALOG_REVALIDATE_SECONDS,
       tags: ['reviews', `reviews:${collectionName}:${cleanId}`],
     }
   );
@@ -298,8 +315,8 @@ export async function getCachedPublishedReviewAggregates(
       const map = await getPublishedReviewAggregates(sortedKeys);
       return Object.fromEntries(map.entries());
     },
-    ['ed-review-aggregates-v1', cacheKey],
-    { revalidate: false, tags: ['reviews', 'catalog'] }
+    ['ed-review-aggregates-v2', cacheKey],
+    { revalidate: CATALOG_REVALIDATE_SECONDS, tags: ['reviews', 'catalog'] }
   );
   const record = await fn();
   return new Map(Object.entries(record));

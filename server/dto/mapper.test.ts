@@ -355,6 +355,30 @@ test('mapCategoryToChipDTO omits fullDescription while mapCategoryToPublicDTO an
   });
   assert.equal(categorizedBook.category, 'CUET PG');
   assert.equal(categorizedBook.categorySlug, 'cuet-pg');
+
+  const lawBook = mapBookToPublicDTO('B_LAW_1', {
+    id: 'B_LAW_1',
+    isPublished: true,
+    isDeleted: false,
+    title: 'CLAT & Judicial Services Digest',
+    urlSlug: 'clat-judicial-services-digest',
+    category: 'Law & Judiciary',
+    buyPrice: 150,
+    listPrice: 200,
+  });
+  assert.equal(lawBook.categorySlug, 'law-and-judiciary');
+
+  const tetBook = mapBookToPublicDTO('B_TET_1', {
+    id: 'B_TET_1',
+    isPublished: true,
+    isDeleted: false,
+    title: 'CTET Paper 1 Solved Papers',
+    urlSlug: 'ctet-paper-1-solved-papers',
+    category: 'TET & CTET',
+    buyPrice: 120,
+    listPrice: 160,
+  });
+  assert.equal(tetBook.categorySlug, 'tet-and-ctet');
 });
 
 

@@ -406,15 +406,14 @@ export default async function CategoryBooksHubPage({
           {/* Editorial Full Description — Rendered Strictly Below the Grid on Unfiltered Page 1 Only */}
           {showFullEditorialBelowGrid && (
             <section
-              aria-labelledby="category-editorial-guide-heading"
+              aria-label={`About ${category.title}`}
               className="ed-container mt-4 pt-8 max-md:pt-6 border-t border-[var(--border-subtle)]"
             >
-              <h2
-                id="category-editorial-guide-heading"
-                className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5"
-              >
-                About {category.title} Preparation & Study Resources
-              </h2>
+              {!/^\s*#{1,2}\s+/.test(category.fullDescription) && (
+                <h2 className="text-lg max-md:text-base font-bold text-[var(--text-main)] mb-3 max-md:mb-2.5">
+                  About {category.title} Preparation &amp; Study Resources
+                </h2>
+              )}
               <div className="text-sm sm:text-base leading-relaxed text-[var(--text-main)] break-words">
                 <DescriptionMarkdown
                   markdown={category.fullDescription}
@@ -448,14 +447,9 @@ export default async function CategoryBooksHubPage({
                 <a
                   key={sib.slug}
                   href={`/books/category/${encodeURIComponent(sib.slug)}`}
-                  className="inline-flex items-center justify-center gap-1.5 min-h-12 px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0"
+                  className="inline-flex items-center justify-center min-h-12 px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0"
                 >
                   <span>{sib.title}</span>
-                  {sib.liveBookCount > 0 && (
-                    <span className="tabular-nums text-[11px] text-[var(--text-muted)]">
-                      ({sib.liveBookCount})
-                    </span>
-                  )}
                 </a>
               ))}
 

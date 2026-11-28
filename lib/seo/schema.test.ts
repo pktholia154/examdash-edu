@@ -293,7 +293,7 @@ test('buildBookDetailJsonLd and buildExamDetailJsonLd include 1:1 AggregateRatin
   assert.equal('datePublished' in epochReviews[0], false);
 });
 
-test('prepareEditorialMarkdown strips leading duplicate hero heading while preserving body headings', () => {
+test('prepareEditorialMarkdown strips leading duplicate hero heading while preserving body and rich category headings', () => {
   const stripped = prepareEditorialMarkdown(
     '# UPSC Modern History Question Bank\n\n## Chapter 1\nContent here.',
     'UPSC Modern History Question Bank'
@@ -305,6 +305,15 @@ test('prepareEditorialMarkdown strips leading duplicate hero heading while prese
     'UPSC Modern History Question Bank'
   );
   assert.equal(kept, '# Key Exam Strategy\n\nFocus on PYQs.');
+
+  const keptCategoryHeading = prepareEditorialMarkdown(
+    '# Banking/IBPS Exam Books – Download Top eBooks, PDFs, Guides & PYQs\n\n## Syllabus Coverage\nDetails.',
+    'Banking'
+  );
+  assert.equal(
+    keptCategoryHeading,
+    '# Banking/IBPS Exam Books – Download Top eBooks, PDFs, Guides & PYQs\n\n## Syllabus Coverage\nDetails.'
+  );
 });
 
 test('toCatalogCardDTO omits fullDescription, seoDescription, bookChapters, and MocktestTitles while retaining imageUrl & imageAlt', () => {
@@ -490,6 +499,8 @@ test('ServerPagination and buildCanonicalAlternates enforce ?page=1-free base UR
 
   const windowTokens = buildVisiblePageNumbers(50, 200);
   assert.deepEqual(windowTokens, [1, 'ellipsis-start', 49, 50, 51, 'ellipsis-end', 200]);
+  assert.deepEqual(buildVisiblePageNumbers(1, 10), [1, 2, 3, 'ellipsis-end', 10]);
+  assert.deepEqual(buildVisiblePageNumbers(10, 10), [1, 'ellipsis-start', 8, 9, 10]);
 
   const alts = buildCanonicalAlternates('/books?page=3', { includeRssFeed: true });
   assert.equal(alts.canonical, 'https://exam-dash.com/books?page=3');

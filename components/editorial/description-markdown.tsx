@@ -150,11 +150,7 @@ export function prepareEditorialMarkdown(
       if (headingMatch && heroTitle) {
         const candidate = normalizeHeadingComparison(headingMatch[1]);
         const target = normalizeHeadingComparison(heroTitle);
-        if (
-          candidate &&
-          target &&
-          (candidate === target || candidate.startsWith(`${target} `))
-        ) {
+        if (candidate && target && candidate === target) {
           body = lines
             .slice(firstContentIdx + 1)
             .join('\n')

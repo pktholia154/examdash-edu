@@ -408,11 +408,7 @@ export function mapBookToPublicDTO(
       ? raw.categorySlug.trim()
       : rawCategory;
   const normalizedCategorySlug = rawCategorySlugCandidate
-    ? rawCategorySlugCandidate
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 160)
+    ? normalizeCategorySlugValue(rawCategorySlugCandidate, '')
     : undefined;
 
   return {
@@ -476,6 +472,7 @@ export function normalizeCategorySlugValue(
   const source = candidate || fallbackIdOrTitle || 'category';
   const cleaned = source
     .toLowerCase()
+    .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 160)

@@ -27,7 +27,7 @@ import {
   buildLatestBooksShelf,
 } from '../lib/catalog/carousel-shelves';
 
-export const revalidate = false;
+export const revalidate = 60;
 
 export const metadata: Metadata = {
   alternates: buildCanonicalAlternates('/', { includeRssFeed: true }),

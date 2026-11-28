@@ -72,7 +72,7 @@ export function FilteredPaginationButtons({
         type="button"
         disabled={!hasPrev || isPending}
         onClick={() => navigateToPage(currentPage - 1)}
-        className="inline-flex items-center justify-center gap-1 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap shrink-0"
+        className="inline-flex items-center justify-center gap-1 min-h-12 px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap shrink-0"
       >
         <ChevronLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
         <span>Previous</span>
@@ -84,7 +84,7 @@ export function FilteredPaginationButtons({
             <span
               key={token}
               aria-hidden="true"
-              className="inline-flex items-center justify-center min-h-[44px] min-w-[36px] text-xs font-semibold text-[var(--text-muted)] select-none"
+              className="inline-flex items-center justify-center min-h-12 min-w-9 text-xs font-semibold text-[var(--text-muted)] select-none"
             >
               …
             </span>
@@ -101,7 +101,7 @@ export function FilteredPaginationButtons({
             aria-current={isCurrent ? 'page' : undefined}
             aria-label={`Page ${token}`}
             className={cn(
-              'inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-3 rounded-lg text-xs font-semibold tabular-nums transition-colors whitespace-nowrap shrink-0',
+              'inline-flex items-center justify-center min-h-12 min-w-12 px-3 rounded-lg text-xs font-semibold tabular-nums transition-colors whitespace-nowrap shrink-0',
               isCurrent
                 ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)]'
                 : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]'
@@ -116,7 +116,7 @@ export function FilteredPaginationButtons({
         type="button"
         disabled={!hasNext || isPending}
         onClick={() => navigateToPage(currentPage + 1)}
-        className="inline-flex items-center justify-center gap-1 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap shrink-0"
+        className="inline-flex items-center justify-center gap-1 min-h-12 px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap shrink-0"
       >
         <span>Next</span>
         <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />

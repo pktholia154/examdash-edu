@@ -107,25 +107,13 @@ export function CategoryChipsBar({
                   href={`/books/category/${encodeURIComponent(cat.slug)}`}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'inline-flex items-center justify-center gap-1.5 min-h-12 px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
+                    'inline-flex items-center justify-center min-h-12 px-3.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0',
                     isActive
                       ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-ink)] font-semibold'
                       : 'border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]'
                   )}
                 >
                   <span>{cat.title}</span>
-                  {cat.liveBookCount > 0 && (
-                    <span
-                      className={cn(
-                        'tabular-nums text-[11px]',
-                        isActive
-                          ? 'opacity-80'
-                          : 'text-[var(--text-muted)]'
-                      )}
-                    >
-                      ({cat.liveBookCount})
-                    </span>
-                  )}
                 </a>
               </li>
             );
