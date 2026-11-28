@@ -10,6 +10,10 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidCategoryId(categoryId) {
+      return categoryId is string && categoryId.size() >= 1 && categoryId.size() <= 128 && categoryId.matches('^[a-zA-Z0-9_ \\-]+$');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -703,6 +707,14 @@ service cloud.firestore {
         && resource.data.isDeleted == false;
       allow list: if resource.data.isPublished == true
         && resource.data.isDeleted == false;
+      allow create, update, delete: if false;
+    }
+
+    // Read-Only Public SEO Hub Categories
+    match /category/{categoryId} {
+      allow get: if isValidCategoryId(categoryId)
+        && resource.data.isDeleted == false;
+      allow list: if resource.data.isDeleted == false;
       allow create, update, delete: if false;
     }
 

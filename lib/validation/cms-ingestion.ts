@@ -110,6 +110,8 @@ export const CmsBookIngestionSchema = z
     fullDescription: z.string().trim().max(120_000).default(''),
     type: z.string().trim().min(1).max(80).default('Ebook'),
     language: z.string().trim().min(1).max(60).default('English'),
+    category: z.string().trim().max(160).optional(),
+    categorySlug: CanonicalSlugSchema.optional(),
     publisher: z.string().trim().min(1).max(120).default('ExamDash'),
     authorName: z.string().trim().min(1).max(120).default('ExamDash Editorial'),
     tags: z.array(z.string().trim().min(1).max(60)).max(25).default([]),
@@ -270,7 +272,7 @@ export const CmsExamSetArraySchema = z.array(CmsExamSetSchema).min(1);
  * Zod schema for authenticated CMS / publishing webhooks (`/api/v1/seo/publish` & `/api/v1/seo/indexnow`).
  */
 export const PublishWebhookItemSchema = z.object({
-  collectionName: z.enum(['books', 'ExamPackDocument', 'exams']),
+  collectionName: z.enum(['books', 'ExamPackDocument', 'exams', 'category']),
   urlSlug: z.string().trim().min(1).max(160),
   itemId: z.string().trim().max(120).optional(),
   action: z.enum(['publish', 'update', 'delete']).default('publish'),

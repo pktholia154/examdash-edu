@@ -32,7 +32,9 @@
         "fullMarkdownStoragePath": { "type": "string", "maxLength": 1024 },
         "fullPdfStoragePath": { "type": "string", "maxLength": 1024 },
         "soldCount": { "type": "number", "description": "Optional verified units sold count" },
-        "isBestseller": { "type": "boolean", "description": "Optional editorial bestseller flag" }
+        "isBestseller": { "type": "boolean", "description": "Optional editorial bestseller flag" },
+        "category": { "type": "string", "maxLength": 160, "description": "Display title of the parent book category" },
+        "categorySlug": { "type": "string", "maxLength": 160, "pattern": "^[a-z0-9\\-]+$", "description": "Canonical URL slug of the parent book category" }
       },
       "required": [
         "id",
@@ -45,6 +47,27 @@
         "currency",
         "listPrice",
         "buyPrice"
+      ]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "SEO Hub category taxonomy record in the category collection.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_ \\-]+$" },
+        "slug": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[a-z0-9\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "metaDescription": { "type": "string", "maxLength": 500 },
+        "fullDescription": { "type": "string", "maxLength": 50000 },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "slug",
+        "title",
+        "isDeleted"
       ]
     },
     "ExamPack": {
@@ -349,6 +372,10 @@
     "/books/{bookId}": {
       "schema": { "$ref": "#/entities/Book" },
       "description": "Read-only public catalog of published ebooks and question banks."
+    },
+    "/category/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Read-only public SEO hub taxonomy categories for published books."
     },
     "/ExamPackDocument/{examId}": {
       "schema": { "$ref": "#/entities/ExamPack" },

@@ -1,7 +1,9 @@
 import type {
+  CategoryChipDTO,
   ImageMetaDTO,
   MocktestTitleItem,
   PublicBookDTO,
+  PublicCategoryDTO,
   PublicExamDTO,
 } from '../../lib/types/catalog';
 
@@ -397,6 +399,22 @@ export function mapBookToPublicDTO(
   const currency = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : 'INR';
   const rawSlug = typeof raw.urlSlug === 'string' ? raw.urlSlug.trim() : '';
 
+  const rawCategory =
+    typeof raw.category === 'string' && raw.category.trim()
+      ? raw.category.trim()
+      : undefined;
+  const rawCategorySlugCandidate =
+    typeof raw.categorySlug === 'string' && raw.categorySlug.trim()
+      ? raw.categorySlug.trim()
+      : rawCategory;
+  const normalizedCategorySlug = rawCategorySlugCandidate
+    ? rawCategorySlugCandidate
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 160)
+    : undefined;
+
   return {
     id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : safeDocId,
     collectionName: 'books',
@@ -443,8 +461,88 @@ export function mapBookToPublicDTO(
       raw.hasFullMarkdown === true ||
       (typeof raw.fullMarkdownStoragePath === 'string' &&
         raw.fullMarkdownStoragePath.trim().length > 0),
+    ...(rawCategory ? { category: rawCategory } : {}),
+    ...(normalizedCategorySlug ? { categorySlug: normalizedCategorySlug } : {}),
     ...(soldCount !== undefined ? { soldCount } : {}),
     ...(isBestseller ? { isBestseller: true } : {}),
+  };
+}
+
+export function normalizeCategorySlugValue(
+  rawSlug: unknown,
+  fallbackIdOrTitle: string
+): string {
+  const candidate = typeof rawSlug === 'string' ? rawSlug.trim() : '';
+  const source = candidate || fallbackIdOrTitle || 'category';
+  const cleaned = source
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 160)
+    .replace(/-+$/g, '');
+  return cleaned || 'general';
+}
+
+/**
+ * Maps raw Firestore `category` document to slim `CategoryChipDTO` (never includes `fullDescription`).
+ */
+export function mapCategoryToChipDTO(
+  docId: string,
+  rawInput: Record<string, unknown>,
+  liveBookCount: number = 0
+): CategoryChipDTO {
+  const raw =
+    rawInput && typeof rawInput === 'object'
+      ? rawInput
+      : ({} as Record<string, unknown>);
+  const safeDocId = (docId || 'category').trim() || 'category';
+  const id =
+    typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : safeDocId;
+  const title =
+    typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : id;
+  const slug = normalizeCategorySlugValue(raw.slug ?? raw.urlSlug, title || id);
+
+  const nowMs = Date.now();
+  const createdMs = extractTimestampMs(raw.createdAt) ?? nowMs;
+  const updatedMs = extractTimestampMs(raw.updatedAt) ?? createdMs;
+
+  const metaDescription = normalizeProse(
+    typeof raw.metaDescription === 'string' && raw.metaDescription.trim()
+      ? raw.metaDescription
+      : typeof raw.seoDescription === 'string'
+      ? raw.seoDescription
+      : ''
+  );
+
+  return {
+    id,
+    slug,
+    title,
+    metaDescription:
+      metaDescription ||
+      `Browse verified ${title} exam preparation books, solved papers, and question banks with free sample previews on ExamDash.`,
+    updatedAtIso: safeTimestampToIso(updatedMs, createdMs),
+    createdAtIso: safeTimestampToIso(createdMs, nowMs),
+    liveBookCount: Math.max(0, Math.floor(liveBookCount)),
+  };
+}
+
+/**
+ * Maps raw Firestore `category` document to `PublicCategoryDTO` (`fullDescription` populated only when projected).
+ */
+export function mapCategoryToPublicDTO(
+  docId: string,
+  rawInput: Record<string, unknown>,
+  liveBookCount: number = 0
+): PublicCategoryDTO {
+  const chip = mapCategoryToChipDTO(docId, rawInput, liveBookCount);
+  const raw =
+    rawInput && typeof rawInput === 'object'
+      ? rawInput
+      : ({} as Record<string, unknown>);
+  return {
+    ...chip,
+    fullDescription: normalizeProse(raw.fullDescription),
   };
 }
 

@@ -1,20 +1,32 @@
 import { unstable_cache } from 'next/cache';
 import type {
+  BookAvailableFacets,
+  BookFacetFilters,
+  CategoryChipDTO,
   CollectionName,
   ItemReviewSummaryDTO,
   PublicBookDTO,
+  PublicCategoryDTO,
   PublicExamDTO,
   ReviewAggregateBadge,
 } from '../../lib/types/catalog';
+import { buildBookFacetQueryString } from '../../lib/catalog/facets';
 import {
   getBookBySlug,
+  getCategoryBooksHubPage,
+  getCategoryBySlug,
   getExamBySlug,
+  getFilteredBooksCatalogPage,
   getLiveBooksPage,
+  getLiveCategoryChips,
   getLiveCollectionCount,
   getLiveExamsPage,
   getSitemapCatalogEntries,
+  getSitemapCategoryEntries,
   type CatalogPageResult,
+  type CategoryBooksHubPageResult,
   type SitemapCatalogEntry,
+  type SitemapCategoryEntry,
   type SlugLookupResult,
 } from '../repositories/catalog-repository';
 import {
@@ -57,6 +69,18 @@ const cachedSitemapEntriesProd = unstable_cache(
   { revalidate: false, tags: ['catalog', 'sitemaps'] }
 );
 
+const cachedLiveCategoryChipsProd = unstable_cache(
+  async (): Promise<CategoryChipDTO[]> => getLiveCategoryChips(),
+  ['ed-live-category-chips-v1'],
+  { revalidate: false, tags: ['catalog', 'books', 'categories'] }
+);
+
+const cachedSitemapCategoryEntriesProd = unstable_cache(
+  async (): Promise<SitemapCategoryEntry[]> => getSitemapCategoryEntries(),
+  ['ed-sitemap-category-entries-v1'],
+  { revalidate: false, tags: ['catalog', 'books', 'categories', 'sitemaps'] }
+);
+
 export async function getCachedLiveBooksPage(options?: {
   limit?: number;
   offset?: number;
@@ -88,6 +112,116 @@ export async function getCachedLiveCollectionCount(
     return getLiveCollectionCount(collectionName);
   }
   return cachedCollectionCountProd(collectionName);
+}
+
+export async function getCachedLiveCategoryChips(): Promise<CategoryChipDTO[]> {
+  if (!IS_PROD) {
+    return getLiveCategoryChips();
+  }
+  return cachedLiveCategoryChipsProd();
+}
+
+export async function getCachedSitemapCategoryEntries(): Promise<
+  SitemapCategoryEntry[]
+> {
+  if (!IS_PROD) {
+    return getSitemapCategoryEntries();
+  }
+  return cachedSitemapCategoryEntriesProd();
+}
+
+export async function getCachedCategoryBySlug(
+  slug: string,
+  options?: { includeFullDescription?: boolean }
+): Promise<SlugLookupResult<PublicCategoryDTO>> {
+  const cleanSlug = (slug || '').trim().toLowerCase();
+  const includeFull = options?.includeFullDescription !== false;
+  if (!cleanSlug || !IS_PROD) {
+    return getCategoryBySlug(slug, { includeFullDescription: includeFull });
+  }
+  const fn = unstable_cache(
+    async () => getCategoryBySlug(cleanSlug, { includeFullDescription: includeFull }),
+    ['ed-category-by-slug-v1', cleanSlug, includeFull ? 'full' : 'slim'],
+    {
+      revalidate: false,
+      tags: ['catalog', 'categories', `category:${cleanSlug}`],
+    }
+  );
+  return fn();
+}
+
+export async function getCachedCategoryBooksHubPage(params: {
+  categorySlug: string;
+  page: number;
+  pageSize?: number;
+  filters?: BookFacetFilters;
+}): Promise<CategoryBooksHubPageResult> {
+  const cleanSlug = (params.categorySlug || '').trim().toLowerCase();
+  const pageSize = params.pageSize ?? 15;
+  const filterKey = buildBookFacetQueryString(params.filters ?? {}, params.page);
+
+  if (!cleanSlug || !IS_PROD) {
+    return getCategoryBooksHubPage({
+      categorySlug: cleanSlug,
+      page: params.page,
+      pageSize,
+      filters: params.filters,
+    });
+  }
+
+  const fn = unstable_cache(
+    async () =>
+      getCategoryBooksHubPage({
+        categorySlug: cleanSlug,
+        page: params.page,
+        pageSize,
+        filters: params.filters,
+      }),
+    ['ed-category-books-hub-v1', cleanSlug, String(pageSize), filterKey],
+    {
+      revalidate: false,
+      tags: ['catalog', 'books', 'categories', `category:${cleanSlug}`],
+    }
+  );
+  return fn();
+}
+
+export async function getCachedFilteredBooksCatalogPage(params: {
+  page: number;
+  pageSize?: number;
+  filters?: BookFacetFilters;
+}): Promise<{
+  items: PublicBookDTO[];
+  totalCount: number;
+  unfilteredTotalCount: number;
+  hasMore: boolean;
+  facets: BookAvailableFacets;
+}> {
+  const pageSize = params.pageSize ?? 20;
+  const filterKey = buildBookFacetQueryString(params.filters ?? {}, params.page);
+
+  if (!IS_PROD) {
+    return getFilteredBooksCatalogPage({
+      page: params.page,
+      pageSize,
+      filters: params.filters,
+    });
+  }
+
+  const fn = unstable_cache(
+    async () =>
+      getFilteredBooksCatalogPage({
+        page: params.page,
+        pageSize,
+        filters: params.filters,
+      }),
+    ['ed-filtered-books-hub-v1', String(pageSize), filterKey],
+    {
+      revalidate: false,
+      tags: ['catalog', 'books'],
+    }
+  );
+  return fn();
 }
 
 export async function getCachedBookBySlug(

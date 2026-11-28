@@ -1,14 +1,17 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { FilteredPaginationButtons } from './filtered-pagination-buttons';
 
 export interface ServerPaginationProps {
-  basePath: '/books' | '/exams';
+  basePath: string;
   currentPage: number;
   pageSize: number;
   hasMore: boolean;
   totalCount?: number | null;
   ariaLabel: string;
+  isFiltered?: boolean;
+  filterQueryWithoutPage?: string;
 }
 
 export function buildPaginationHref(basePath: string, page: number): string {
@@ -44,8 +47,8 @@ export function buildVisiblePageNumbers(
 /**
  * Pure Server-Rendered Crawl Pagination (`<a href>` Zero-JS Graph):
  * Ensures Googlebot, Bingbot, and AI search citation bots discover every paginated
- * catalog archive (`/books`, `/books?page=2`, ...) without executing client JS,
- * while never linking to `?page=1`.
+ * catalog & category hub archive (`/books/category/[slug]?page=2`, ...) without executing client JS,
+ * while switching to crawl-proof `<button>` controls whenever facet filters are active.
  */
 export function ServerPagination({
   basePath,
@@ -54,6 +57,8 @@ export function ServerPagination({
   hasMore,
   totalCount,
   ariaLabel,
+  isFiltered = false,
+  filterQueryWithoutPage = '',
 }: ServerPaginationProps) {
   const computedTotalPages =
     typeof totalCount === 'number' && totalCount > 0
@@ -73,6 +78,20 @@ export function ServerPagination({
   const hasNext = hasMore || currentPage < computedTotalPages;
   const visibleTokens = buildVisiblePageNumbers(currentPage, computedTotalPages);
 
+  if (isFiltered) {
+    return (
+      <FilteredPaginationButtons
+        basePath={basePath}
+        filterQueryWithoutPage={filterQueryWithoutPage}
+        currentPage={currentPage}
+        visibleTokens={visibleTokens}
+        hasPrev={hasPrev}
+        hasNext={hasNext}
+        ariaLabel={ariaLabel}
+      />
+    );
+  }
+
   return (
     <nav
       aria-label={ariaLabel}
@@ -82,7 +101,7 @@ export function ServerPagination({
         <a
           href={buildPaginationHref(basePath, currentPage - 1)}
           rel="prev"
-          className="inline-flex items-center justify-center gap-1 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors"
+          className="inline-flex items-center justify-center gap-1 min-h-[44px] px-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-main)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-colors whitespace-nowrap shrink-0"
         >
           <ChevronLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
           <span>Previous</span>

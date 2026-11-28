@@ -206,12 +206,48 @@ function buildGone410Response(isFirebaseOrCloudRunHost: boolean): NextResponse {
   });
 }
 
+function buildSameHostRedirectUrl(
+  req: NextRequest,
+  targetPathname: string,
+  targetSearchParams: URLSearchParams
+): string {
+  const rawForwardedHost = (
+    req.headers.get('x-forwarded-host') ||
+    req.headers.get('host') ||
+    ''
+  )
+    .split(',')[0]
+    ?.trim();
+  const rawProto = (
+    req.headers.get('x-forwarded-proto') ||
+    req.nextUrl.protocol.replace(/:$/, '') ||
+    'https'
+  )
+    .split(',')[0]
+    ?.trim()
+    .toLowerCase();
+  const safeProto = rawProto === 'http' ? 'http' : 'https';
+  const qs = targetSearchParams.toString();
+  const suffix = `${targetPathname}${qs ? `?${qs}` : ''}`;
+
+  if (rawForwardedHost) {
+    return `${safeProto}://${rawForwardedHost}${suffix}`;
+  }
+  return `${req.nextUrl.origin}${suffix}`;
+}
+
 function deriveSurrogateKeys(pathname: string): {
   surrogateKey: string;
   cacheTag: string;
 } {
   if (pathname === '/') {
     return { surrogateKey: 'catalog home books exams', cacheTag: 'catalog,home,books,exams' };
+  }
+  if (pathname.startsWith('/books/category/')) {
+    return {
+      surrogateKey: 'catalog books categories',
+      cacheTag: 'catalog,books,categories',
+    };
   }
   if (pathname === '/books' || pathname.startsWith('/books/')) {
     return { surrogateKey: 'catalog books', cacheTag: 'catalog,books' };
@@ -344,6 +380,50 @@ export async function middleware(req: NextRequest) {
   }
 
   const isPartialRsc = isNextPartialFlightRequest(req);
+
+  // 2d-0. Single-Hop 301 URL Normalization for Category Aliases & Redundant `?page=1`
+  // Preserves incoming host (`x-forwarded-host` / `host`) so `www.exam-dash.com` never cross-host loops.
+  if ((req.method === 'GET' || req.method === 'HEAD') && !isPartialRsc) {
+    const legacyCategoryMatch = pathname.match(/^\/categor(?:y|ies)\/([^/]+)\/?$/);
+    if (legacyCategoryMatch) {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      if (
+        nextParams.getAll('page').length === 1 &&
+        nextParams.get('page')?.trim() === '1'
+      ) {
+        nextParams.delete('page');
+      }
+      const targetUrl = buildSameHostRedirectUrl(
+        req,
+        `/books/category/${legacyCategoryMatch[1]}`,
+        nextParams
+      );
+      const redirectRes = NextResponse.redirect(targetUrl, 301);
+      if (isFirebaseOrCloudRunHost) {
+        redirectRes.headers.set('X-Robots-Tag', 'noindex, nofollow');
+      }
+      return redirectRes;
+    }
+
+    const isPaginatedHubPath =
+      pathname === '/books' ||
+      pathname === '/exams' ||
+      /^\/books\/category\/[^/]+$/.test(pathname);
+    if (
+      isPaginatedHubPath &&
+      searchParams.getAll('page').length === 1 &&
+      searchParams.get('page')?.trim() === '1'
+    ) {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.delete('page');
+      const targetUrl = buildSameHostRedirectUrl(req, pathname, nextParams);
+      const redirectRes = NextResponse.redirect(targetUrl, 301);
+      if (isFirebaseOrCloudRunHost) {
+        redirectRes.headers.set('X-Robots-Tag', 'noindex, nofollow');
+      }
+      return redirectRes;
+    }
+  }
 
   // 2d. Permanently Deleted Entities (`isDeleted == true` Tombstones) -> Genuine HTTP 410 Gone
   if ((req.method === 'GET' || req.method === 'HEAD') && !isPartialRsc) {

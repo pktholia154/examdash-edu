@@ -3,12 +3,13 @@
 ## 1. Data Invariants
 
 1. **Default-Deny Catch-All**: Every path not explicitly matched is denied (`allow read, write: if false`).
-2. **Read-Only Public Catalogs (`books`, `ExamPackDocument`)**:
-   - Client/public reads are permitted ONLY when `resource.data.isPublished == true && resource.data.isDeleted == false`.
-   - Client writes (`create`, `update`, `delete`) to `books` and `ExamPackDocument` are strictly forbidden (`if false`).
+2. **Read-Only Public Catalogs (`books`, `ExamPackDocument`, `category`)**:
+   - Client/public reads on `books` and `ExamPackDocument` are permitted ONLY when `resource.data.isPublished == true && resource.data.isDeleted == false`.
+   - Client/public reads on `category` are permitted ONLY when `resource.data.isDeleted == false` (with single-doc `get` hardened via `isValidCategoryId(categoryId)` allowing `<= 128` chars `^[a-zA-Z0-9_ \-]+$`).
+   - Client writes (`create`, `update`, `delete`) to `books`, `ExamPackDocument`, and `category` are strictly forbidden (`if false`).
 3. **Verified Identity & Path Variable Hardening**:
    - All user writes require `request.auth != null && request.auth.token.email_verified == true`.
-   - Every single-document path variable (`userId`, `infoId`, `purchaseId`, `cartKey`, `bookId`, `examId`) is validated via `isValidId()` (`<= 128` chars, `^[a-zA-Z0-9_\-]+$`).
+   - Every single-document path variable (`userId`, `infoId`, `purchaseId`, `cartKey`, `bookId`, `examId`) is validated via `isValidId()` (`<= 128` chars, `^[a-zA-Z0-9_\-]+$`), and `categoryId` via `isValidCategoryId()` (`<= 128` chars, `^[a-zA-Z0-9_ \-]+$`).
 4. **Master Gate (Relational Parent Sync)**:
    - Subcollections under `/users/{userId}/*` (`private`, `purchases`, `cart`) require `request.auth.uid == userId` AND verify parent profile existence via `exists(/databases/$(database)/documents/users/$(userId))` (or atomic batch creation via `existsAfter(/databases/$(database)/documents/users/$(userId))`).
 5. **PII Split-Collection Isolation**:

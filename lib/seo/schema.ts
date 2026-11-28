@@ -422,11 +422,24 @@ export function buildBookDetailJsonLd(
     '@graph': [
       {
         '@type': 'BreadcrumbList',
-        itemListElement: [
-          { '@type': 'ListItem', position: 1, name: 'Home', item: origin },
-          { '@type': 'ListItem', position: 2, name: 'Books', item: `${origin}/books` },
-          { '@type': 'ListItem', position: 3, name: book.title, item: pageUrl },
-        ],
+        itemListElement:
+          book.categorySlug && book.category
+            ? [
+                { '@type': 'ListItem', position: 1, name: 'Home', item: origin },
+                { '@type': 'ListItem', position: 2, name: 'Books', item: `${origin}/books` },
+                {
+                  '@type': 'ListItem',
+                  position: 3,
+                  name: book.category,
+                  item: `${origin}/books/category/${encodeURIComponent(book.categorySlug)}`,
+                },
+                { '@type': 'ListItem', position: 4, name: book.title, item: pageUrl },
+              ]
+            : [
+                { '@type': 'ListItem', position: 1, name: 'Home', item: origin },
+                { '@type': 'ListItem', position: 2, name: 'Books', item: `${origin}/books` },
+                { '@type': 'ListItem', position: 3, name: book.title, item: pageUrl },
+              ],
       },
       {
         '@type': ['Product', 'Book'],
@@ -526,6 +539,8 @@ export function buildCollectionHubJsonLd(params: {
   title: string;
   description: string;
   pageNum: number;
+  pageSize?: number;
+  isFiltered?: boolean;
   items: Array<{
     title: string;
     urlSlug: string;
@@ -535,9 +550,12 @@ export function buildCollectionHubJsonLd(params: {
   const origin = getCanonicalOrigin();
   const basePath = params.collection === 'books' ? '/books' : '/exams';
   const baseLabel = params.collection === 'books' ? 'Books' : 'Exams';
+  const pageSize = Math.max(1, params.pageSize ?? 20);
+  const isFiltered = Boolean(params.isFiltered);
+  const effectivePage = !isFiltered && params.pageNum > 1 ? params.pageNum : 1;
   const pageUrl =
-    params.pageNum > 1
-      ? `${origin}${basePath}?page=${params.pageNum}`
+    effectivePage > 1
+      ? `${origin}${basePath}?page=${effectivePage}`
       : `${origin}${basePath}`;
 
   const latestItemIso = params.items
@@ -553,7 +571,7 @@ export function buildCollectionHubJsonLd(params: {
         '@type': 'BreadcrumbList',
         itemListElement: [
           { '@type': 'ListItem', position: 1, name: 'Home', item: origin },
-          ...(params.pageNum > 1
+          ...(effectivePage > 1
             ? [
                 {
                   '@type': 'ListItem',
@@ -564,7 +582,7 @@ export function buildCollectionHubJsonLd(params: {
                 {
                   '@type': 'ListItem',
                   position: 3,
-                  name: `Page ${params.pageNum}`,
+                  name: `Page ${effectivePage}`,
                   item: pageUrl,
                 },
               ]
@@ -588,7 +606,7 @@ export function buildCollectionHubJsonLd(params: {
         isPartOf: { '@id': `${origin}/#website` },
         publisher: { '@id': `${origin}/#organization` },
         ...(latestItemIso ? { dateModified: latestItemIso } : {}),
-        ...(params.items.length > 0
+        ...(!isFiltered && params.items.length > 0
           ? {
               mainEntity: {
                 '@type': 'ItemList',
@@ -596,7 +614,7 @@ export function buildCollectionHubJsonLd(params: {
                 itemListOrder: 'https://schema.org/ItemListOrderDescending',
                 itemListElement: params.items.map((item, idx) => ({
                   '@type': 'ListItem',
-                  position: (params.pageNum - 1) * 20 + idx + 1,
+                  position: (effectivePage - 1) * pageSize + idx + 1,
                   name: item.title,
                   url: `${origin}${basePath}/${encodeURIComponent(item.urlSlug)}`,
                 })),
@@ -607,3 +625,111 @@ export function buildCollectionHubJsonLd(params: {
     ],
   };
 }
+
+export function buildCategoryHubJsonLd(params: {
+  category: {
+    slug: string;
+    title: string;
+    metaDescription: string;
+    updatedAtIso: string;
+  };
+  pageNum: number;
+  pageSize: number;
+  isFiltered?: boolean;
+  latestBookIso?: string;
+  items: Array<{
+    title: string;
+    urlSlug: string;
+    updatedAtIso?: string;
+  }>;
+}) {
+  const origin = getCanonicalOrigin();
+  const baseHubPath = `/books/category/${encodeURIComponent(params.category.slug)}`;
+  const baseHubUrl = `${origin}${baseHubPath}`;
+  const isFiltered = Boolean(params.isFiltered);
+  const safePageSize = Math.max(1, params.pageSize || 15);
+  const effectivePage = !isFiltered && params.pageNum > 1 ? params.pageNum : 1;
+  const pageUrl =
+    effectivePage > 1 ? `${baseHubUrl}?page=${effectivePage}` : baseHubUrl;
+
+  const latestItemIso = [
+    params.category.updatedAtIso || '',
+    params.latestBookIso || '',
+    ...params.items.map((i) => i.updatedAtIso || ''),
+  ]
+    .filter(Boolean)
+    .sort()
+    .pop();
+
+  const description =
+    params.category.metaDescription ||
+    `Explore verified ${params.category.title} books, question banks, and downloadable sample chapters on ExamDash.`;
+
+  const pageName =
+    effectivePage > 1
+      ? `${params.category.title} Books — Page ${effectivePage}`
+      : `${params.category.title} Books & Study Materials`;
+
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: origin },
+          { '@type': 'ListItem', position: 2, name: 'Books', item: `${origin}/books` },
+          ...(effectivePage > 1
+            ? [
+                {
+                  '@type': 'ListItem',
+                  position: 3,
+                  name: params.category.title,
+                  item: baseHubUrl,
+                },
+                {
+                  '@type': 'ListItem',
+                  position: 4,
+                  name: `Page ${effectivePage}`,
+                  item: pageUrl,
+                },
+              ]
+            : [
+                {
+                  '@type': 'ListItem',
+                  position: 3,
+                  name: params.category.title,
+                  item: baseHubUrl,
+                },
+              ]),
+        ],
+      },
+      {
+        '@type': 'CollectionPage',
+        '@id': `${pageUrl}#collection`,
+        url: pageUrl,
+        name: pageName,
+        description,
+        inLanguage: 'en-IN',
+        isPartOf: { '@id': `${origin}/#website` },
+        publisher: { '@id': `${origin}/#organization` },
+        ...(latestItemIso ? { dateModified: latestItemIso } : {}),
+        ...(!isFiltered && params.items.length > 0
+          ? {
+              mainEntity: {
+                '@type': 'ItemList',
+                numberOfItems: params.items.length,
+                itemListOrder: 'https://schema.org/ItemListOrderDescending',
+                itemListElement: params.items.map((item, idx) => ({
+                  '@type': 'ListItem',
+                  position: (effectivePage - 1) * safePageSize + idx + 1,
+                  name: item.title,
+                  url: `${origin}/books/${encodeURIComponent(item.urlSlug)}`,
+                })),
+              },
+            }
+          : {}),
+      },
+    ],
+  };
+}
+

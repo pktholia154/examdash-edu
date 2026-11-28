@@ -7,7 +7,10 @@ import {
   buildSitemapIndexXml,
   buildSitemapManifest,
 } from '../../lib/seo/sitemaps';
-import { getCachedSitemapCatalogEntries } from '../../server/cache/catalog-cache';
+import {
+  getCachedSitemapCatalogEntries,
+  getCachedSitemapCategoryEntries,
+} from '../../server/cache/catalog-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,12 +22,13 @@ export async function GET(req: NextRequest) {
   ).toLowerCase();
   const isMirrorHost = isDefaultFirebaseOrCloudRunHost(host);
   const origin = getCanonicalOrigin();
-  const [books, exams] = await Promise.all([
+  const [books, exams, categories] = await Promise.all([
     getCachedSitemapCatalogEntries('books').catch(() => []),
     getCachedSitemapCatalogEntries('ExamPackDocument').catch(() => []),
+    getCachedSitemapCategoryEntries().catch(() => []),
   ]);
 
-  const manifest = buildSitemapManifest({ books, exams, origin });
+  const manifest = buildSitemapManifest({ books, exams, categories, origin });
   const xml = buildSitemapIndexXml(manifest.shards);
 
   return new NextResponse(xml, {

@@ -55,6 +55,8 @@ export interface PublicBookDTO {
   sampleMarkdownUrl: string;
   hasFullPdf: boolean;
   hasFullMarkdown: boolean;
+  category?: string;
+  categorySlug?: string;
   soldCount?: number;
   isBestseller?: boolean;
 }
@@ -147,6 +149,8 @@ export interface CatalogCardDTO {
   listPrice: number;
   buyPrice: number;
   publishAtIso: string;
+  category?: string;
+  categorySlug?: string;
   imageUrl?: string;
   imageAlt?: string;
   imageTitle?: string;
@@ -155,6 +159,47 @@ export interface CatalogCardDTO {
   reviewCount?: number;
   soldCount?: number;
   isBestseller?: boolean;
+}
+
+export type BookPriceBucket =
+  | 'all'
+  | 'free'
+  | 'under-150'
+  | '150-300'
+  | 'above-300';
+
+export interface BookFacetFilters {
+  type?: string;
+  language?: string;
+  price?: BookPriceBucket;
+  sort?: SortOption;
+}
+
+export interface BookAvailableFacets {
+  types: string[];
+  languages: string[];
+  priceBuckets: BookPriceBucket[];
+}
+
+/**
+ * Slim Category Chip DTO — strictly excludes `fullDescription` so `/books` and sitemap
+ * routes never pull or serialize long-form category markdown.
+ */
+export interface CategoryChipDTO {
+  id: string;
+  slug: string;
+  title: string;
+  metaDescription: string;
+  updatedAtIso: string;
+  createdAtIso: string;
+  liveBookCount: number;
+}
+
+/**
+ * Full Category Hub DTO — `fullDescription` is projected strictly on unfiltered Page 1.
+ */
+export interface PublicCategoryDTO extends CategoryChipDTO {
+  fullDescription: string;
 }
 
 export function toCatalogCardDTO(
@@ -181,6 +226,12 @@ export function toCatalogCardDTO(
     listPrice: item.listPrice,
     buyPrice: item.buyPrice,
     publishAtIso: item.publishAtIso,
+    ...(item.collectionName === 'books' && item.category
+      ? { category: item.category }
+      : {}),
+    ...(item.collectionName === 'books' && item.categorySlug
+      ? { categorySlug: item.categorySlug }
+      : {}),
     ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
     ...(item.imageMeta?.alt ? { imageAlt: item.imageMeta.alt } : {}),
     ...(item.imageMeta?.title ? { imageTitle: item.imageMeta.title } : {}),

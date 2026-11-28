@@ -5,6 +5,7 @@ import { middleware } from '../../middleware';
 import {
   buildBookDetailJsonLd,
   buildCanonicalAlternates,
+  buildCategoryHubJsonLd,
   buildCollectionHubJsonLd,
   buildExamDetailJsonLd,
   buildItemCoverSchemaImage,
@@ -663,16 +664,198 @@ test('middleware returns NextResponse.next() with zero redirects and sets X-Robo
   assert.equal(runAppRes.headers.get('location'), null);
   assert.equal(runAppRes.headers.get('x-robots-tag'), 'noindex, nofollow');
 
-  // 5. www.exam-dash.com and ?page=1 -> zero redirects (status 200, no location header)
-  const wwwPage1Req = new NextRequest('https://exam-dash.com/books?page=1', {
+  // 5. www.exam-dash.com without ?page=1 -> zero host redirects (status 200, no location header)
+  const wwwReq = new NextRequest('https://exam-dash.com/books', {
     headers: {
       host: 'examdash-edu.asia-south1.run.app',
       'x-forwarded-host': 'www.exam-dash.com',
     },
   });
-  const wwwPage1Res = await middleware(wwwPage1Req);
-  assert.equal(wwwPage1Res.status, 200);
-  assert.equal(wwwPage1Res.headers.get('location'), null);
-  assert.equal(wwwPage1Res.headers.get('x-robots-tag'), null);
+  const wwwRes = await middleware(wwwReq);
+  assert.equal(wwwRes.status, 200);
+  assert.equal(wwwRes.headers.get('location'), null);
+  assert.equal(wwwRes.headers.get('x-robots-tag'), null);
+
+  // 6. ?page=1 on /books and /books/category/[slug] -> single-hop 301 preserving host
+  const page1CatReq = new NextRequest(
+    'https://examdash-edu.asia-south1.run.app/books/category/cuet-pg?page=1',
+    {
+      headers: {
+        host: 'examdash-edu.asia-south1.run.app',
+        'x-forwarded-host': 'exam-dash.com',
+        'x-forwarded-proto': 'https',
+      },
+    }
+  );
+  const page1CatRes = await middleware(page1CatReq);
+  assert.equal(page1CatRes.status, 301);
+  assert.equal(
+    page1CatRes.headers.get('location'),
+    'https://exam-dash.com/books/category/cuet-pg'
+  );
+
+  // 7. Legacy /category/[slug]?page=1 -> single-hop 301 to /books/category/[slug]
+  const legacyCatReq = new NextRequest(
+    'https://examdash-edu.asia-south1.run.app/category/cuet-pg?page=1',
+    {
+      headers: {
+        host: 'examdash-edu.asia-south1.run.app',
+        'x-forwarded-host': 'exam-dash.com',
+        'x-forwarded-proto': 'https',
+      },
+    }
+  );
+  const legacyCatRes = await middleware(legacyCatReq);
+  assert.equal(legacyCatRes.status, 301);
+  assert.equal(
+    legacyCatRes.headers.get('location'),
+    'https://exam-dash.com/books/category/cuet-pg'
+  );
+
+  // 8. Faceted filter query on Category Hub -> 200 OK + X-Robots-Tag: noindex, follow
+  const filteredCatReq = new NextRequest(
+    'https://examdash-edu.asia-south1.run.app/books/category/cuet-pg?type=Practice+Tests&language=Sanskrit&price=under-150',
+    {
+      headers: {
+        host: 'examdash-edu.asia-south1.run.app',
+        'x-forwarded-host': 'exam-dash.com',
+      },
+    }
+  );
+  const filteredCatRes = await middleware(filteredCatReq);
+  assert.equal(filteredCatRes.status, 200);
+  assert.equal(filteredCatRes.headers.get('x-robots-tag'), 'noindex, follow');
 });
+
+test('Hub-and-Spoke Category JSON-LD, 4-level Book Breadcrumbs, Categories Sitemap Shard, and Category Publish Webhook', async () => {
+  // 1. Unfiltered Page 2 Category Hub JSON-LD emits global ItemList positions (16, 17)
+  const catPage2Graph = buildCategoryHubJsonLd({
+    category: {
+      slug: 'cuet-pg',
+      title: 'CUET PG',
+      metaDescription: 'Verified CUET PG practice tests & study books.',
+      updatedAtIso: '2026-11-20T00:00:00.000Z',
+    },
+    pageNum: 2,
+    pageSize: 15,
+    isFiltered: false,
+    items: [
+      { title: 'CUET PG Sanskrit Mock Papers', urlSlug: 'cuet-pg-sanskrit' },
+      { title: 'CUET PG English Question Bank </script>', urlSlug: 'cuet-pg-english' },
+    ],
+  });
+  const serializedCat = serializeSafeJsonLd(catPage2Graph);
+  assert.equal(serializedCat.includes('</script>'), false);
+  assert.equal(serializedCat.includes('\\u003c/script>'), true);
+
+  const parsedCat = JSON.parse(serializedCat);
+  assert.equal(parsedCat['@graph'][0].itemListElement.length, 4);
+  assert.equal(
+    parsedCat['@graph'][0].itemListElement[2].item,
+    'https://exam-dash.com/books/category/cuet-pg'
+  );
+  assert.equal(
+    parsedCat['@graph'][1].url,
+    'https://exam-dash.com/books/category/cuet-pg?page=2'
+  );
+  assert.equal(parsedCat['@graph'][1].mainEntity.itemListElement[0].position, 16);
+  assert.equal(parsedCat['@graph'][1].mainEntity.itemListElement[1].position, 17);
+
+  // 2. Filtered Category Hub JSON-LD omits ItemList and canonicalizes to base Hub URL
+  const filteredGraph = buildCategoryHubJsonLd({
+    category: {
+      slug: 'cuet-pg',
+      title: 'CUET PG',
+      metaDescription: 'Verified CUET PG practice tests & study books.',
+      updatedAtIso: '2026-11-20T00:00:00.000Z',
+    },
+    pageNum: 2,
+    pageSize: 15,
+    isFiltered: true,
+    items: [{ title: 'CUET PG Sanskrit Mock Papers', urlSlug: 'cuet-pg-sanskrit' }],
+  });
+  assert.equal(
+    filteredGraph['@graph'][1].url,
+    'https://exam-dash.com/books/category/cuet-pg'
+  );
+  assert.equal('mainEntity' in filteredGraph['@graph'][1], false);
+
+  // 3. Book Detail JSON-LD emits 4-crumb BreadcrumbList when category & categorySlug exist
+  const categorizedBookJsonLd = buildBookDetailJsonLd({
+    ...SAMPLE_BOOK,
+    category: 'CUET PG',
+    categorySlug: 'cuet-pg',
+  });
+  const crumbs = categorizedBookJsonLd['@graph'][0].itemListElement as Array<{
+    position: number;
+    name: string;
+    item: string;
+  }>;
+  assert.equal(crumbs.length, 4);
+  assert.equal(crumbs[2].name, 'CUET PG');
+  assert.equal(crumbs[2].item, 'https://exam-dash.com/books/category/cuet-pg');
+  assert.equal(crumbs[3].position, 4);
+
+  // 4. Sitemaps emit categories-1.xml strictly for non-empty clean Page 1 Category Hubs
+  const manifest = buildSitemapManifest({
+    books: [],
+    exams: [],
+    categories: [
+      {
+        slug: 'cuet-pg',
+        title: 'CUET PG',
+        updatedAtIso: '2026-11-25T10:00:00.000Z',
+        liveBookCount: 2,
+      },
+      {
+        slug: 'empty-category',
+        title: 'Empty Category',
+        updatedAtIso: '2026-11-25T10:00:00.000Z',
+        liveBookCount: 0,
+      },
+    ],
+  });
+  assert.equal(
+    manifest.shards.some((s) => s.shardName === 'categories-1.xml'),
+    true
+  );
+  const catShardXml = resolveSitemapShardXml({
+    rawShardParam: 'categories-1.xml',
+    books: [],
+    exams: [],
+    categories: [
+      {
+        slug: 'cuet-pg',
+        title: 'CUET PG',
+        updatedAtIso: '2026-11-25T10:00:00.000Z',
+        liveBookCount: 2,
+      },
+      {
+        slug: 'empty-category',
+        title: 'Empty Category',
+        updatedAtIso: '2026-11-25T10:00:00.000Z',
+        liveBookCount: 0,
+      },
+    ],
+  });
+  assert.ok(catShardXml);
+  assert.match(catShardXml, /https:\/\/exam-dash\.com\/books\/category\/cuet-pg/);
+  assert.doesNotMatch(catShardXml, /empty-category/);
+  assert.doesNotMatch(catShardXml, /\?page=/);
+
+  // 5. Publish webhook invalidates category paths
+  const webhookRes = await executePublishWebhookPipeline(
+    {
+      items: [{ collectionName: 'category', urlSlug: 'cuet-pg', action: 'update' }],
+      invalidateOnly: true,
+    },
+    { skipPrewarmInTests: true }
+  );
+  assert.equal(webhookRes.ok, true);
+  assert.equal(
+    webhookRes.revalidatedPaths?.includes('/books/category/cuet-pg'),
+    true
+  );
+});
+
 

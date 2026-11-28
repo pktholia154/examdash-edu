@@ -2,16 +2,29 @@ import crypto from 'node:crypto';
 import https from 'node:https';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type {
+  BookAvailableFacets,
+  BookFacetFilters,
+  CategoryChipDTO,
   CollectionName,
   ImageMetaDTO,
   PublicBookDTO,
+  PublicCategoryDTO,
   PublicExamDTO,
 } from '../../lib/types/catalog';
+import {
+  deriveAvailableBookFacets,
+  estimateCategoryHubCatalogReads,
+  getEffectiveBookPayablePrice,
+  matchesBookPriceBucket,
+} from '../../lib/catalog/facets';
 import {
   extractTimestampMs,
   isDocumentLive,
   mapBookToPublicDTO,
+  mapCategoryToChipDTO,
+  mapCategoryToPublicDTO,
   mapExamToPublicDTO,
+  normalizeCategorySlugValue,
   normalizeImageUrl,
   parseImageMeta,
   safeTimestampToIso,
@@ -52,6 +65,8 @@ const PUBLIC_BOOK_CARD_FIELDS = [
   'imageMeta',
   'samplePdfUrl',
   'sampleMarkdownUrl',
+  'category',
+  'categorySlug',
   'soldCount',
   'salesCount',
   'isBestseller',
@@ -108,6 +123,8 @@ const PUBLIC_BOOK_FIELDS = [
   'sampleMarkdownUrl',
   'fullPdfStoragePath',
   'fullMarkdownStoragePath',
+  'category',
+  'categorySlug',
   'soldCount',
   'salesCount',
   'isBestseller',
@@ -203,6 +220,8 @@ const SITEMAP_PROJECTION_FIELDS = [
   'samplePdfUrl',
   'sampleMarkdownUrl',
   'sampleJsonStoragePath',
+  'category',
+  'categorySlug',
 ] as const;
 
 export interface SitemapCatalogEntry {
@@ -785,6 +804,9 @@ let deletedSlugsCache: {
 export function invalidateCatalogSitemapCache(): void {
   sitemapEntriesCache.clear();
   deletedSlugsCache = null;
+  liveBooksManifestCache = null;
+  categoryChipsMemoryCache = null;
+  categoryCountCache.clear();
 }
 
 function mapDocToSitemapEntry(
@@ -2105,3 +2127,737 @@ export async function resolveBookStreamUpstream(params: {
 export function resolvePublicSampleJsonUrl(sampleJsonStoragePath: string): string {
   return buildStorageMediaUrl(sampleJsonStoragePath);
 }
+
+/**
+ * ============================================================================
+ * HUB-AND-SPOKE CATEGORY & ZERO-OFFSET FACETED BOOK REPOSITORY (PILLAR 2 & 5)
+ * ============================================================================
+ * - Uses strict `.select()` field projections (`fullDescription` is projected ONLY on
+ *   unfiltered Page 1 category detail lookups; NEVER on chips, sitemaps, Page 2+, or filtered views).
+ * - Never uses `.offset()` — streams lightweight index rows via `__name__ ASC` + `startAt(before: false)`
+ *   cursors, pairs with `runAggregationQuery` (`COUNT()`), and fetches ONLY the `<= 15` target page items
+ *   by primary reference key (`__name__ IN [...]`).
+ */
+
+const CATEGORY_CHIP_FIELDS = [
+  'id',
+  'slug',
+  'title',
+  'metaDescription',
+  'seoDescription',
+  'isDeleted',
+  'updatedAt',
+  'createdAt',
+] as const;
+
+const CATEGORY_FULL_FIELDS = [
+  ...CATEGORY_CHIP_FIELDS,
+  'fullDescription',
+] as const;
+
+const BOOK_MANIFEST_INDEX_FIELDS = [
+  'id',
+  'urlSlug',
+  'type',
+  'language',
+  'buyPrice',
+  'isPublished',
+  'isDeleted',
+  'publishAt',
+  'updatedAt',
+  'createdAt',
+  'category',
+  'categorySlug',
+] as const;
+
+interface BookManifestIndexRow {
+  docId: string;
+  fullName: string;
+  id: string;
+  urlSlug: string;
+  type: string;
+  language: string;
+  buyPrice: number;
+  publishAtMs: number;
+  updatedAtIso: string;
+  category?: string;
+  categorySlug?: string;
+}
+
+const MANIFEST_MEMORY_TTL_MS = 60_000;
+
+let liveBooksManifestCache: {
+  expiresAtMs: number;
+  rows: BookManifestIndexRow[];
+} | null = null;
+
+let categoryChipsMemoryCache: {
+  expiresAtMs: number;
+  chips: CategoryChipDTO[];
+} | null = null;
+
+const categoryCountCache = new Map<
+  string,
+  { expiresAtMs: number; count: number | null }
+>();
+
+export interface SitemapCategoryEntry {
+  slug: string;
+  title: string;
+  updatedAtIso: string;
+  liveBookCount: number;
+}
+
+export interface CategoryBooksHubPageResult {
+  items: PublicBookDTO[];
+  totalCount: number;
+  unfilteredTotalCount: number;
+  hasMore: boolean;
+  facets: BookAvailableFacets;
+  latestUpdatedAtIso: string;
+  firestoreReadsEstimate: number;
+}
+
+/**
+ * Executes a Firestore `runAggregationQuery` (`COUNT()`) for live published books in a category
+ * (zero document payload egress; billed at 1 index read per <= 1,000 matched index entries).
+ */
+export async function getCategoryPublishedBooksCount(
+  categorySlug: string
+): Promise<number | null> {
+  const cleanSlug = (categorySlug || '').trim().toLowerCase();
+  if (!cleanSlug) return 0;
+
+  const nowMs = Date.now();
+  const cached = categoryCountCache.get(cleanSlug);
+  if (cached && cached.expiresAtMs > nowMs) {
+    return cached.count;
+  }
+
+  const projectId = firebaseConfig.projectId || 'examdash-ed';
+  const apiKey = firebaseConfig.apiKey || '';
+  const payload = JSON.stringify({
+    structuredAggregationQuery: {
+      aggregations: [{ alias: 'total', count: {} }],
+      structuredQuery: {
+        from: [{ collectionId: 'books' }],
+        where: {
+          compositeFilter: {
+            op: 'AND',
+            filters: [
+              {
+                fieldFilter: {
+                  field: { fieldPath: 'categorySlug' },
+                  op: 'EQUAL',
+                  value: { stringValue: cleanSlug },
+                },
+              },
+              {
+                fieldFilter: {
+                  field: { fieldPath: 'isPublished' },
+                  op: 'EQUAL',
+                  value: { booleanValue: true },
+                },
+              },
+              {
+                fieldFilter: {
+                  field: { fieldPath: 'isDeleted' },
+                  op: 'EQUAL',
+                  value: { booleanValue: false },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  });
+
+  const urlPath = `/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/(default)/documents:runAggregationQuery${
+    apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''
+  }`;
+
+  const count = await new Promise<number | null>((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'firestore.googleapis.com',
+        port: 443,
+        path: urlPath,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+        timeout: 5000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+            resolve(null);
+            return;
+          }
+          try {
+            const rows = JSON.parse(
+              Buffer.concat(chunks).toString('utf8')
+            ) as Array<{
+              result?: {
+                aggregateFields?: {
+                  total?: { integerValue?: string | number };
+                };
+              };
+            }>;
+            const rawVal = rows?.[0]?.result?.aggregateFields?.total?.integerValue;
+            const parsed = Number(rawVal);
+            resolve(Number.isFinite(parsed) && parsed >= 0 ? parsed : null);
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.on('error', () => resolve(null));
+    req.write(payload);
+    req.end();
+  });
+
+  categoryCountCache.set(cleanSlug, {
+    expiresAtMs: Date.now() + MANIFEST_MEMORY_TTL_MS,
+    count,
+  });
+
+  return count;
+}
+
+/**
+ * Streams and caches the ultra-lightweight book index manifest using `__name__ ASC` + `startAt(before: false)`
+ * cursors (zero `.offset()`, zero `fullDescription` / `seoDescription` / `bookChapters` transfer).
+ */
+async function getLiveBooksIndexManifest(): Promise<{
+  rows: BookManifestIndexRow[];
+  wasWarm: boolean;
+}> {
+  const nowMs = Date.now();
+  if (liveBooksManifestCache && liveBooksManifestCache.expiresAtMs > nowMs) {
+    return { rows: liveBooksManifestCache.rows, wasWarm: true };
+  }
+
+  const CURSOR_BATCH_LIMIT = 500;
+  const MAX_BATCHES = 40;
+  const seenDocIds = new Set<string>();
+  const rows: BookManifestIndexRow[] = [];
+  let cursorFullName: string | null = null;
+  let useNameOrder = true;
+
+  for (let batchIdx = 0; batchIdx < MAX_BATCHES; batchIdx++) {
+    const baseQuery: Record<string, unknown> = {
+      from: [{ collectionId: 'books' }],
+      select: {
+        fields: BOOK_MANIFEST_INDEX_FIELDS.map((fieldPath) => ({ fieldPath })),
+      },
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'isPublished' },
+          op: 'EQUAL',
+          value: { booleanValue: true },
+        },
+      },
+      limit: CURSOR_BATCH_LIMIT,
+    };
+
+    let docs: ParsedFirestoreDoc[] = [];
+    if (useNameOrder) {
+      try {
+        docs = await runDefaultFirestoreQuery({
+          ...baseQuery,
+          orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+          ...(cursorFullName
+            ? {
+                startAt: {
+                  values: [{ referenceValue: cursorFullName }],
+                  before: false,
+                },
+              }
+            : {}),
+        });
+      } catch {
+        useNameOrder = false;
+        docs = await runDefaultFirestoreQuery(baseQuery);
+      }
+    } else {
+      docs = await runDefaultFirestoreQuery(baseQuery);
+    }
+
+    if (docs.length === 0) break;
+
+    let added = 0;
+    for (const docSnap of docs) {
+      if (seenDocIds.has(docSnap.docId)) continue;
+      seenDocIds.add(docSnap.docId);
+      added += 1;
+
+      const raw = docSnap.data;
+      if (!isDocumentLive(raw, nowMs)) continue;
+
+      const createdMs = extractTimestampMs(raw.createdAt) ?? nowMs;
+      const publishMs = extractTimestampMs(raw.publishAt) ?? createdMs;
+      const updatedMs = extractTimestampMs(raw.updatedAt) ?? publishMs;
+      const buyPrice =
+        typeof raw.buyPrice === 'number' &&
+        Number.isFinite(raw.buyPrice) &&
+        raw.buyPrice >= 0
+          ? raw.buyPrice
+          : Number(raw.buyPrice) >= 0
+          ? Number(raw.buyPrice)
+          : 0;
+
+      const rawCategory =
+        typeof raw.category === 'string' && raw.category.trim()
+          ? raw.category.trim()
+          : undefined;
+      const rawCatSlug =
+        typeof raw.categorySlug === 'string' && raw.categorySlug.trim()
+          ? normalizeCategorySlugValue(raw.categorySlug, '')
+          : rawCategory
+          ? normalizeCategorySlugValue(rawCategory, '')
+          : undefined;
+
+      rows.push({
+        docId: docSnap.docId,
+        fullName: docSnap.fullName,
+        id:
+          typeof raw.id === 'string' && raw.id.trim()
+            ? raw.id.trim()
+            : docSnap.docId,
+        urlSlug:
+          typeof raw.urlSlug === 'string' && raw.urlSlug.trim()
+            ? raw.urlSlug.trim()
+            : docSnap.docId,
+        type:
+          typeof raw.type === 'string' && raw.type.trim()
+            ? raw.type.trim()
+            : 'Ebook',
+        language:
+          typeof raw.language === 'string' && raw.language.trim()
+            ? raw.language.trim()
+            : 'English',
+        buyPrice,
+        publishAtMs: publishMs,
+        updatedAtIso: safeTimestampToIso(updatedMs, publishMs),
+        ...(rawCategory ? { category: rawCategory } : {}),
+        ...(rawCatSlug ? { categorySlug: rawCatSlug } : {}),
+      });
+    }
+
+    cursorFullName = docs[docs.length - 1]?.fullName || null;
+    if (!useNameOrder || added === 0 || docs.length < CURSOR_BATCH_LIMIT) {
+      break;
+    }
+  }
+
+  // Default canonical order: publishAt DESC, urlSlug ASC
+  rows.sort((a, b) => {
+    const diff = b.publishAtMs - a.publishAtMs;
+    if (diff !== 0) return diff;
+    return a.urlSlug.localeCompare(b.urlSlug);
+  });
+
+  liveBooksManifestCache = {
+    expiresAtMs: Date.now() + MANIFEST_MEMORY_TTL_MS,
+    rows,
+  };
+
+  return { rows, wasWarm: false };
+}
+
+/**
+ * Fetches exact card projections (`PUBLIC_BOOK_CARD_FIELDS`) for a bounded slice of manifest rows
+ * using primary-key `__name__ IN [...]` batches (<= 30 docs per batch, zero `.offset()`).
+ */
+async function fetchBookCardsByManifestSlice(
+  targetRows: readonly BookManifestIndexRow[]
+): Promise<PublicBookDTO[]> {
+  if (targetRows.length === 0) return [];
+  const byDocId = new Map<string, PublicBookDTO>();
+
+  for (let i = 0; i < targetRows.length; i += 30) {
+    const chunk = targetRows.slice(i, i + 30);
+    let docs: ParsedFirestoreDoc[] = [];
+
+    try {
+      docs = await runDefaultFirestoreQuery({
+        from: [{ collectionId: 'books' }],
+        select: {
+          fields: PUBLIC_BOOK_CARD_FIELDS.map((fieldPath) => ({ fieldPath })),
+        },
+        where: {
+          fieldFilter: {
+            field: { fieldPath: '__name__' },
+            op: 'IN',
+            value: {
+              arrayValue: {
+                values: chunk.map((r) => ({ referenceValue: r.fullName })),
+              },
+            },
+          },
+        },
+      });
+    } catch {
+      docs = await runDefaultFirestoreQuery({
+        from: [{ collectionId: 'books' }],
+        select: {
+          fields: PUBLIC_BOOK_CARD_FIELDS.map((fieldPath) => ({ fieldPath })),
+        },
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'id' },
+            op: 'IN',
+            value: {
+              arrayValue: {
+                values: chunk.map((r) => ({ stringValue: r.id })),
+              },
+            },
+          },
+        },
+      });
+    }
+
+    for (const docSnap of docs) {
+      const dto = mapBookToPublicDTO(docSnap.docId, docSnap.data);
+      byDocId.set(docSnap.docId, dto);
+      byDocId.set(dto.id, dto);
+    }
+  }
+
+  const ordered: PublicBookDTO[] = [];
+  for (const row of targetRows) {
+    const match = byDocId.get(row.docId) ?? byDocId.get(row.id);
+    if (match) {
+      ordered.push(match);
+    }
+  }
+  return ordered;
+}
+
+function applyManifestFacetsAndSort(
+  sourceRows: readonly BookManifestIndexRow[],
+  filters?: BookFacetFilters
+): BookManifestIndexRow[] {
+  const typeLower = filters?.type?.trim().toLowerCase();
+  const langLower = filters?.language?.trim().toLowerCase();
+  const priceBucket = filters?.price;
+  const sortBy = filters?.sort || 'publishAt_desc';
+
+  const filtered = sourceRows.filter((row) => {
+    if (typeLower && row.type.toLowerCase() !== typeLower) return false;
+    if (langLower && row.language.toLowerCase() !== langLower) return false;
+    if (!matchesBookPriceBucket(row.buyPrice, priceBucket)) return false;
+    return true;
+  });
+
+  if (sortBy === 'publishAt_desc') {
+    return filtered;
+  }
+
+  return [...filtered].sort((a, b) => {
+    if (sortBy === 'price_asc') {
+      const diff =
+        getEffectiveBookPayablePrice(a.buyPrice) -
+        getEffectiveBookPayablePrice(b.buyPrice);
+      if (diff !== 0) return diff;
+    } else if (sortBy === 'price_desc') {
+      const diff =
+        getEffectiveBookPayablePrice(b.buyPrice) -
+        getEffectiveBookPayablePrice(a.buyPrice);
+      if (diff !== 0) return diff;
+    } else if (sortBy === 'publishAt_asc') {
+      const diff = a.publishAtMs - b.publishAtMs;
+      if (diff !== 0) return diff;
+    }
+    return b.publishAtMs - a.publishAtMs;
+  });
+}
+
+/**
+ * Fetches all non-deleted categories from Firestore `category` collection using a slim `.select()`
+ * projection (excluding `fullDescription`), enriched with live book counts for the `/books` Chips Bar.
+ */
+export async function getLiveCategoryChips(): Promise<CategoryChipDTO[]> {
+  const nowMs = Date.now();
+  if (categoryChipsMemoryCache && categoryChipsMemoryCache.expiresAtMs > nowMs) {
+    return categoryChipsMemoryCache.chips;
+  }
+
+  const [categoryDocs, manifestResult] = await Promise.all([
+    runDefaultFirestoreQuery({
+      from: [{ collectionId: 'category' }],
+      select: {
+        fields: CATEGORY_CHIP_FIELDS.map((fieldPath) => ({ fieldPath })),
+      },
+    }),
+    getLiveBooksIndexManifest(),
+  ]);
+
+  const countsBySlug = new Map<string, number>();
+  const latestBookIsoBySlug = new Map<string, string>();
+  for (const row of manifestResult.rows) {
+    if (!row.categorySlug) continue;
+    countsBySlug.set(row.categorySlug, (countsBySlug.get(row.categorySlug) ?? 0) + 1);
+    const prevIso = latestBookIsoBySlug.get(row.categorySlug);
+    if (!prevIso || row.updatedAtIso > prevIso) {
+      latestBookIsoBySlug.set(row.categorySlug, row.updatedAtIso);
+    }
+  }
+
+  const chipsBySlug = new Map<string, CategoryChipDTO>();
+  for (const docSnap of categoryDocs) {
+    if (docSnap.data.isDeleted === true) continue;
+    const baseChip = mapCategoryToChipDTO(docSnap.docId, docSnap.data, 0);
+    const count = countsBySlug.get(baseChip.slug) ?? 0;
+    const latestBookIso = latestBookIsoBySlug.get(baseChip.slug);
+    const mergedUpdatedIso =
+      latestBookIso && latestBookIso > baseChip.updatedAtIso
+        ? latestBookIso
+        : baseChip.updatedAtIso;
+
+    chipsBySlug.set(baseChip.slug, {
+      ...baseChip,
+      liveBookCount: count,
+      updatedAtIso: mergedUpdatedIso,
+    });
+  }
+
+  // Sort categories with the highest live book counts first, then alphabetically by title
+  const chips = Array.from(chipsBySlug.values()).sort((a, b) => {
+    if (b.liveBookCount !== a.liveBookCount) {
+      return b.liveBookCount - a.liveBookCount;
+    }
+    return a.title.localeCompare(b.title);
+  });
+
+  categoryChipsMemoryCache = {
+    expiresAtMs: Date.now() + MANIFEST_MEMORY_TTL_MS,
+    chips,
+  };
+
+  return chips;
+}
+
+/**
+ * Returns non-deleted, non-empty (`liveBookCount > 0`) category entries for `sitemaps/categories-1.xml`.
+ * Empty categories (`liveBookCount === 0`) emit `noindex, follow` on HTML and are excluded from XML sitemaps.
+ */
+export async function getSitemapCategoryEntries(): Promise<SitemapCategoryEntry[]> {
+  const chips = await getLiveCategoryChips();
+  return chips
+    .filter((c) => c.liveBookCount > 0)
+    .map((c) => ({
+      slug: c.slug,
+      title: c.title,
+      updatedAtIso: c.updatedAtIso,
+      liveBookCount: c.liveBookCount,
+    }));
+}
+
+/**
+ * Resolves a single Category Hub document by `slug` using `.select()`.
+ * Projects `fullDescription` strictly when `options?.includeFullDescription !== false` (unfiltered Page 1).
+ */
+export async function getCategoryBySlug(
+  slug: string,
+  options?: { includeFullDescription?: boolean }
+): Promise<SlugLookupResult<PublicCategoryDTO>> {
+  const cleanSlug = normalizeCategorySlugValue(slug, '');
+  if (!cleanSlug || cleanSlug !== (slug || '').trim().toLowerCase()) {
+    // Reject non-canonical uppercase / malformed slugs as 404
+    if ((slug || '').trim() !== cleanSlug) {
+      return { status: 'not_found' };
+    }
+  }
+
+  const includeFull = options?.includeFullDescription !== false;
+  const projectionFields = includeFull
+    ? CATEGORY_FULL_FIELDS
+    : CATEGORY_CHIP_FIELDS;
+
+  const docs = await runDefaultFirestoreQuery({
+    from: [{ collectionId: 'category' }],
+    select: {
+      fields: projectionFields.map((fieldPath) => ({ fieldPath })),
+    },
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'slug' },
+        op: 'EQUAL',
+        value: { stringValue: cleanSlug },
+      },
+    },
+    limit: 5,
+  });
+
+  let matchedDoc: ParsedFirestoreDoc | undefined = docs[0];
+
+  // Fallback for legacy category documents keyed by docId/title before `slug` was populated
+  if (!matchedDoc) {
+    const allDocs = await runDefaultFirestoreQuery({
+      from: [{ collectionId: 'category' }],
+      select: {
+        fields: projectionFields.map((fieldPath) => ({ fieldPath })),
+      },
+      limit: 200,
+    });
+    matchedDoc = allDocs.find(
+      (d) =>
+        normalizeCategorySlugValue(
+          d.data.slug ?? d.data.title ?? d.data.id,
+          d.docId
+        ) === cleanSlug
+    );
+  }
+
+  if (!matchedDoc) {
+    return { status: 'not_found' };
+  }
+
+  if (matchedDoc.data.isDeleted === true) {
+    return { status: 'deleted' };
+  }
+
+  const aggCount = await getCategoryPublishedBooksCount(cleanSlug);
+  const dto = mapCategoryToPublicDTO(
+    matchedDoc.docId,
+    matchedDoc.data,
+    aggCount ?? 0
+  );
+
+  return {
+    status: 'ok',
+    data: includeFull ? dto : { ...dto, fullDescription: '' },
+  };
+}
+
+/**
+ * Resolves a 15-item Hub-and-Spoke Category Page with zero `.offset()`, `.count()` aggregation,
+ * cached cursor manifest filtering (`type`, `language`, `price`, `sort`), and targeted card projection.
+ */
+export async function getCategoryBooksHubPage(params: {
+  categorySlug: string;
+  page: number;
+  pageSize?: number;
+  filters?: BookFacetFilters;
+}): Promise<CategoryBooksHubPageResult> {
+  const cleanSlug = normalizeCategorySlugValue(params.categorySlug, '');
+  const safePageSize = Math.max(1, Math.min(30, Math.floor(params.pageSize ?? 15)));
+  const safePage = Math.max(1, Math.floor(params.page || 1));
+
+  const [manifestResult, aggCount] = await Promise.all([
+    getLiveBooksIndexManifest(),
+    getCategoryPublishedBooksCount(cleanSlug),
+  ]);
+
+  const categoryRows = manifestResult.rows.filter(
+    (row) => row.categorySlug === cleanSlug
+  );
+  const facets = deriveAvailableBookFacets(categoryRows);
+  const filteredRows = applyManifestFacetsAndSort(categoryRows, params.filters);
+
+  const unfilteredTotalCount =
+    typeof aggCount === 'number'
+      ? Math.max(aggCount, categoryRows.length)
+      : categoryRows.length;
+  const totalCount = filteredRows.length;
+
+  const sliceStart = (safePage - 1) * safePageSize;
+  const sliceEnd = sliceStart + safePageSize;
+  const pageSlice =
+    sliceStart < filteredRows.length
+      ? filteredRows.slice(sliceStart, sliceEnd)
+      : [];
+  const hasMore = sliceEnd < filteredRows.length;
+
+  const items = await fetchBookCardsByManifestSlice(pageSlice);
+
+  const latestUpdatedAtIso = categoryRows.reduce(
+    (latest, r) => (r.updatedAtIso > latest ? r.updatedAtIso : latest),
+    ''
+  );
+
+  const firestoreReadsEstimate = estimateCategoryHubCatalogReads({
+    cacheHit: false,
+    categoryFound: true,
+    manifestWarm: manifestResult.wasWarm,
+    totalCategoryDocs: unfilteredTotalCount,
+    returnedPageItems: items.length,
+  });
+
+  return {
+    items,
+    totalCount,
+    unfilteredTotalCount,
+    hasMore,
+    facets,
+    latestUpdatedAtIso,
+    firestoreReadsEstimate,
+  };
+}
+
+/**
+ * Resolves the main `/books` catalog page with faceted filtering (`type`, `language`, `price`, `sort`)
+ * and zero `.offset()` cursor manifest slicing.
+ */
+export async function getFilteredBooksCatalogPage(params: {
+  page: number;
+  pageSize?: number;
+  filters?: BookFacetFilters;
+}): Promise<{
+  items: PublicBookDTO[];
+  totalCount: number;
+  unfilteredTotalCount: number;
+  hasMore: boolean;
+  facets: BookAvailableFacets;
+}> {
+  const safePageSize = Math.max(1, Math.min(30, Math.floor(params.pageSize ?? 20)));
+  const safePage = Math.max(1, Math.floor(params.page || 1));
+
+  const [manifestResult, aggCount] = await Promise.all([
+    getLiveBooksIndexManifest(),
+    getLiveCollectionCount('books'),
+  ]);
+
+  const allBookRows = manifestResult.rows;
+  const facets = deriveAvailableBookFacets(allBookRows);
+  const filteredRows = applyManifestFacetsAndSort(allBookRows, params.filters);
+
+  const unfilteredTotalCount =
+    typeof aggCount === 'number'
+      ? Math.max(aggCount, allBookRows.length)
+      : allBookRows.length;
+  const totalCount = filteredRows.length;
+
+  const sliceStart = (safePage - 1) * safePageSize;
+  const sliceEnd = sliceStart + safePageSize;
+  const pageSlice =
+    sliceStart < filteredRows.length
+      ? filteredRows.slice(sliceStart, sliceEnd)
+      : [];
+  const hasMore = sliceEnd < filteredRows.length;
+
+  const items = await fetchBookCardsByManifestSlice(pageSlice);
+
+  return {
+    items,
+    totalCount,
+    unfilteredTotalCount,
+    hasMore,
+    facets,
+  };
+}
+

@@ -156,11 +156,23 @@ export default async function BookDetailPage({
       />
 
       <Breadcrumbs
-        items={[
-          { label: 'Home', href: '/' },
-          { label: 'Books', href: '/books' },
-          { label: book.title },
-        ]}
+        items={
+          book.category && book.categorySlug
+            ? [
+                { label: 'Home', href: '/' },
+                { label: 'Books', href: '/books' },
+                {
+                  label: book.category,
+                  href: `/books/category/${encodeURIComponent(book.categorySlug)}`,
+                },
+                { label: book.title },
+              ]
+            : [
+                { label: 'Home', href: '/' },
+                { label: 'Books', href: '/books' },
+                { label: book.title },
+              ]
+        }
       />
 
       <article className="w-full min-w-0">
@@ -309,17 +321,29 @@ export default async function BookDetailPage({
         />
 
         {/* Shallow Cross-Taxonomy Related Links (<= 6 canonical links) */}
-        {(siblingBooks.length > 0 || relatedExams.length > 0) && (
+        {(Boolean(book.category && book.categorySlug) ||
+          siblingBooks.length > 0 ||
+          relatedExams.length > 0) && (
           <section
             aria-labelledby="related-resources-heading"
             className="mt-10 pt-8 border-t border-[var(--border-subtle)]"
           >
-            <h2
-              id="related-resources-heading"
-              className="text-base font-bold text-[var(--text-main)] mb-4"
-            >
-              Related Books & Companion Exam Packs
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <h2
+                id="related-resources-heading"
+                className="text-base font-bold text-[var(--text-main)]"
+              >
+                Related Books & Companion Exam Packs
+              </h2>
+              {book.category && book.categorySlug && (
+                <a
+                  href={`/books/category/${encodeURIComponent(book.categorySlug)}`}
+                  className="text-xs font-semibold text-[var(--text-main)] hover:underline underline-offset-4 whitespace-nowrap shrink-0"
+                >
+                  Explore all {book.category} books →
+                </a>
+              )}
+            </div>
             <div className="flex flex-col gap-2.5">
               {siblingBooks.map((rel) => {
                 const relPricing = getDefaultCatalogPricing('books', rel.buyPrice);

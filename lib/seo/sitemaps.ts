@@ -1,5 +1,8 @@
 import { BUSINESS_INFO, LEGAL_PAGES } from '../legal/business-info';
-import type { SitemapCatalogEntry } from '../../server/repositories/catalog-repository';
+import type {
+  SitemapCatalogEntry,
+  SitemapCategoryEntry,
+} from '../../server/repositories/catalog-repository';
 import { getCanonicalOrigin } from './schema';
 
 /**
@@ -165,23 +168,39 @@ export function mapCatalogEntryToSitemapUrl(
   };
 }
 
+export function mapCategoryEntryToSitemapUrl(
+  entry: SitemapCategoryEntry,
+  origin: string = getCanonicalOrigin()
+): SitemapUrlEntry {
+  const fallbackIso = new Date(BUSINESS_INFO.effectiveDateIso).toISOString();
+  return {
+    loc: `${origin}/books/category/${encodeURIComponent(entry.slug)}`,
+    lastmod: normalizeIsoTimestamp(entry.updatedAtIso, fallbackIso),
+  };
+}
+
 /**
  * Computes the complete manifest of active sitemap shards and their exact deterministic `<lastmod>`
- * timestamps from live `books` and `exams` entries.
+ * timestamps from live `books`, `exams`, and non-empty `categories` entries.
  */
 export function buildSitemapManifest(params: {
   books: readonly SitemapCatalogEntry[];
   exams: readonly SitemapCatalogEntry[];
+  categories?: readonly SitemapCategoryEntry[];
   origin?: string;
 }): {
   shards: SitemapShardDescriptor[];
   bookShards: SitemapCatalogEntry[][];
   examShards: SitemapCatalogEntry[][];
+  categoryShards: SitemapCategoryEntry[][];
   recentUpdates: SitemapCatalogEntry[];
   pagesEntries: SitemapUrlEntry[];
 } {
   const origin = params.origin || getCanonicalOrigin();
   const legalLastModIso = new Date(BUSINESS_INFO.effectiveDateIso).toISOString();
+  const nonEmptyCategories = (params.categories ?? []).filter(
+    (c) => c.liveBookCount > 0 && Boolean(c.slug)
+  );
 
   const latestBooksIso = computeMaxLastmodIso(
     params.books.map((b) => b.updatedAtIso),
@@ -191,12 +210,16 @@ export function buildSitemapManifest(params: {
     params.exams.map((e) => e.updatedAtIso),
     legalLastModIso
   );
+  const latestCategoriesIso = computeMaxLastmodIso(
+    nonEmptyCategories.map((c) => c.updatedAtIso),
+    latestBooksIso
+  );
   const latestOverallIso = computeMaxLastmodIso(
-    [latestBooksIso, latestExamsIso, legalLastModIso],
+    [latestBooksIso, latestExamsIso, latestCategoriesIso, legalLastModIso],
     legalLastModIso
   );
 
-  // Core hub + compliance pages (only include /books or /exams if non-empty, or keep hubs with accurate lastmod)
+  // Core hub + compliance pages (clean Page 1 hubs only)
   const pagesEntries: SitemapUrlEntry[] = [
     { loc: origin, lastmod: latestOverallIso },
     ...(params.books.length > 0
@@ -225,6 +248,10 @@ export function buildSitemapManifest(params: {
 
   const bookShards = partitionIntoShards(params.books, SITEMAP_BATCH_SIZE);
   const examShards = partitionIntoShards(params.exams, SITEMAP_BATCH_SIZE);
+  const categoryShards = partitionIntoShards(
+    nonEmptyCategories,
+    SITEMAP_BATCH_SIZE
+  );
 
   const shards: SitemapShardDescriptor[] = [
     {
@@ -244,6 +271,18 @@ export function buildSitemapManifest(params: {
       ),
     });
   }
+
+  categoryShards.forEach((batch, idx) => {
+    const shardName = `categories-${idx + 1}.xml`;
+    shards.push({
+      shardName,
+      loc: `${origin}/sitemaps/${shardName}`,
+      lastmod: computeMaxLastmodIso(
+        batch.map((c) => c.updatedAtIso),
+        latestCategoriesIso
+      ),
+    });
+  });
 
   bookShards.forEach((batch, idx) => {
     const shardName = `books-${idx + 1}.xml`;
@@ -273,6 +312,7 @@ export function buildSitemapManifest(params: {
     shards,
     bookShards,
     examShards,
+    categoryShards,
     recentUpdates,
     pagesEntries,
   };
@@ -285,6 +325,7 @@ export function resolveSitemapShardXml(params: {
   rawShardParam: string;
   books: readonly SitemapCatalogEntry[];
   exams: readonly SitemapCatalogEntry[];
+  categories?: readonly SitemapCategoryEntry[];
   origin?: string;
 }): string | null {
   const origin = params.origin || getCanonicalOrigin();
@@ -292,6 +333,7 @@ export function resolveSitemapShardXml(params: {
   const manifest = buildSitemapManifest({
     books: params.books,
     exams: params.exams,
+    categories: params.categories,
     origin,
   });
 
@@ -305,6 +347,17 @@ export function resolveSitemapShardXml(params: {
       manifest.recentUpdates.map((entry) =>
         mapCatalogEntryToSitemapUrl(entry, origin)
       )
+    );
+  }
+
+  const categoryMatch = shard.match(/^categories-(\d+)\.xml$/);
+  if (categoryMatch) {
+    const batchNum = Number(categoryMatch[1]);
+    if (!Number.isInteger(batchNum) || batchNum < 1) return null;
+    const batch = manifest.categoryShards[batchNum - 1];
+    if (!batch || batch.length === 0) return null;
+    return buildSitemapUrlsetXml(
+      batch.map((entry) => mapCategoryEntryToSitemapUrl(entry, origin))
     );
   }
 

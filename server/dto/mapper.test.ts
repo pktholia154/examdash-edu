@@ -4,6 +4,8 @@ import {
   extractTimestampMs,
   isDocumentLive,
   mapBookToPublicDTO,
+  mapCategoryToChipDTO,
+  mapCategoryToPublicDTO,
   mapExamToPublicDTO,
   normalizeBookChapters,
   normalizeImageUrl,
@@ -315,6 +317,46 @@ test('Zod CMS ingestion validators enforce canonical slugs, non-negative prices,
     assert.equal(validExam.data.MocktestTitles[0].duration, 180);
   }
 });
+
+test('mapCategoryToChipDTO omits fullDescription while mapCategoryToPublicDTO and mapBookToPublicDTO normalize category slugs', () => {
+  const rawCategory = {
+    id: 'CUET PG',
+    slug: 'cuet-pg',
+    title: 'CUET PG',
+    isDeleted: false,
+    metaDescription: 'CUET PG exam books and practice tests.',
+    fullDescription: '# CUET PG Preparation Guide\n\nDetailed syllabus and strategy.',
+    createdAt: { seconds: 1732000000, nanoseconds: 0 },
+    updatedAt: { seconds: 1732500000, nanoseconds: 0 },
+  };
+
+  const chip = mapCategoryToChipDTO('CUET PG', rawCategory, 2);
+  assert.equal(chip.id, 'CUET PG');
+  assert.equal(chip.slug, 'cuet-pg');
+  assert.equal(chip.title, 'CUET PG');
+  assert.equal(chip.liveBookCount, 2);
+  assert.equal('fullDescription' in chip, false);
+
+  const fullCat = mapCategoryToPublicDTO('CUET PG', rawCategory, 2);
+  assert.equal(
+    fullCat.fullDescription,
+    '# CUET PG Preparation Guide\n\nDetailed syllabus and strategy.'
+  );
+
+  const categorizedBook = mapBookToPublicDTO('B_CUET_1', {
+    id: 'B_CUET_1',
+    isPublished: true,
+    isDeleted: false,
+    title: 'CUET PG Sanskrit Practice Book',
+    urlSlug: 'cuet-pg-sanskrit-practice-book',
+    category: 'CUET PG',
+    buyPrice: 200,
+    listPrice: 240,
+  });
+  assert.equal(categorizedBook.category, 'CUET PG');
+  assert.equal(categorizedBook.categorySlug, 'cuet-pg');
+});
+
 
 
 

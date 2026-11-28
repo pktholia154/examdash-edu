@@ -19,11 +19,14 @@ test('Firestore rules enforce default-deny catch-all and rules_version 2', () =>
   assert.match(rules, /match\s+\/\{document=\*\*\}\s*\{\s*allow\s+read,\s*write:\s*if\s+false;\s*\}/);
 });
 
-test('Dirty Dozen: Catalog collections forbid client writes and enforce published non-deleted reads', () => {
+test('Dirty Dozen: Catalog and Category collections forbid client writes and enforce non-deleted reads', () => {
   const rules = readRules();
   assert.match(rules, /match\s+\/books\/\{bookId\}/);
+  assert.match(rules, /match\s+\/category\/\{categoryId\}/);
+  assert.match(rules, /function\s+isValidCategoryId\(categoryId\)/);
   assert.match(rules, /match\s+\/ExamPackDocument\/\{examId\}/);
-  assert.match(rules, /resource\.data\.isPublished\s*==\s*true\s*&&\s*resource\.data\.isDeleted\s*==\s*false/);
+  assert.match(rules, /resource\.data\.isPublished\s*==\s*true[\s\S]*resource\.data\.isDeleted\s*==\s*false/);
+  assert.match(rules, /allow\s+list:\s*if\s+resource\.data\.isDeleted\s*==\s*false;/);
   assert.match(rules, /allow\s+create,\s*update,\s*delete:\s*if\s+false;/);
 });
 

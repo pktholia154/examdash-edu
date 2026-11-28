@@ -132,9 +132,26 @@ export async function executePublishWebhookPipeline(
   const allAffectedUrls: unknown[] = [...(payload.urls ?? [])];
 
   for (const item of payload.items ?? []) {
-    const hubSegment = item.collectionName === 'books' ? 'books' : 'exams';
     const cleanSlug = item.urlSlug.trim().replace(/^\/+|\/+$/g, '');
     if (!cleanSlug) continue;
+
+    if (item.collectionName === 'category') {
+      const catPath = `/books/category/${encodeURIComponent(cleanSlug)}`;
+      itemPathsToRevalidate.add(catPath);
+      allAffectedUrls.push(`${origin}${catPath}`);
+      if (item.action !== 'delete') {
+        livePathsToPrewarm.add(catPath);
+      }
+      try {
+        revalidateTag('categories');
+        revalidateTag(`category:${cleanSlug}`);
+      } catch {
+        // Safe outside Next.js request context
+      }
+      continue;
+    }
+
+    const hubSegment = item.collectionName === 'books' ? 'books' : 'exams';
     const detailPath = `/${hubSegment}/${encodeURIComponent(cleanSlug)}`;
     itemPathsToRevalidate.add(detailPath);
     allAffectedUrls.push(`${origin}${detailPath}`);
@@ -166,10 +183,16 @@ export async function executePublishWebhookPipeline(
       const u = new URL(fullUrl);
       itemPathsToRevalidate.add(u.pathname);
       livePathsToPrewarm.add(u.pathname);
-      const match = u.pathname.match(/^\/(books|exams)\/([^/]+)$/);
-      if (match) {
-        const slug = decodeURIComponent(match[2]);
-        revalidateTag(match[1] === 'books' ? `book:${slug}` : `exam:${slug}`);
+      const catMatch = u.pathname.match(/^\/books\/category\/([^/]+)$/);
+      if (catMatch) {
+        const slug = decodeURIComponent(catMatch[1]);
+        revalidateTag(`category:${slug}`);
+      } else {
+        const match = u.pathname.match(/^\/(books|exams)\/([^/]+)$/);
+        if (match) {
+          const slug = decodeURIComponent(match[2]);
+          revalidateTag(match[1] === 'books' ? `book:${slug}` : `exam:${slug}`);
+        }
       }
     } catch {
       // Ignore invalid URL
@@ -191,6 +214,7 @@ export async function executePublishWebhookPipeline(
   try {
     revalidateTag('catalog');
     revalidateTag('books');
+    revalidateTag('categories');
     revalidateTag('exams');
     revalidateTag('sitemaps');
     revalidateTag('reviews');
