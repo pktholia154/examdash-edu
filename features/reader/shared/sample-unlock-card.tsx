@@ -18,10 +18,12 @@ export function SampleUnlockCard({
   book,
   formatLabel,
   onUnlocked,
+  onCtaClick,
 }: {
   book: PublicBookDTO;
   formatLabel: 'PDF' | 'Markdown';
   onUnlocked?: () => void;
+  onCtaClick?: () => void;
 }) {
   const { ownedCompositeKeys } = useAuth();
   const { buyNow, isCheckingOut } = useCart();
@@ -34,6 +36,7 @@ export function SampleUnlockCard({
   const savings = pricing.savingsAmount;
 
   const handleBuyUnlock = async () => {
+    onCtaClick?.();
     const ok = await buyNow(book, { redirectToPurchased: true });
     if (ok) {
       onUnlocked?.();

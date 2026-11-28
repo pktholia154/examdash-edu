@@ -28,6 +28,7 @@ import {
 import type { PublicBookDTO } from '../../../lib/types/catalog';
 import { fetchClientStorageBytes } from '../../../lib/firebase/storage-client';
 import { readBookFormatOffline } from '../../../lib/offline/offline-vault';
+import { fetchSampleMarkdownCached } from '../../../lib/reader/sample-stream-loader';
 import { cn } from '../../../lib/utils';
 import {
   DiagramLightbox,
@@ -49,6 +50,7 @@ import {
   type ReaderTopBarProps,
 } from '../shared/reader-top-bar';
 import { SampleUnlockCard } from '../shared/sample-unlock-card';
+import { SampleDocumentBodySkeleton } from '../shared/sample-viewer-skeleton';
 import type {
   MarkdownChapterChunk,
   MarkdownTocItem,
@@ -63,11 +65,19 @@ export interface MarkdownViewerProps {
   directStreamUrl?: string;
   initialMarkdownText?: string;
   isSample: boolean;
+  isOverlayEmbed?: boolean;
   userId?: string;
   preferOffline?: boolean;
   bearerTokenProvider?: () => Promise<string | null>;
   onRefreshSignedUrl?: () => Promise<string | null>;
   onSwitchToFullMode?: () => void;
+  onReadingProgressChange?: (progress: {
+    current: number;
+    total: number;
+    ratio: number;
+  }) => void;
+  onUserActivity?: () => void;
+  onEndCardCtaClick?: () => void;
   topBar?: ReaderTopBarProps;
 }
 
@@ -170,14 +180,27 @@ export function MarkdownViewer({
   directStreamUrl,
   initialMarkdownText,
   isSample,
+  isOverlayEmbed = false,
   userId,
   preferOffline = false,
   bearerTokenProvider,
   onRefreshSignedUrl,
   onSwitchToFullMode,
+  onReadingProgressChange,
+  onUserActivity,
+  onEndCardCtaClick,
   topBar,
 }: MarkdownViewerProps) {
   const router = useRouter();
+
+  const onReadingProgressRef = useRef(onReadingProgressChange);
+  const onUserActivityRef = useRef(onUserActivity);
+  useEffect(() => {
+    onReadingProgressRef.current = onReadingProgressChange;
+  }, [onReadingProgressChange]);
+  useEffect(() => {
+    onUserActivityRef.current = onUserActivity;
+  }, [onUserActivity]);
 
   const progressKey = `ed-md-prog-v1:${book.id}:${isSample ? 'sample' : 'full'}`;
   const vaultKey = `md_${book.id}_sample.md`;
@@ -195,9 +218,16 @@ export function MarkdownViewer({
   const [fontMode, setFontMode] = useState<MarkdownFontMode>(
     savedInitial?.fontMode ?? 'sans'
   );
-  const [comfortTheme, setComfortTheme] = useState<ReaderComfortTheme>(
-    savedInitial?.theme ?? 'light'
-  );
+  const [comfortTheme, setComfortTheme] = useState<ReaderComfortTheme>(() => {
+    if (savedInitial?.theme) return savedInitial.theme;
+    if (
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('dark')
+    ) {
+      return 'dark';
+    }
+    return 'light';
+  });
 
   const [chapters, setChapters] = useState<MarkdownChapterChunk[]>([]);
   const [toc, setToc] = useState<MarkdownTocItem[]>([]);
@@ -844,7 +874,10 @@ export function MarkdownViewer({
           } else if (initialMarkdownText && initialMarkdownText.trim().length > 0) {
             markdownText = initialMarkdownText;
           } else if (streamUrlRef.current) {
-            const buf = await fetchOnlineMarkdownBuffer();
+            const buf = await fetchSampleMarkdownCached(
+              streamUrlRef.current,
+              abortController.signal
+            );
             markdownText = new TextDecoder('utf-8').decode(buf);
           } else {
             markdownText = `# ${book.title}\n\n${
@@ -1015,8 +1048,24 @@ export function MarkdownViewer({
     });
   }, [chapters.length, loadingState, savedInitial]);
 
+  // Report initial & updated chapter/scroll progress to parent overlay analytics
+  useEffect(() => {
+    if (loadingState !== 'ready' || chapters.length === 0) return;
+    const total = Math.max(1, chapters.length);
+    const ratio =
+      total <= 1
+        ? chapterScrollRatio
+        : Math.min(1, Math.max(0, (safeChapterIndex + chapterScrollRatio) / total));
+    onReadingProgressRef.current?.({
+      current: safeChapterIndex + 1,
+      total,
+      ratio,
+    });
+  }, [chapterScrollRatio, chapters.length, loadingState, safeChapterIndex]);
+
   // Scroll listener -> Scroll progress + Persistence
   const handleScroll = useCallback(() => {
+    onUserActivityRef.current?.();
     const scroller = scrollerRef.current;
     if (!scroller) return;
 
@@ -1445,18 +1494,23 @@ export function MarkdownViewer({
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto overscroll-contain px-3 sm:px-6 lg:px-10 py-4 sm:py-6"
           style={{
-            paddingBottom: 'calc(2rem + var(--safe-area-inset-bottom))',
+            paddingBottom: isOverlayEmbed
+              ? '1.5rem'
+              : 'calc(2rem + var(--safe-area-inset-bottom))',
           }}
         >
-          {loadingState === 'loading' && (
-            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-              <Loader2
-                className="w-6 h-6 animate-spin text-[var(--reader-muted)] mb-2.5"
-                aria-hidden="true"
-              />
-              <p className="text-sm font-semibold">Loading content...</p>
-            </div>
-          )}
+          {loadingState === 'loading' &&
+            (isSample ? (
+              <SampleDocumentBodySkeleton format="markdown" />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
+                <Loader2
+                  className="w-6 h-6 animate-spin text-[var(--reader-muted)] mb-2.5"
+                  aria-hidden="true"
+                />
+                <p className="text-sm font-semibold">Loading content...</p>
+              </div>
+            ))}
 
           {loadingState === 'error' && (
             <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center p-6">
@@ -1597,6 +1651,7 @@ export function MarkdownViewer({
                     book={book}
                     formatLabel="Markdown"
                     onUnlocked={onSwitchToFullMode}
+                    onCtaClick={onEndCardCtaClick}
                   />
                 </div>
               )}

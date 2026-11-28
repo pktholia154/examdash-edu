@@ -11,21 +11,97 @@ interface TimestampLike {
   nanoseconds?: number;
 }
 
+const MAX_SAFE_DATE_MS = 8_640_000_000_000_000; // ECMAScript Date limit
+const MAX_PLAUSIBLE_EPOCH_MS = 100_000_000_000_000; // Year 5138 ceiling separating ms from us/ns
+const MIN_PLAUSIBLE_EPOCH_MS = 946_684_800_000; // 2000-01-01T00:00:00Z
+const DEFAULT_FALLBACK_EPOCH_MS = 1_704_067_200_000; // 2024-01-01T00:00:00Z
+
+function normalizeEpochUnits(msOrSec: number): number | null {
+  if (!Number.isFinite(msOrSec) || msOrSec <= 0) return null;
+  // Auto-convert 10-digit Unix seconds (e.g. 1700000000) to milliseconds
+  let normalized =
+    msOrSec >= 946_684_800 && msOrSec < 100_000_000_000
+      ? Math.floor(msOrSec * 1000)
+      : Math.floor(msOrSec);
+
+  // Scale accidental microsecond (~1.7e15) or nanosecond (~1.7e18) timestamps to milliseconds
+  if (normalized > MAX_PLAUSIBLE_EPOCH_MS) {
+    if (normalized < MAX_PLAUSIBLE_EPOCH_MS * 1000) {
+      normalized = Math.floor(normalized / 1000);
+    } else if (normalized < MAX_PLAUSIBLE_EPOCH_MS * 1_000_000) {
+      normalized = Math.floor(normalized / 1_000_000);
+    } else {
+      return null;
+    }
+  }
+
+  return normalized <= MAX_SAFE_DATE_MS ? normalized : null;
+}
+
+export function safeTimestampToIso(
+  ms: number | null | undefined,
+  fallbackMs: number = DEFAULT_FALLBACK_EPOCH_MS
+): string {
+  const safeFallback =
+    Number.isFinite(fallbackMs) &&
+    fallbackMs >= 0 &&
+    fallbackMs <= MAX_SAFE_DATE_MS
+      ? fallbackMs
+      : DEFAULT_FALLBACK_EPOCH_MS;
+
+  const candidate =
+    typeof ms === 'number' &&
+    Number.isFinite(ms) &&
+    ms >= MIN_PLAUSIBLE_EPOCH_MS &&
+    ms <= MAX_SAFE_DATE_MS
+      ? ms
+      : safeFallback;
+
+  try {
+    return new Date(candidate).toISOString();
+  } catch {
+    return '2024-01-01T00:00:00.000Z';
+  }
+}
+
 export function extractTimestampMs(val: unknown): number | null {
   if (!val) return null;
   if (typeof val === 'object') {
     const ts = val as TimestampLike;
     if (typeof ts.toMillis === 'function') {
-      const ms = ts.toMillis();
-      return Number.isFinite(ms) ? ms : null;
+      try {
+        return normalizeEpochUnits(ts.toMillis());
+      } catch {
+        return null;
+      }
     }
-    if (typeof ts.seconds === 'number') {
-      return ts.seconds * 1000 + Math.floor((ts.nanoseconds ?? 0) / 1_000_000);
+    if (typeof ts.seconds === 'number' && Number.isFinite(ts.seconds)) {
+      const nanos =
+        typeof ts.nanoseconds === 'number' && Number.isFinite(ts.nanoseconds)
+          ? ts.nanoseconds
+          : 0;
+      return normalizeEpochUnits(
+        ts.seconds * 1000 + Math.floor(nanos / 1_000_000)
+      );
     }
   }
-  if (typeof val === 'string' || typeof val === 'number') {
-    const parsed = new Date(val).getTime();
-    return Number.isFinite(parsed) ? parsed : null;
+  if (typeof val === 'number') {
+    return normalizeEpochUnits(val);
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    if (/^\d{10,19}$/.test(trimmed)) {
+      if (trimmed.length >= 18) {
+        return normalizeEpochUnits(Number(BigInt(trimmed) / BigInt(1_000_000)));
+      }
+      if (trimmed.length >= 15) {
+        return normalizeEpochUnits(Number(BigInt(trimmed) / BigInt(1_000)));
+      }
+      return normalizeEpochUnits(Number(trimmed));
+    }
+    const parsed = new Date(trimmed).getTime();
+    return normalizeEpochUnits(parsed);
   }
   return null;
 }
@@ -278,9 +354,13 @@ function sanitizePaidFullProse(
  */
 export function mapBookToPublicDTO(
   docId: string,
-  raw: Record<string, unknown>
+  rawInput: Record<string, unknown>
 ): PublicBookDTO {
-  const createdMs = extractTimestampMs(raw.createdAt) ?? Date.now();
+  const raw =
+    rawInput && typeof rawInput === 'object' ? rawInput : ({} as Record<string, unknown>);
+  const safeDocId = (docId || 'book').trim() || 'book';
+  const nowMs = Date.now();
+  const createdMs = extractTimestampMs(raw.createdAt) ?? nowMs;
   const publishMs = extractTimestampMs(raw.publishAt) ?? createdMs;
   const updatedMs = extractTimestampMs(raw.updatedAt) ?? publishMs;
 
@@ -312,11 +392,16 @@ export function mapBookToPublicDTO(
   const isBestseller =
     raw.isBestseller === true || raw.bestseller === true ? true : undefined;
 
+  const rawCurrency =
+    typeof raw.currency === 'string' ? raw.currency.trim().toUpperCase() : '';
+  const currency = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : 'INR';
+  const rawSlug = typeof raw.urlSlug === 'string' ? raw.urlSlug.trim() : '';
+
   return {
-    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : docId,
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : safeDocId,
     collectionName: 'books',
     title,
-    urlSlug: typeof raw.urlSlug === 'string' ? raw.urlSlug.trim() : docId,
+    urlSlug: rawSlug || safeDocId,
     seoDescription,
     fullDescription: sanitizePaidFullProse(
       typeof raw.fullDescription === 'string' ? raw.fullDescription : '',
@@ -337,15 +422,12 @@ export function mapBookToPublicDTO(
         ? raw.authorName.trim()
         : 'ExamDash Editorial',
     tags,
-    currency:
-      typeof raw.currency === 'string' && raw.currency.trim()
-        ? raw.currency.trim().toUpperCase()
-        : 'INR',
+    currency,
     listPrice,
     buyPrice,
-    publishAtIso: new Date(publishMs).toISOString(),
-    updatedAtIso: new Date(updatedMs).toISOString(),
-    createdAtIso: new Date(createdMs).toISOString(),
+    publishAtIso: safeTimestampToIso(publishMs, nowMs),
+    updatedAtIso: safeTimestampToIso(updatedMs, publishMs),
+    createdAtIso: safeTimestampToIso(createdMs, nowMs),
     imageUrl: normalizeImageUrl(raw.imageUrl, raw.bookCover),
     ...(parseImageMeta(raw.imageMeta)
       ? { imageMeta: parseImageMeta(raw.imageMeta) }
@@ -391,9 +473,13 @@ function normalizeMocktestTitles(rawList: unknown): MocktestTitleItem[] {
  */
 export function mapExamToPublicDTO(
   docId: string,
-  raw: Record<string, unknown>
+  rawInput: Record<string, unknown>
 ): PublicExamDTO {
-  const createdMs = extractTimestampMs(raw.createdAt) ?? Date.now();
+  const raw =
+    rawInput && typeof rawInput === 'object' ? rawInput : ({} as Record<string, unknown>);
+  const safeDocId = (docId || 'exam').trim() || 'exam';
+  const nowMs = Date.now();
+  const createdMs = extractTimestampMs(raw.createdAt) ?? nowMs;
   const publishMs = extractTimestampMs(raw.publishAt) ?? createdMs;
   const updatedMs = extractTimestampMs(raw.updatedAt) ?? publishMs;
 
@@ -419,11 +505,16 @@ export function mapExamToPublicDTO(
     hasSample
   );
 
+  const rawCurrency =
+    typeof raw.currency === 'string' ? raw.currency.trim().toUpperCase() : '';
+  const currency = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : 'INR';
+  const rawSlug = typeof raw.urlSlug === 'string' ? raw.urlSlug.trim() : '';
+
   return {
-    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : docId,
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : safeDocId,
     collectionName: 'ExamPackDocument',
     title,
-    urlSlug: typeof raw.urlSlug === 'string' ? raw.urlSlug.trim() : docId,
+    urlSlug: rawSlug || safeDocId,
     seoDescription,
     fullDescription: sanitizePaidFullProse(
       typeof raw.fullDescription === 'string' ? raw.fullDescription : '',
@@ -444,15 +535,12 @@ export function mapExamToPublicDTO(
         ? raw.authorName.trim()
         : 'ExamDash Faculty',
     tags,
-    currency:
-      typeof raw.currency === 'string' && raw.currency.trim()
-        ? raw.currency.trim().toUpperCase()
-        : 'INR',
+    currency,
     listPrice,
     buyPrice,
-    publishAtIso: new Date(publishMs).toISOString(),
-    updatedAtIso: new Date(updatedMs).toISOString(),
-    createdAtIso: new Date(createdMs).toISOString(),
+    publishAtIso: safeTimestampToIso(publishMs, nowMs),
+    updatedAtIso: safeTimestampToIso(updatedMs, publishMs),
+    createdAtIso: safeTimestampToIso(createdMs, nowMs),
     imageUrl: normalizeImageUrl(raw.imageUrl, raw.examCover),
     ...(parseImageMeta(raw.imageMeta)
       ? { imageMeta: parseImageMeta(raw.imageMeta) }

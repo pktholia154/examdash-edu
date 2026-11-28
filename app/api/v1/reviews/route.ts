@@ -1,4 +1,4 @@
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateReviewSubmission } from '../../../../lib/reviews/validation';
 import { submitIndexNowBatch } from '../../../../lib/seo/indexnow';
@@ -10,10 +10,22 @@ import {
   upsertUserItemReview,
 } from '../../../../server/repositories/review-repository';
 
-function revalidateReviewRoutes(collectionName: CollectionName, urlSlug?: string) {
+function revalidateReviewRoutes(
+  collectionName: CollectionName,
+  itemId: string,
+  urlSlug?: string
+) {
   const hubPath = collectionName === 'books' ? '/books' : '/exams';
   const detailPath = urlSlug ? `${hubPath}/${urlSlug}` : null;
   try {
+    revalidateTag('reviews');
+    revalidateTag(`reviews:${collectionName}:${itemId}`);
+    revalidateTag('catalog');
+    if (urlSlug) {
+      revalidateTag(
+        collectionName === 'books' ? `book:${urlSlug}` : `exam:${urlSlug}`
+      );
+    }
     revalidatePath('/');
     revalidatePath(hubPath);
     if (detailPath) {
@@ -146,7 +158,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  revalidateReviewRoutes(collectionName, result.urlSlug);
+  revalidateReviewRoutes(collectionName, itemId, result.urlSlug);
 
   return NextResponse.json(
     {
@@ -201,7 +213,7 @@ export async function DELETE(req: NextRequest) {
     );
   }
 
-  revalidateReviewRoutes(collectionName, result.urlSlug);
+  revalidateReviewRoutes(collectionName, itemId, result.urlSlug);
 
   return NextResponse.json(
     { summary: result.summary },

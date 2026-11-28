@@ -14,6 +14,7 @@ import {
   mapExamToPublicDTO,
   normalizeImageUrl,
   parseImageMeta,
+  safeTimestampToIso,
   sanitizePaidDescription,
   sanitizePaidTitle,
 } from '../dto/mapper';
@@ -841,8 +842,8 @@ function mapDocToSitemapEntry(
         ? raw.currency.trim().toUpperCase()
         : 'INR',
     buyPrice,
-    publishAtIso: new Date(publishMs > 0 ? publishMs : 1704067200000).toISOString(),
-    updatedAtIso: new Date(updatedMs > 0 ? updatedMs : 1704067200000).toISOString(),
+    publishAtIso: safeTimestampToIso(publishMs, 1704067200000),
+    updatedAtIso: safeTimestampToIso(updatedMs, publishMs || 1704067200000),
     ...(normalizeImageUrl(raw.imageUrl, raw.bookCover)
       ? { imageUrl: normalizeImageUrl(raw.imageUrl, raw.bookCover) }
       : {}),

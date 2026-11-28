@@ -7,19 +7,36 @@ import type {
   PublicExamDTO,
 } from '../types/catalog';
 
+export const PRODUCTION_CANONICAL_ORIGIN = 'https://exam-dash.com';
+
 export function getCanonicalOrigin(): string {
-  const explicitOrigin = (
-    process.env.CANONICAL_ORIGIN || process.env.APP_URL
-  )?.trim();
-  if (
-    explicitOrigin &&
-    explicitOrigin.startsWith('https://') &&
-    !explicitOrigin.includes('.run.app') &&
-    !explicitOrigin.includes('localhost')
-  ) {
-    return explicitOrigin.replace(/\/+$/, '');
-  }
-  return 'https://exam-dash.com';
+  return PRODUCTION_CANONICAL_ORIGIN;
+}
+
+/**
+ * Extracts the primary client-facing hostname from `x-forwarded-host` or `host`,
+ * safely taking the first hop in comma-separated proxy headers and stripping `:port` or trailing dots.
+ */
+export function extractRequestHostname(rawForwardedOrHost: string): string {
+  const firstHop = (rawForwardedOrHost || '')
+    .toLowerCase()
+    .split(',')[0]
+    ?.trim() || '';
+  return firstHop.replace(/:\d+$/, '').replace(/\.+$/, '');
+}
+
+/**
+ * Returns true strictly when `host` belongs to default Firebase Hosting or Cloud Run domains
+ * (`.web.app`, `.firebaseapp.com`, or `.run.app`), leaving `exam-dash.com` untouched.
+ */
+export function isDefaultFirebaseOrCloudRunHost(rawHost: string): boolean {
+  const host = extractRequestHostname(rawHost);
+  if (!host) return false;
+  return (
+    host.endsWith('.web.app') ||
+    host.endsWith('.firebaseapp.com') ||
+    host.endsWith('.run.app')
+  );
 }
 
 export function buildSiteOgUrl(): string {
@@ -54,6 +71,50 @@ export function buildCanonicalAlternates(
         }
       : {}),
   };
+}
+
+export const FACET_FILTER_PARAM_NAMES = new Set([
+  'sort',
+  'filter',
+  'q',
+  'query',
+  'tag',
+  'tags',
+  'type',
+  'category',
+  'lang',
+  'language',
+  'price',
+  'level',
+]);
+
+/**
+ * Detects non-canonical filter, sort, or search query parameters on public pages
+ * so both metadata and middleware emit `noindex, follow` while preserving canonical links.
+ */
+export function hasFacetFilterParams(
+  params:
+    | URLSearchParams
+    | Record<string, string | string[] | undefined>
+    | null
+    | undefined
+): boolean {
+  if (!params) return false;
+  if (params instanceof URLSearchParams) {
+    for (const key of params.keys()) {
+      if (FACET_FILTER_PARAM_NAMES.has(key.trim().toLowerCase())) {
+        return true;
+      }
+    }
+    return false;
+  }
+  for (const [key, val] of Object.entries(params)) {
+    if (val === undefined) continue;
+    if (FACET_FILTER_PARAM_NAMES.has(key.trim().toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -343,7 +404,7 @@ export function buildBookDetailJsonLd(
   reviewSummary?: ItemReviewSummaryDTO
 ) {
   const origin = getCanonicalOrigin();
-  const pageUrl = `${origin}/books/${book.urlSlug}`;
+  const pageUrl = `${origin}/books/${encodeURIComponent(book.urlSlug)}`;
   const description =
     book.seoDescription ||
     book.fullDescription.slice(0, 220) ||
@@ -409,7 +470,7 @@ export function buildExamDetailJsonLd(
   reviewSummary?: ItemReviewSummaryDTO
 ) {
   const origin = getCanonicalOrigin();
-  const pageUrl = `${origin}/exams/${exam.urlSlug}`;
+  const pageUrl = `${origin}/exams/${encodeURIComponent(exam.urlSlug)}`;
   const description =
     exam.seoDescription ||
     exam.fullDescription.slice(0, 220) ||
@@ -537,7 +598,7 @@ export function buildCollectionHubJsonLd(params: {
                   '@type': 'ListItem',
                   position: (params.pageNum - 1) * 20 + idx + 1,
                   name: item.title,
-                  url: `${origin}${basePath}/${item.urlSlug}`,
+                  url: `${origin}${basePath}/${encodeURIComponent(item.urlSlug)}`,
                 })),
               },
             }

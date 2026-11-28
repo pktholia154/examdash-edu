@@ -63,6 +63,7 @@ function buildManifestCorsHeaders(
       ? 'private, max-age=0, must-revalidate'
       : 'public, max-age=300, s-maxage=3600',
     'X-Content-Type-Options': 'nosniff',
+    'X-Robots-Tag': 'noindex',
     Vary: 'Origin, Accept-Encoding',
   };
 

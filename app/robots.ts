@@ -23,8 +23,6 @@ const PRIVATE_AND_TRAP_DISALLOW_PATHS = [
   '/account/',
   '/checkout/',
   '/*?q=',
-  '/*?sort=',
-  '/*?filter=',
 ];
 
 export default function robots(): MetadataRoute.Robots {

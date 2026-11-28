@@ -55,7 +55,7 @@ const SITE_DESC =
   'Discover curated ebooks, quizbooks, and full-length mock exam packs with instant syllabus previews and unified study library access.';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(getCanonicalOrigin()),
+  metadataBase: new URL('https://exam-dash.com'),
   title: {
     default: SITE_TITLE,
     template: '%s | ExamDash',
@@ -63,7 +63,7 @@ export const metadata: Metadata = {
   description: SITE_DESC,
   alternates: {
     types: {
-      'application/rss+xml': `${getCanonicalOrigin()}/feed.xml`,
+      'application/rss+xml': 'https://exam-dash.com/feed.xml',
     },
   },
   robots: {

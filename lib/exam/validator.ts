@@ -1,6 +1,7 @@
 import katex from 'katex';
 import 'katex/contrib/mhchem';
 import type { MocktestTitleItem } from '../types/catalog';
+import { CmsExamSetArraySchema, formatZodIssues } from '../validation/cms-ingestion';
 import type { ExamSet, TableCellInput, VisualBlock } from './types';
 
 export interface ExamPackValidationResult {
@@ -138,9 +139,8 @@ function checkVisualsAndPlaceholders(
 
 /**
  * Deterministic Pillar 1 <-> Pillar 2 Zero-Drift Validator (Zero-AI Runtime).
- * Verifies RFC 8259 structure, KaTeX expressions, context/visual references,
- * sectionalTiming durations, maxAttempts top-K totalMarks, and auto-generates
- * Firestore MocktestTitles & totalMocktest metadata.
+ * Combines Zod structural ingestion validation with RFC 8259 checks, KaTeX expressions,
+ * context/visual references, sectionalTiming durations, and maxAttempts top-K totalMarks.
  */
 export function validateExamPack(rawSets: unknown): ExamPackValidationResult {
   const errors: string[] = [];
@@ -154,6 +154,13 @@ export function validateExamPack(rawSets: unknown): ExamPackValidationResult {
       warnings,
       derivedMetadata: { totalMocktest: 0, MocktestTitles: [] },
     };
+  }
+
+  const zodCheck = CmsExamSetArraySchema.safeParse(rawSets);
+  if (!zodCheck.success) {
+    for (const issue of formatZodIssues(zodCheck.error)) {
+      errors.push(`Schema: ${issue}`);
+    }
   }
 
   const seenSetIds = new Set<string>();

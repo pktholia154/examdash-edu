@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { NextRequest } from 'next/server';
+import { middleware } from '../../middleware';
 import {
   buildBookDetailJsonLd,
   buildCanonicalAlternates,
@@ -7,6 +9,10 @@ import {
   buildExamDetailJsonLd,
   buildItemCoverSchemaImage,
   buildSiteOgUrl,
+  extractRequestHostname,
+  getCanonicalOrigin,
+  hasFacetFilterParams,
+  isDefaultFirebaseOrCloudRunHost,
   normalizeSchemaLanguageTag,
   serializeSafeJsonLd,
 } from './schema';
@@ -20,10 +26,17 @@ import {
 } from './sitemaps';
 import { sanitizeCanonicalUrlBatch } from './indexnow';
 import {
+  executePublishWebhookPipeline,
+  prewarmCanonicalUrls,
+} from './publish-webhook';
+import {
   buildPaginationHref,
   buildVisiblePageNumbers,
 } from '../../components/ui/server-pagination';
-import { prepareEditorialMarkdown } from '../../components/editorial/description-markdown';
+import {
+  prepareEditorialMarkdown,
+  sanitizeEditorialUrl,
+} from '../../components/editorial/description-markdown';
 import { apiUrl } from '../platform/api-base';
 import { toCatalogCardDTO, type PublicBookDTO, type PublicExamDTO } from '../types/catalog';
 import type { SitemapCatalogEntry } from '../../server/repositories/catalog-repository';
@@ -492,5 +505,174 @@ test('ServerPagination and buildCanonicalAlternates enforce ?page=1-free base UR
   assert.equal(hubGraph['@graph'].length, 2);
   assert.equal(hubGraph['@graph'][1]['@type'], 'CollectionPage');
   assert.equal(hubGraph['@graph'][1].mainEntity?.itemListElement[0].position, 21);
+});
+
+test('hasFacetFilterParams flags filter/sort/search query params for GSC noindex while allowing clean pagination & utm params', () => {
+  assert.equal(hasFacetFilterParams({ page: '2' }), false);
+  assert.equal(hasFacetFilterParams(new URLSearchParams('page=3&utm_source=google')), false);
+  assert.equal(hasFacetFilterParams({ sort: 'price' }), true);
+  assert.equal(hasFacetFilterParams(new URLSearchParams('page=2&filter=free')), true);
+  assert.equal(hasFacetFilterParams(new URLSearchParams('q=upsc')), true);
+  assert.equal(hasFacetFilterParams({ tag: 'history' }), true);
+});
+
+test('sanitizeEditorialUrl blocks unsafe javascript: and data: schemes while preserving https and relative anchors', () => {
+  assert.equal(sanitizeEditorialUrl('javascript:alert(1)'), '');
+  assert.equal(sanitizeEditorialUrl('data:text/html;base64,PHNjcmlwdD4='), '');
+  assert.equal(sanitizeEditorialUrl('//evil.example/payload'), '');
+  assert.equal(sanitizeEditorialUrl('/books/upsc-modern-history-101'), '/books/upsc-modern-history-101');
+  assert.equal(sanitizeEditorialUrl('#syllabus'), '#syllabus');
+  assert.equal(sanitizeEditorialUrl('https://exam-dash.com/books'), 'https://exam-dash.com/books');
+});
+
+test('executePublishWebhookPipeline validates Zod payload, computes revalidated paths, and blocks SSRF prewarm hosts', async () => {
+  const badPayload = await executePublishWebhookPipeline(
+    { items: [{ collectionName: 'unknown_col', urlSlug: '' }] },
+    { skipPrewarmInTests: true }
+  );
+  assert.equal(badPayload.ok, false);
+  assert.equal(badPayload.statusCode, 400);
+
+  const validRun = await executePublishWebhookPipeline(
+    {
+      items: [
+        {
+          collectionName: 'books',
+          urlSlug: 'upsc-modern-history-101',
+          action: 'publish',
+        },
+      ],
+      urls: ['/exams/ssc-cgl-tier-1-202'],
+    },
+    { skipPrewarmInTests: true }
+  );
+  assert.equal(validRun.ok, true);
+  assert.equal(validRun.cacheInvalidated, true);
+  assert.ok(validRun.revalidatedPaths?.includes('/'));
+  assert.ok(validRun.revalidatedPaths?.includes('/books'));
+  assert.ok(validRun.revalidatedPaths?.includes('/books/upsc-modern-history-101'));
+  assert.ok(validRun.revalidatedPaths?.includes('/exams/ssc-cgl-tier-1-202'));
+
+  // SSRF guard: loopback, metadata IP, and external origins are rejected before any network call
+  const blockedPrewarm = await prewarmCanonicalUrls(
+    [
+      'http://127.0.0.1:8080/admin',
+      'http://169.254.169.254/latest/meta-data/',
+      'https://attacker.example/books/test',
+    ],
+    'https://exam-dash.com'
+  );
+  assert.deepEqual(blockedPrewarm, []);
+});
+
+test('getCanonicalOrigin and isDefaultFirebaseOrCloudRunHost enforce https://exam-dash.com and isolate .web.app, .firebaseapp.com, and .run.app mirrors', () => {
+  const prevAppUrl = process.env.APP_URL;
+  const prevCanonicalOrigin = process.env.CANONICAL_ORIGIN;
+  try {
+    process.env.APP_URL = 'https://examdash-ed.web.app';
+    process.env.CANONICAL_ORIGIN = 'https://examdash-ed.firebaseapp.com';
+    assert.equal(getCanonicalOrigin(), 'https://exam-dash.com');
+    assert.equal(
+      buildCanonicalAlternates('/').canonical,
+      'https://exam-dash.com'
+    );
+    assert.equal(
+      buildCanonicalAlternates('/books/upsc-modern-history-101').canonical,
+      'https://exam-dash.com/books/upsc-modern-history-101'
+    );
+  } finally {
+    if (prevAppUrl === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = prevAppUrl;
+    if (prevCanonicalOrigin === undefined) delete process.env.CANONICAL_ORIGIN;
+    else process.env.CANONICAL_ORIGIN = prevCanonicalOrigin;
+  }
+
+  // Default Firebase Hosting & Cloud Run domains -> true
+  assert.equal(isDefaultFirebaseOrCloudRunHost('examdash-ed.web.app'), true);
+  assert.equal(isDefaultFirebaseOrCloudRunHost('EXAMDASH-ED.FIREBASEAPP.COM'), true);
+  assert.equal(
+    isDefaultFirebaseOrCloudRunHost('examdash-edu-513220259814.asia-south1.run.app'),
+    true
+  );
+  assert.equal(isDefaultFirebaseOrCloudRunHost('examdash-ed.web.app:443'), true);
+  assert.equal(
+    isDefaultFirebaseOrCloudRunHost('examdash-ed.web.app, examdash-edu.a.run.app'),
+    true
+  );
+
+  // Production custom domain (including multi-hop x-forwarded-host behind Firebase Hosting -> Cloud Run) -> false
+  assert.equal(isDefaultFirebaseOrCloudRunHost('exam-dash.com'), false);
+  assert.equal(isDefaultFirebaseOrCloudRunHost('exam-dash.com:443'), false);
+  assert.equal(
+    extractRequestHostname('exam-dash.com, examdash-edu-xyz.asia-south1.run.app'),
+    'exam-dash.com'
+  );
+  assert.equal(
+    isDefaultFirebaseOrCloudRunHost('exam-dash.com, examdash-edu-xyz.asia-south1.run.app'),
+    false
+  );
+  assert.equal(isDefaultFirebaseOrCloudRunHost('localhost:3000'), false);
+  assert.equal(isDefaultFirebaseOrCloudRunHost(''), false);
+});
+
+test('middleware returns NextResponse.next() with zero redirects and sets X-Robots-Tag: noindex, nofollow strictly on .web.app, .firebaseapp.com, and .run.app', async () => {
+  // 1. Custom domain behind Firebase Hosting -> Cloud Run rewrite: untouched (no X-Robots-Tag, zero redirects)
+  const prodReq = new NextRequest('https://examdash-edu.asia-south1.run.app/books', {
+    headers: {
+      host: 'examdash-edu.asia-south1.run.app',
+      'x-forwarded-host': 'exam-dash.com',
+    },
+  });
+  const prodRes = await middleware(prodReq);
+  assert.equal(prodRes.status, 200);
+  assert.equal(prodRes.headers.get('location'), null);
+  assert.equal(prodRes.headers.get('x-robots-tag'), null);
+
+  // 2. .web.app mirror -> 200 OK (no redirect) + X-Robots-Tag: noindex, nofollow
+  const webAppReq = new NextRequest('https://examdash-edu.asia-south1.run.app/books', {
+    headers: {
+      host: 'examdash-edu.asia-south1.run.app',
+      'x-forwarded-host': 'examdash-ed.web.app',
+    },
+  });
+  const webAppRes = await middleware(webAppReq);
+  assert.equal(webAppRes.status, 200);
+  assert.equal(webAppRes.headers.get('location'), null);
+  assert.equal(webAppRes.headers.get('x-robots-tag'), 'noindex, nofollow');
+
+  // 3. .firebaseapp.com mirror -> 200 OK (no redirect) + X-Robots-Tag: noindex, nofollow
+  const fbAppReq = new NextRequest('https://examdash-edu.asia-south1.run.app/', {
+    headers: {
+      host: 'examdash-edu.asia-south1.run.app',
+      'x-forwarded-host': 'examdash-ed.firebaseapp.com',
+    },
+  });
+  const fbAppRes = await middleware(fbAppReq);
+  assert.equal(fbAppRes.status, 200);
+  assert.equal(fbAppRes.headers.get('location'), null);
+  assert.equal(fbAppRes.headers.get('x-robots-tag'), 'noindex, nofollow');
+
+  // 4. Direct .run.app Cloud Run URL -> 200 OK (no redirect) + X-Robots-Tag: noindex, nofollow
+  const runAppReq = new NextRequest('https://examdash-edu.asia-south1.run.app/exams', {
+    headers: {
+      host: 'examdash-edu.asia-south1.run.app',
+    },
+  });
+  const runAppRes = await middleware(runAppReq);
+  assert.equal(runAppRes.status, 200);
+  assert.equal(runAppRes.headers.get('location'), null);
+  assert.equal(runAppRes.headers.get('x-robots-tag'), 'noindex, nofollow');
+
+  // 5. www.exam-dash.com and ?page=1 -> zero redirects (status 200, no location header)
+  const wwwPage1Req = new NextRequest('https://exam-dash.com/books?page=1', {
+    headers: {
+      host: 'examdash-edu.asia-south1.run.app',
+      'x-forwarded-host': 'www.exam-dash.com',
+    },
+  });
+  const wwwPage1Res = await middleware(wwwPage1Req);
+  assert.equal(wwwPage1Res.status, 200);
+  assert.equal(wwwPage1Res.headers.get('location'), null);
+  assert.equal(wwwPage1Res.headers.get('x-robots-tag'), null);
 });
 

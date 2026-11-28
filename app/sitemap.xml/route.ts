@@ -1,18 +1,27 @@
-import { NextResponse } from 'next/server';
-import { getCanonicalOrigin } from '../../lib/seo/schema';
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  getCanonicalOrigin,
+  isDefaultFirebaseOrCloudRunHost,
+} from '../../lib/seo/schema';
 import {
   buildSitemapIndexXml,
   buildSitemapManifest,
 } from '../../lib/seo/sitemaps';
-import { getSitemapCatalogEntries } from '../../server/repositories/catalog-repository';
+import { getCachedSitemapCatalogEntries } from '../../server/cache/catalog-cache';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const host = (
+    req.headers.get('x-forwarded-host') ||
+    req.headers.get('host') ||
+    ''
+  ).toLowerCase();
+  const isMirrorHost = isDefaultFirebaseOrCloudRunHost(host);
   const origin = getCanonicalOrigin();
   const [books, exams] = await Promise.all([
-    getSitemapCatalogEntries('books').catch(() => []),
-    getSitemapCatalogEntries('ExamPackDocument').catch(() => []),
+    getCachedSitemapCatalogEntries('books').catch(() => []),
+    getCachedSitemapCatalogEntries('ExamPackDocument').catch(() => []),
   ]);
 
   const manifest = buildSitemapManifest({ books, exams, origin });
@@ -22,11 +31,17 @@ export async function GET() {
     status: 200,
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
-      'Cache-Control':
-        'public, max-age=60, s-maxage=300, stale-while-revalidate=600, stale-if-error=86400',
-      'Surrogate-Key': 'sitemaps catalog',
-      'Cache-Tag': 'sitemaps,catalog',
-      Vary: 'Accept-Encoding',
+      'Cache-Control': isMirrorHost
+        ? 'private, no-store'
+        : 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400',
+      'X-Robots-Tag': isMirrorHost ? 'noindex, nofollow' : 'noindex, follow',
+      ...(isMirrorHost
+        ? {}
+        : {
+            'Surrogate-Key': 'sitemaps catalog',
+            'Cache-Tag': 'sitemaps,catalog',
+          }),
+      Vary: 'X-Forwarded-Host, Accept-Encoding',
     },
   });
 }

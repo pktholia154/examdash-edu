@@ -1,20 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCanonicalOrigin } from '../../../lib/seo/schema';
+import {
+  getCanonicalOrigin,
+  isDefaultFirebaseOrCloudRunHost,
+} from '../../../lib/seo/schema';
 import { resolveSitemapShardXml } from '../../../lib/seo/sitemaps';
-import { getSitemapCatalogEntries } from '../../../server/repositories/catalog-repository';
+import { getCachedSitemapCatalogEntries } from '../../../server/cache/catalog-cache';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ shard: string }> }
 ) {
   const { shard } = await context.params;
+  const host = (
+    req.headers.get('x-forwarded-host') ||
+    req.headers.get('host') ||
+    ''
+  ).toLowerCase();
+  const isMirrorHost = isDefaultFirebaseOrCloudRunHost(host);
   const origin = getCanonicalOrigin();
 
   const [books, exams] = await Promise.all([
-    getSitemapCatalogEntries('books').catch(() => []),
-    getSitemapCatalogEntries('ExamPackDocument').catch(() => []),
+    getCachedSitemapCatalogEntries('books').catch(() => []),
+    getCachedSitemapCatalogEntries('ExamPackDocument').catch(() => []),
   ]);
 
   const xml = resolveSitemapShardXml({
@@ -29,8 +38,11 @@ export async function GET(
       status: 404,
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'public, max-age=0, s-maxage=60',
-        'X-Robots-Tag': 'noindex',
+        'Cache-Control': isMirrorHost
+          ? 'private, no-store'
+          : 'public, max-age=0, s-maxage=60',
+        'X-Robots-Tag': isMirrorHost ? 'noindex, nofollow' : 'noindex',
+        Vary: 'X-Forwarded-Host, Accept-Encoding',
       },
     });
   }
@@ -41,12 +53,19 @@ export async function GET(
     status: 200,
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
-      'Cache-Control': isUpdatesShard
-        ? 'public, max-age=60, s-maxage=180, stale-while-revalidate=600, stale-if-error=86400'
-        : 'public, max-age=60, s-maxage=300, stale-while-revalidate=900, stale-if-error=86400',
-      'Surrogate-Key': `sitemaps catalog sitemap-${shard.toLowerCase()}`,
-      'Cache-Tag': `sitemaps,catalog,sitemap-${shard.toLowerCase()}`,
-      Vary: 'Accept-Encoding',
+      'Cache-Control': isMirrorHost
+        ? 'private, no-store'
+        : isUpdatesShard
+        ? 'public, max-age=60, s-maxage=900, stale-while-revalidate=86400, stale-if-error=86400'
+        : 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400',
+      'X-Robots-Tag': isMirrorHost ? 'noindex, nofollow' : 'noindex, follow',
+      ...(isMirrorHost
+        ? {}
+        : {
+            'Surrogate-Key': `sitemaps catalog sitemap-${shard.toLowerCase()}`,
+            'Cache-Tag': `sitemaps,catalog,sitemap-${shard.toLowerCase()}`,
+          }),
+      Vary: 'X-Forwarded-Host, Accept-Encoding',
     },
   });
 }

@@ -18,15 +18,20 @@ import {
   serializeSafeJsonLd,
 } from '../../../lib/seo/schema';
 import {
-  getExamBySlug,
-  getLiveBooksPage,
-  getLiveExamsPage,
-} from '../../../server/repositories/catalog-repository';
-import { getItemReviewsSummary } from '../../../server/repositories/review-repository';
+  getCachedExamBySlug,
+  getCachedItemReviewsSummary,
+  getCachedLiveBooksPage,
+  getCachedLiveExamsPage,
+} from '../../../server/cache/catalog-cache';
 
-export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
+export const revalidate = false;
 
-const loadExamBySlug = cache(async (slug: string) => getExamBySlug(slug));
+export async function generateStaticParams() {
+  return [];
+}
+
+const loadExamBySlug = cache(async (slug: string) => getCachedExamBySlug(slug));
 
 export async function generateMetadata({
   params,
@@ -42,7 +47,8 @@ export async function generateMetadata({
 
   const exam = lookup.data;
   const origin = getCanonicalOrigin();
-  const canonicalUrl = `${origin}/exams/${exam.urlSlug}`;
+  const encodedSlug = encodeURIComponent(exam.urlSlug);
+  const canonicalUrl = `${origin}/exams/${encodedSlug}`;
   const coverUrl = exam.imageUrl || buildSiteOgUrl();
   const coverAlt = exam.imageMeta?.alt || `${exam.title} exam pack cover`;
 
@@ -55,7 +61,7 @@ export async function generateMetadata({
   return {
     title: exam.title,
     description,
-    alternates: buildCanonicalAlternates(`/exams/${exam.urlSlug}`),
+    alternates: buildCanonicalAlternates(`/exams/${encodedSlug}`),
     openGraph: {
       title: exam.imageMeta?.title || `${exam.title} | ExamDash`,
       description,
@@ -104,12 +110,12 @@ export default async function ExamDetailPage({
   const { urlSlug } = await params;
   const [lookup, examsSample, booksSample] = await Promise.all([
     loadExamBySlug(urlSlug),
-    getLiveExamsPage({ limit: 4, offset: 0 }).catch(() => ({
+    getCachedLiveExamsPage({ limit: 4, offset: 0 }).catch(() => ({
       items: [],
       hasMore: false,
       nextOffset: 0,
     })),
-    getLiveBooksPage({ limit: 3, offset: 0 }).catch(() => ({
+    getCachedLiveBooksPage({ limit: 3, offset: 0 }).catch(() => ({
       items: [],
       hasMore: false,
       nextOffset: 0,
@@ -121,7 +127,7 @@ export default async function ExamDetailPage({
   }
 
   const exam = lookup.data;
-  const reviewSummary = await getItemReviewsSummary('ExamPackDocument', exam.id);
+  const reviewSummary = await getCachedItemReviewsSummary('ExamPackDocument', exam.id);
   const jsonLd = serializeSafeJsonLd(buildExamDetailJsonLd(exam, reviewSummary));
 
   const siblingExams = examsSample.items

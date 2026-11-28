@@ -138,14 +138,22 @@ function mapRawReviewDoc(
       ? d.targetKey
       : buildReviewTargetKey(collectionName, itemId);
 
-  const createdRaw = typeof d.createdAt === 'string' ? d.createdAt : '';
-  const updatedRaw = typeof d.updatedAt === 'string' ? d.updatedAt : createdRaw;
-  const createdAtIso = createdRaw
-    ? new Date(createdRaw).toISOString()
-    : new Date(0).toISOString();
-  const updatedAtIso = updatedRaw
-    ? new Date(updatedRaw).toISOString()
-    : createdAtIso;
+  const parseSafeIso = (rawVal: unknown, fallbackIso: string): string => {
+    if (typeof rawVal !== 'string' || !rawVal.trim()) return fallbackIso;
+    const ms = new Date(rawVal.trim()).getTime();
+    if (!Number.isFinite(ms) || Math.abs(ms) > 8_640_000_000_000_000) {
+      return fallbackIso;
+    }
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return fallbackIso;
+    }
+  };
+
+  const epochZeroIso = '1970-01-01T00:00:00.000Z';
+  const createdAtIso = parseSafeIso(d.createdAt, epochZeroIso);
+  const updatedAtIso = parseSafeIso(d.updatedAt, createdAtIso);
 
   const title =
     typeof d.title === 'string' && d.title.trim().length > 0

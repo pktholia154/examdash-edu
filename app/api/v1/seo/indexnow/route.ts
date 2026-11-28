@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getConfiguredIndexNowKey,
-  submitIndexNowBatch,
   verifySeoWebhookSecret,
 } from '../../../../../lib/seo/indexnow';
-import { invalidateCatalogSitemapCache } from '../../../../../server/repositories/catalog-repository';
+import { executePublishWebhookPipeline } from '../../../../../lib/seo/publish-webhook';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,8 +37,9 @@ export async function GET(req: NextRequest) {
 
 /**
  * Authenticated publishing webhook (`POST /api/v1/seo/indexnow`) to:
- * 1. Immediately invalidate in-memory sitemap & 410 tombstone caches on publish/update/delete.
- * 2. Dispatch canonical URLs (up to 10,000 per call) to `api.indexnow.org` for instant crawl discovery.
+ * 1. Validate webhook payload with Zod and purge in-memory + Next.js (`revalidate = false`) server caches.
+ * 2. Immediately pre-fetch live URLs & sitemaps ahead of bots.
+ * 3. Dispatch canonical URLs (up to 10,000 per call) to `api.indexnow.org` for instant crawl discovery.
  */
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization') || '';
@@ -61,9 +61,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { urls?: unknown[]; invalidateOnly?: boolean } = {};
+  let rawBody: unknown;
   try {
-    body = (await req.json()) as { urls?: unknown[]; invalidateOnly?: boolean };
+    rawBody = await req.json();
   } catch {
     return NextResponse.json(
       { error: 'Invalid JSON request body.' },
@@ -71,32 +71,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Always purge in-memory sitemap & deleted-slug caches immediately
-  invalidateCatalogSitemapCache();
+  const outcome = await executePublishWebhookPipeline(rawBody);
 
-  if (body.invalidateOnly === true) {
+  if (!outcome.ok && outcome.error) {
     return NextResponse.json(
+      { error: outcome.error, details: outcome.details },
       {
-        ok: true,
-        cacheInvalidated: true,
-        dispatched: false,
-        submittedCount: 0,
-      },
-      { status: 200, headers: { 'Cache-Control': 'private, no-store' } }
+        status: outcome.statusCode,
+        headers: { 'Cache-Control': 'private, no-store' },
+      }
     );
   }
 
-  const urls = Array.isArray(body.urls) ? body.urls : [];
-  const result = await submitIndexNowBatch(urls);
-
   return NextResponse.json(
     {
-      ok: result.statusCode < 400,
-      cacheInvalidated: true,
-      ...result,
+      ok: outcome.ok,
+      cacheInvalidated: outcome.cacheInvalidated,
+      revalidatedPaths: outcome.revalidatedPaths,
+      prewarmedCount: outcome.prewarmed?.length ?? 0,
+      ...(outcome.indexNow ?? {}),
     },
     {
-      status: result.statusCode === 400 ? 400 : 200,
+      status: outcome.statusCode,
       headers: { 'Cache-Control': 'private, no-store' },
     }
   );

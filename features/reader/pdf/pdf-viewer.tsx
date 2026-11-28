@@ -21,6 +21,7 @@ import {
 import type { PublicBookDTO } from '../../../lib/types/catalog';
 import { fetchClientStorageBytes } from '../../../lib/firebase/storage-client';
 import { readBookFormatOffline } from '../../../lib/offline/offline-vault';
+import { fetchSamplePdfViaHttpRanges } from '../../../lib/reader/sample-stream-loader';
 import { cn } from '../../../lib/utils';
 import {
   getPdfCanvasWindowRadius,
@@ -37,6 +38,7 @@ import {
   type ReaderTopBarProps,
 } from '../shared/reader-top-bar';
 import { SampleUnlockCard } from '../shared/sample-unlock-card';
+import { SampleDocumentBodySkeleton } from '../shared/sample-viewer-skeleton';
 import type {
   PdfPageDimension,
   PdfWorkerRequest,
@@ -49,11 +51,19 @@ export interface PdfViewerProps {
   fullStoragePath?: string;
   directStreamUrl?: string;
   isSample: boolean;
+  isOverlayEmbed?: boolean;
   userId?: string;
   preferOffline?: boolean;
   bearerTokenProvider?: () => Promise<string | null>;
   onRefreshSignedUrl?: () => Promise<string | null>;
   onSwitchToFullMode?: () => void;
+  onReadingProgressChange?: (progress: {
+    current: number;
+    total: number;
+    ratio: number;
+  }) => void;
+  onUserActivity?: () => void;
+  onEndCardCtaClick?: () => void;
   topBar?: ReaderTopBarProps;
 }
 
@@ -79,11 +89,15 @@ export function PdfViewer({
   fullStoragePath,
   directStreamUrl,
   isSample,
+  isOverlayEmbed = false,
   userId,
   preferOffline = false,
   bearerTokenProvider,
   onRefreshSignedUrl,
   onSwitchToFullMode,
+  onReadingProgressChange,
+  onUserActivity,
+  onEndCardCtaClick,
   topBar,
 }: PdfViewerProps) {
   const progressKey = `ed-pdf-prog-v1:${book.id}:${isSample ? 'sample' : 'full'}`;
@@ -103,18 +117,36 @@ export function PdfViewer({
     return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
   });
   const [livePreviewZoom, setLivePreviewZoom] = useState<number | null>(null);
-  const [comfortTheme, setComfortTheme] = useState<ReaderComfortTheme>(
-    savedInitial?.comfortTheme ?? 'light'
-  );
+  const [comfortTheme, setComfortTheme] = useState<ReaderComfortTheme>(() => {
+    if (savedInitial?.comfortTheme) return savedInitial.comfortTheme;
+    if (
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('dark')
+    ) {
+      return 'dark';
+    }
+    return 'light';
+  });
 
   const [loadingState, setLoadingState] = useState<
     'loading' | 'ready' | 'password' | 'error'
   >('loading');
+  const [firstPagePainted, setFirstPagePainted] = useState<boolean>(false);
+  const [rangeProgressLabel, setRangeProgressLabel] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [submittedPassword, setSubmittedPassword] = useState<string | undefined>(
     undefined
   );
+
+  const onReadingProgressRef = useRef(onReadingProgressChange);
+  const onUserActivityRef = useRef(onUserActivity);
+  useEffect(() => {
+    onReadingProgressRef.current = onReadingProgressChange;
+  }, [onReadingProgressChange]);
+  useEffect(() => {
+    onUserActivityRef.current = onUserActivity;
+  }, [onUserActivity]);
 
   const [viewportWidth, setViewportWidth] = useState<number>(() =>
     typeof window !== 'undefined' ? window.innerWidth : 780
@@ -350,6 +382,7 @@ export function PdfViewer({
           if (Math.abs(pNum - active) > 1) {
             canvas.width = 0;
             canvas.height = 0;
+            delete canvas.dataset.rendered;
             renderedMetaRef.current.delete(pNum);
           }
         });
@@ -384,6 +417,7 @@ export function PdfViewer({
             canvas.width = 0;
             canvas.height = 0;
           }
+          delete canvas.dataset.rendered;
           renderedMetaRef.current.delete(pNum);
         }
       });
@@ -502,6 +536,9 @@ export function PdfViewer({
             data.bitmap?.close();
           }
 
+          canvas.dataset.rendered = 'true';
+          setFirstPagePainted(true);
+
           const metric = pageLayoutItemsRef.current[data.pageNumber - 1];
           const actualDpr = metric
             ? data.width / Math.max(1, metric.cssWidth)
@@ -593,6 +630,25 @@ export function PdfViewer({
       };
 
       let primaryError: Error | null = null;
+
+      if (resolvedUrl && isSample) {
+        return fetchSamplePdfViaHttpRanges(resolvedUrl, {
+          signal: abortController.signal,
+          onProgress: ({ loadedBytes, totalBytes }) => {
+            if (cancelled) return;
+            if (totalBytes && totalBytes > 0) {
+              const pct = Math.min(
+                100,
+                Math.max(1, Math.round((loadedBytes / totalBytes) * 100))
+              );
+              setRangeProgressLabel(`Streaming ${pct}%`);
+            } else {
+              const kb = Math.max(1, Math.round(loadedBytes / 1024));
+              setRangeProgressLabel(`Loaded ${kb} KB`);
+            }
+          },
+        });
+      }
 
       if (resolvedUrl) {
         try {
@@ -694,6 +750,7 @@ export function PdfViewer({
       if (cancelled) return;
 
       setLoadingState('loading');
+      setFirstPagePainted(false);
       setErrorMessage('');
 
       try {
@@ -873,8 +930,20 @@ export function PdfViewer({
     zoomScale,
   ]);
 
+  // Report initial & active page progress to parent overlay analytics
+  useEffect(() => {
+    if (loadingState !== 'ready' || pages.length === 0) return;
+    const safeCurr = Math.min(pages.length, Math.max(1, currentPage));
+    onReadingProgressRef.current?.({
+      current: safeCurr,
+      total: pages.length,
+      ratio: safeCurr / pages.length,
+    });
+  }, [currentPage, loadingState, pages.length]);
+
   // Native Scroll Handler -> Active Page Detection + 150ms Idle 3.0 DPR Upgrade
   const handleViewportScroll = useCallback(() => {
+    onUserActivityRef.current?.();
     const vp = viewportRef.current;
     if (!vp || pageLayoutMetrics.items.length === 0) return;
 
@@ -892,6 +961,17 @@ export function PdfViewer({
     if (bestPage !== currentPageRef.current) {
       currentPageRef.current = bestPage;
       setCurrentPage(bestPage);
+    }
+
+    const maxScroll = vp.scrollHeight - vp.clientHeight;
+    if (maxScroll > 8 && pageLayoutMetrics.items.length > 0) {
+      const scrollRatio = Math.min(1, Math.max(0, vp.scrollTop / maxScroll));
+      const pageRatio = bestPage / pageLayoutMetrics.items.length;
+      onReadingProgressRef.current?.({
+        current: bestPage,
+        total: pageLayoutMetrics.items.length,
+        ratio: Math.max(pageRatio, scrollRatio),
+      });
     }
 
     if (scrollSharpenTimerRef.current) {
@@ -1285,18 +1365,39 @@ export function PdfViewer({
         )}
         style={{
           touchAction: zoomScale > 1.01 ? 'pan-x pan-y' : 'pan-y',
-          paddingBottom: 'var(--safe-area-inset-bottom)',
+          paddingBottom: isOverlayEmbed
+            ? '0.75rem'
+            : 'var(--safe-area-inset-bottom)',
         }}
       >
-        {loadingState === 'loading' && (
-          <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-6 text-center text-[var(--reader-ink)]">
-            <Loader2
-              className="w-6 h-6 animate-spin text-[var(--reader-muted)] mb-2.5"
-              aria-hidden="true"
-            />
-            <p className="text-sm font-semibold">Loading PDF...</p>
-          </div>
-        )}
+        {(loadingState === 'loading' ||
+          (isSample && loadingState === 'ready' && !firstPagePainted)) &&
+          (isSample ? (
+            <div
+              className={cn(
+                loadingState === 'ready'
+                  ? 'pointer-events-none absolute inset-0 z-10 flex flex-col'
+                  : 'flex flex-col h-full w-full'
+              )}
+            >
+              <SampleDocumentBodySkeleton
+                format="pdf"
+                progressLabel={
+                  loadingState === 'ready'
+                    ? 'Rendering page 1...'
+                    : rangeProgressLabel || 'Streaming sample...'
+                }
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-6 text-center text-[var(--reader-ink)]">
+              <Loader2
+                className="w-6 h-6 animate-spin text-[var(--reader-muted)] mb-2.5"
+                aria-hidden="true"
+              />
+              <p className="text-sm font-semibold">Loading PDF...</p>
+            </div>
+          ))}
 
         {loadingState === 'password' && (
           <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-4">
@@ -1404,6 +1505,7 @@ export function PdfViewer({
                   book={book}
                   formatLabel="PDF"
                   onUnlocked={onSwitchToFullMode}
+                  onCtaClick={onEndCardCtaClick}
                 />
               </div>
             )}

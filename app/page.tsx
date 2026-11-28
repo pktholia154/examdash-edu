@@ -1,12 +1,12 @@
 import type { Metadata } from 'next';
 import React from 'react';
 import {
-  getLiveBooksPage,
-  getLiveCollectionCount,
-  getLiveExamsPage,
-  type CatalogPageResult,
-} from '../server/repositories/catalog-repository';
-import { getPublishedReviewAggregates } from '../server/repositories/review-repository';
+  getCachedLiveBooksPage,
+  getCachedLiveCollectionCount,
+  getCachedLiveExamsPage,
+  getCachedPublishedReviewAggregates,
+} from '../server/cache/catalog-cache';
+import type { CatalogPageResult } from '../server/repositories/catalog-repository';
 import { buildReviewTargetKey } from '../lib/reviews/validation';
 import { buildCanonicalAlternates } from '../lib/seo/schema';
 import {
@@ -27,7 +27,7 @@ import {
   buildLatestBooksShelf,
 } from '../lib/catalog/carousel-shelves';
 
-export const dynamic = 'force-dynamic';
+export const revalidate = false;
 
 export const metadata: Metadata = {
   alternates: buildCanonicalAlternates('/', { includeRssFeed: true }),
@@ -55,10 +55,10 @@ export default async function HomePage() {
   try {
     [booksPage, examsPage, booksTotalCount, examsTotalCount] =
       await Promise.all([
-        getLiveBooksPage({ limit: HOME_CAROUSEL_LIMIT, offset: 0 }),
-        getLiveExamsPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
-        getLiveCollectionCount('books'),
-        getLiveCollectionCount('ExamPackDocument'),
+        getCachedLiveBooksPage({ limit: HOME_CAROUSEL_LIMIT, offset: 0 }),
+        getCachedLiveExamsPage({ limit: HOME_LIST_LIMIT, offset: 0 }),
+        getCachedLiveCollectionCount('books'),
+        getCachedLiveCollectionCount('ExamPackDocument'),
       ]);
 
     const visibleKeys = [
@@ -67,7 +67,7 @@ export default async function HomePage() {
         buildReviewTargetKey('ExamPackDocument', e.id)
       ),
     ];
-    reviewAggregates = await getPublishedReviewAggregates(visibleKeys);
+    reviewAggregates = await getCachedPublishedReviewAggregates(visibleKeys);
   } catch (error) {
     fetchError =
       error instanceof Error

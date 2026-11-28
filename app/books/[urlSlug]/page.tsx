@@ -18,15 +18,20 @@ import {
   serializeSafeJsonLd,
 } from '../../../lib/seo/schema';
 import {
-  getBookBySlug,
-  getLiveBooksPage,
-  getLiveExamsPage,
-} from '../../../server/repositories/catalog-repository';
-import { getItemReviewsSummary } from '../../../server/repositories/review-repository';
+  getCachedBookBySlug,
+  getCachedItemReviewsSummary,
+  getCachedLiveBooksPage,
+  getCachedLiveExamsPage,
+} from '../../../server/cache/catalog-cache';
 
-export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
+export const revalidate = false;
 
-const loadBookBySlug = cache(async (slug: string) => getBookBySlug(slug));
+export async function generateStaticParams() {
+  return [];
+}
+
+const loadBookBySlug = cache(async (slug: string) => getCachedBookBySlug(slug));
 
 export async function generateMetadata({
   params,
@@ -42,7 +47,8 @@ export async function generateMetadata({
 
   const book = lookup.data;
   const origin = getCanonicalOrigin();
-  const canonicalUrl = `${origin}/books/${book.urlSlug}`;
+  const encodedSlug = encodeURIComponent(book.urlSlug);
+  const canonicalUrl = `${origin}/books/${encodedSlug}`;
   const coverUrl = book.imageUrl || buildSiteOgUrl();
   const coverAlt = book.imageMeta?.alt || `${book.title} book cover`;
 
@@ -65,7 +71,7 @@ export async function generateMetadata({
     title: book.title,
     description,
     ...(seoKeywords ? { keywords: seoKeywords } : {}),
-    alternates: buildCanonicalAlternates(`/books/${book.urlSlug}`),
+    alternates: buildCanonicalAlternates(`/books/${encodedSlug}`),
     openGraph: {
       title: book.imageMeta?.title || `${book.title} | ExamDash`,
       description,
@@ -114,12 +120,12 @@ export default async function BookDetailPage({
   const { urlSlug } = await params;
   const [lookup, booksSample, examsSample] = await Promise.all([
     loadBookBySlug(urlSlug),
-    getLiveBooksPage({ limit: 5, offset: 0 }).catch(() => ({
+    getCachedLiveBooksPage({ limit: 5, offset: 0 }).catch(() => ({
       items: [],
       hasMore: false,
       nextOffset: 0,
     })),
-    getLiveExamsPage({ limit: 2, offset: 0 }).catch(() => ({
+    getCachedLiveExamsPage({ limit: 2, offset: 0 }).catch(() => ({
       items: [],
       hasMore: false,
       nextOffset: 0,
@@ -131,7 +137,7 @@ export default async function BookDetailPage({
   }
 
   const book = lookup.data;
-  const reviewSummary = await getItemReviewsSummary('books', book.id);
+  const reviewSummary = await getCachedItemReviewsSummary('books', book.id);
   const jsonLd = serializeSafeJsonLd(buildBookDetailJsonLd(book, reviewSummary));
 
   // Up to 6 cross-taxonomy related <a href> links using bounded card reads (O(1) Firestore FinOps)
@@ -177,7 +183,7 @@ export default async function BookDetailPage({
           </figure>
 
           <div className="min-w-0 flex-1">
-            <h1 className="text-[length:var(--text-h1)] font-extrabold tracking-tight text-[var(--text-main)] leading-tight text-balance break-words">
+            <h1 className="text-[18px] leading-[22px] font-extrabold tracking-tight text-[var(--text-main)] text-balance break-words">
               {book.title}
             </h1>
             <p className="mt-1.5 max-md:mt-1 text-xs font-medium text-[var(--text-muted)] break-words">
@@ -218,6 +224,8 @@ export default async function BookDetailPage({
           bookId={book.id}
           urlSlug={book.urlSlug}
           chapters={book.bookChapters}
+          hasSamplePdf={Boolean(book.samplePdfUrl)}
+          hasSampleMarkdown={Boolean(book.sampleMarkdownUrl)}
         />
 
         {/* Full Description (Server-Rendered, # -> <h2>, ## -> <h3>) */}

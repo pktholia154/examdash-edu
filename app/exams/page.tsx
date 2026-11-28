@@ -2,11 +2,11 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import React, { cache } from 'react';
 import {
-  getLiveCollectionCount,
-  getLiveExamsPage,
-  type CatalogPageResult,
-} from '../../server/repositories/catalog-repository';
-import { getPublishedReviewAggregates } from '../../server/repositories/review-repository';
+  getCachedLiveCollectionCount,
+  getCachedLiveExamsPage,
+  getCachedPublishedReviewAggregates,
+} from '../../server/cache/catalog-cache';
+import type { CatalogPageResult } from '../../server/repositories/catalog-repository';
 import { Breadcrumbs } from '../../components/ui/breadcrumbs';
 import { ServerPagination } from '../../components/ui/server-pagination';
 import { CatalogSection } from '../../features/catalog/catalog-section';
@@ -17,6 +17,7 @@ import {
   buildCollectionHubJsonLd,
   buildSiteOgUrl,
   getCanonicalOrigin,
+  hasFacetFilterParams,
   serializeSafeJsonLd,
 } from '../../lib/seo/schema';
 import {
@@ -25,22 +26,22 @@ import {
   type ReviewAggregateBadge,
 } from '../../lib/types/catalog';
 
-export const dynamic = 'force-dynamic';
-
 const PAGE_SIZE = 20;
 
 const loadExamsHubPage = cache(async (offset: number) => {
-  return getLiveExamsPage({ limit: PAGE_SIZE, offset });
+  return getCachedLiveExamsPage({ limit: PAGE_SIZE, offset });
 });
 
 export async function generateMetadata({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<Metadata> {
   const sp = await searchParams;
-  const pageNum = Math.max(1, Math.floor(Number(sp.page) || 1));
+  const rawPageParam = Array.isArray(sp.page) ? sp.page[0] : sp.page;
+  const pageNum = Math.max(1, Math.floor(Number(rawPageParam) || 1));
   const offset = Math.min(50000, (pageNum - 1) * PAGE_SIZE);
+  const isFilteredVariant = hasFacetFilterParams(sp);
 
   let itemCount = 1;
   try {
@@ -82,7 +83,7 @@ export async function generateMetadata({
     description,
     alternates: buildCanonicalAlternates(relCanonical, { includeRssFeed: true }),
     robots: {
-      index: true,
+      index: !isFilteredVariant,
       follow: true,
     },
     openGraph: {
@@ -113,10 +114,11 @@ export async function generateMetadata({
 export default async function ExamsCatalogPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const pageNum = Math.max(1, Math.floor(Number(sp.page) || 1));
+  const rawPageParam = Array.isArray(sp.page) ? sp.page[0] : sp.page;
+  const pageNum = Math.max(1, Math.floor(Number(rawPageParam) || 1));
   const offset = Math.min(50000, (pageNum - 1) * PAGE_SIZE);
 
   let examsPage: CatalogPageResult<PublicExamDTO> = {
@@ -131,7 +133,7 @@ export default async function ExamsCatalogPage({
   try {
     [examsPage, totalExamsCount] = await Promise.all([
       loadExamsHubPage(offset),
-      getLiveCollectionCount('ExamPackDocument'),
+      getCachedLiveCollectionCount('ExamPackDocument'),
     ]);
 
     if (pageNum > 1 && examsPage.items.length === 0) {
@@ -141,7 +143,7 @@ export default async function ExamsCatalogPage({
     const visibleKeys = examsPage.items.map((e) =>
       buildReviewTargetKey('ExamPackDocument', e.id)
     );
-    reviewAggregates = await getPublishedReviewAggregates(visibleKeys);
+    reviewAggregates = await getCachedPublishedReviewAggregates(visibleKeys);
   } catch (err) {
     if (
       err &&

@@ -248,3 +248,93 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+export async function HEAD(req: NextRequest) {
+  const sp = req.nextUrl.searchParams;
+  const slug = (sp.get('slug') || '').trim();
+  const mode = sp.get('mode') === 'full' ? 'full' : 'sample';
+  const format = sp.get('format') === 'pdf' ? 'pdf' : 'markdown';
+  const uid = (sp.get('uid') || '').trim();
+  const expRaw = sp.get('exp') || '';
+  const sig = (sp.get('sig') || '').trim();
+  const expMs = expRaw ? Number(expRaw) : undefined;
+
+  if (!slug) {
+    return new NextResponse(null, {
+      status: 400,
+      headers: { 'Cache-Control': 'private, no-store' },
+    });
+  }
+
+  const authHeader = req.headers.get('authorization');
+  let verifiedTokenUid: string | null = null;
+  let rawBearerToken: string | null = null;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const candidate = authHeader.slice('Bearer '.length).trim();
+    const decoded = await verifyBearerIdToken(authHeader);
+    if (decoded?.uid) {
+      verifiedTokenUid = decoded.uid;
+      rawBearerToken = candidate;
+    }
+  }
+
+  try {
+    const resolution = await resolveBookStreamUpstream({
+      urlSlug: slug,
+      mode,
+      format,
+      uid,
+      expMs,
+      sig,
+      verifiedTokenUid,
+      bearerIdToken: rawBearerToken,
+    });
+
+    if (resolution.status !== 'ok') {
+      return new NextResponse(null, {
+        status: resolution.status === 'unauthorized' ? 401 : 404,
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
+
+    const probe = await fetchUpstreamBytes(resolution.target.upstreamUrl, {
+      rangeHeader: 'bytes=0-0',
+      firebaseIdToken: rawBearerToken,
+      maxBytes: 4096,
+    });
+
+    const headersOut = new Headers();
+    headersOut.set(
+      'Content-Type',
+      probe.headers['content-type'] || resolution.target.contentType
+    );
+    headersOut.set('Accept-Ranges', 'bytes');
+
+    const cr = probe.headers['content-range'] || '';
+    const totalMatch = /\/(\d+)$/.exec(cr);
+    if (totalMatch) {
+      headersOut.set('Content-Length', totalMatch[1]);
+    } else if (probe.headers['content-length']) {
+      headersOut.set('Content-Length', probe.headers['content-length']);
+    }
+    if (probe.headers['etag']) {
+      headersOut.set('ETag', probe.headers['etag']);
+    }
+    headersOut.set(
+      'Cache-Control',
+      mode === 'sample' ? 'private, max-age=300' : 'private, no-store'
+    );
+    headersOut.set('X-Content-Type-Options', 'nosniff');
+
+    return new NextResponse(null, {
+      status: probe.statusCode >= 200 && probe.statusCode < 300 ? 200 : 502,
+      headers: headersOut,
+    });
+  } catch {
+    return new NextResponse(null, {
+      status: 500,
+      headers: { 'Cache-Control': 'private, no-store' },
+    });
+  }
+}

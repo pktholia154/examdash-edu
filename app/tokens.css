@@ -279,6 +279,18 @@ select,
   color: var(--text-main);
 }
 
+.markdown-body .ed-markdown-table-wrap {
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+
+.markdown-body .ed-markdown-table-wrap table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+}
+
 /* ==========================================================================
    Reader Comfort Skins (Light / Warm Sepia / True Dark) — Zero-Cost CSS Vars
    ========================================================================== */
@@ -917,12 +929,17 @@ select,
     overflow-wrap: anywhere;
   }
 
-  .markdown-body pre,
-  .markdown-body table {
+  .markdown-body pre {
     display: block;
     max-width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .markdown-body .ed-markdown-table-wrap table {
+    display: table;
+    min-width: 100%;
+    overflow-x: visible;
   }
 
   /* Award-winning Safe-Area Mobile Bottom Navigation Bar */

@@ -1,13 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  extractTimestampMs,
   isDocumentLive,
   mapBookToPublicDTO,
   mapExamToPublicDTO,
   normalizeBookChapters,
   normalizeImageUrl,
   parseImageMeta,
+  safeTimestampToIso,
 } from './mapper';
+import {
+  normalizeSafeCatalogSlug,
+  validateCmsBookIngestion,
+  validateCmsExamPackIngestion,
+} from '../../lib/validation/cms-ingestion';
 
 test('mapBookToPublicDTO strips fullPdfStoragePath and fullMarkdownStoragePath and falls back to createdAt', () => {
   const rawBook = {
@@ -231,5 +238,83 @@ test('mapBookToPublicDTO maps optional positive soldCount and isBestseller witho
   assert.equal(bestsellerBook.soldCount, 42);
   assert.equal(bestsellerBook.isBestseller, true);
 });
+
+test('crash-proof mapper handles out-of-range microsecond/nanosecond timestamps, epoch seconds, and malformed fields without throwing', () => {
+  // 10-digit Unix seconds auto-normalized to milliseconds
+  assert.equal(extractTimestampMs(1704067200), 1704067200000);
+  // Nanosecond timestamp (1.7e18) safely scaled down instead of throwing RangeError
+  const nanoMs = extractTimestampMs('1704067200000000000');
+  assert.equal(nanoMs, 1704067200000);
+  // Extreme out-of-bounds value never throws RangeError in safeTimestampToIso
+  assert.doesNotThrow(() => safeTimestampToIso(9e25));
+
+  const malformedBook = mapBookToPublicDTO(
+    'B_CORRUPT',
+    {
+      createdAt: { seconds: 9e20 },
+      updatedAt: 'not-a-valid-date',
+      currency: 'INVALID_CURRENCY',
+      buyPrice: 'NaN',
+      listPrice: -50,
+    } as Record<string, unknown>
+  );
+  assert.equal(malformedBook.currency, 'INR');
+  assert.equal(malformedBook.buyPrice, 0);
+  assert.equal(malformedBook.listPrice, 0);
+  assert.ok(malformedBook.publishAtIso.endsWith('Z'));
+});
+
+test('Zod CMS ingestion validators enforce canonical slugs, non-negative prices, safe URLs, and GSC paid-title hygiene', () => {
+  assert.equal(normalizeSafeCatalogSlug('UPSC History & Polity!! ', 'B1'), 'upsc-history-polity');
+
+  const validBook = validateCmsBookIngestion({
+    id: 'B500',
+    title: 'UPSC Polity Masterclass (Free Sample Book)',
+    urlSlug: 'upsc-polity-masterclass-500',
+    seoDescription: '100% free download UPSC Polity notes.',
+    buyPrice: '199',
+    listPrice: 99,
+    currency: 'inr',
+    tags: ['UPSC', 'Free PDF', 'Polity'],
+    samplePdfUrl: 'https://exam-dash.com/samples/polity.pdf',
+    bookChapters: [{ title: 'Chapter 1: Constitutional Framework' }],
+  });
+  assert.equal(validBook.ok, true);
+  if (validBook.ok) {
+    assert.equal(validBook.data.title, 'UPSC Polity Masterclass');
+    assert.equal(validBook.data.listPrice, 199);
+    assert.equal(validBook.data.currency, 'INR');
+    assert.deepEqual(validBook.data.tags, ['UPSC', 'Polity']);
+    assert.match(validBook.data.seoDescription, /Includes Free Sample/i);
+    assert.deepEqual(validBook.data.bookChapters, [
+      'Chapter 1: Constitutional Framework',
+    ]);
+  }
+
+  const invalidSlugBook = validateCmsBookIngestion({
+    id: 'B501',
+    title: 'Bad Slug Book',
+    urlSlug: 'Bad Uppercase Slug!',
+    buyPrice: 99,
+    samplePdfUrl: 'javascript:alert(1)',
+  });
+  assert.equal(invalidSlugBook.ok, false);
+
+  const validExam = validateCmsExamPackIngestion({
+    id: 'E500',
+    title: 'GATE CS Full Mock Series',
+    urlSlug: 'gate-cs-full-mock-500',
+    buyPrice: 299,
+    MocktestTitles: [
+      { id: 'm1', title: 'Mock 1', duration: '180', totalQuestions: 65, totalMarks: 100 },
+    ],
+  });
+  assert.equal(validExam.ok, true);
+  if (validExam.ok) {
+    assert.equal(validExam.data.totalMocktest, 1);
+    assert.equal(validExam.data.MocktestTitles[0].duration, 180);
+  }
+});
+
 
 

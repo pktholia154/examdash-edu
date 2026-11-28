@@ -2,11 +2,11 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import React, { cache } from 'react';
 import {
-  getLiveBooksPage,
-  getLiveCollectionCount,
-  type CatalogPageResult,
-} from '../../server/repositories/catalog-repository';
-import { getPublishedReviewAggregates } from '../../server/repositories/review-repository';
+  getCachedLiveBooksPage,
+  getCachedLiveCollectionCount,
+  getCachedPublishedReviewAggregates,
+} from '../../server/cache/catalog-cache';
+import type { CatalogPageResult } from '../../server/repositories/catalog-repository';
 import { Breadcrumbs } from '../../components/ui/breadcrumbs';
 import { ServerPagination } from '../../components/ui/server-pagination';
 import { CatalogSection } from '../../features/catalog/catalog-section';
@@ -17,6 +17,7 @@ import {
   buildCollectionHubJsonLd,
   buildSiteOgUrl,
   getCanonicalOrigin,
+  hasFacetFilterParams,
   serializeSafeJsonLd,
 } from '../../lib/seo/schema';
 import {
@@ -25,22 +26,22 @@ import {
   type ReviewAggregateBadge,
 } from '../../lib/types/catalog';
 
-export const dynamic = 'force-dynamic';
-
 const PAGE_SIZE = 20;
 
 const loadBooksHubPage = cache(async (offset: number) => {
-  return getLiveBooksPage({ limit: PAGE_SIZE, offset });
+  return getCachedLiveBooksPage({ limit: PAGE_SIZE, offset });
 });
 
 export async function generateMetadata({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<Metadata> {
   const sp = await searchParams;
-  const pageNum = Math.max(1, Math.floor(Number(sp.page) || 1));
+  const rawPageParam = Array.isArray(sp.page) ? sp.page[0] : sp.page;
+  const pageNum = Math.max(1, Math.floor(Number(rawPageParam) || 1));
   const offset = Math.min(50000, (pageNum - 1) * PAGE_SIZE);
+  const isFilteredVariant = hasFacetFilterParams(sp);
 
   let itemCount = 1;
   try {
@@ -83,7 +84,7 @@ export async function generateMetadata({
     description,
     alternates: buildCanonicalAlternates(relCanonical, { includeRssFeed: true }),
     robots: {
-      index: true,
+      index: !isFilteredVariant,
       follow: true,
     },
     openGraph: {
@@ -114,10 +115,11 @@ export async function generateMetadata({
 export default async function BooksCatalogPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const pageNum = Math.max(1, Math.floor(Number(sp.page) || 1));
+  const rawPageParam = Array.isArray(sp.page) ? sp.page[0] : sp.page;
+  const pageNum = Math.max(1, Math.floor(Number(rawPageParam) || 1));
   const offset = Math.min(50000, (pageNum - 1) * PAGE_SIZE);
 
   let booksPage: CatalogPageResult<PublicBookDTO> = {
@@ -132,7 +134,7 @@ export default async function BooksCatalogPage({
   try {
     [booksPage, totalBooksCount] = await Promise.all([
       loadBooksHubPage(offset),
-      getLiveCollectionCount('books'),
+      getCachedLiveCollectionCount('books'),
     ]);
 
     if (pageNum > 1 && booksPage.items.length === 0) {
@@ -142,7 +144,7 @@ export default async function BooksCatalogPage({
     const visibleKeys = booksPage.items.map((b) =>
       buildReviewTargetKey('books', b.id)
     );
-    reviewAggregates = await getPublishedReviewAggregates(visibleKeys);
+    reviewAggregates = await getCachedPublishedReviewAggregates(visibleKeys);
   } catch (err) {
     // Re-throw Next.js notFound() digest if triggered above
     if (

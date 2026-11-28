@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import firebaseConfig from './firebase-applet-config.json';
+import {
+  extractRequestHostname,
+  hasFacetFilterParams,
+  isDefaultFirebaseOrCloudRunHost,
+} from './lib/seo/schema';
 
 const CAPACITOR_ALLOWED_ORIGINS = new Set([
   'capacitor://localhost',
@@ -9,7 +14,7 @@ const CAPACITOR_ALLOWED_ORIGINS = new Set([
 ]);
 
 const PUBLIC_ROUTER_VARY =
-  'RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch, Accept-Encoding';
+  'RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch, X-Forwarded-Host, Accept-Encoding';
 
 const MARKETING_PARAM_NAMES = new Set([
   'gclid',
@@ -155,7 +160,7 @@ async function getEdgeTombstones(): Promise<EdgeTombstoneSnapshot> {
   return inflightTombstonePromise;
 }
 
-function buildGone410Response(): NextResponse {
+function buildGone410Response(isFirebaseOrCloudRunHost: boolean): NextResponse {
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -192,8 +197,10 @@ function buildGone410Response(): NextResponse {
     status: 410,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'public, max-age=0, s-maxage=3600',
-      'X-Robots-Tag': 'noindex',
+      'Cache-Control': isFirebaseOrCloudRunHost
+        ? 'private, no-store'
+        : 'public, max-age=0, s-maxage=3600',
+      'X-Robots-Tag': isFirebaseOrCloudRunHost ? 'noindex, nofollow' : 'noindex',
       'X-Content-Type-Options': 'nosniff',
     },
   });
@@ -219,26 +226,16 @@ export async function middleware(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
   const origin = req.headers.get('origin') || '';
 
-  const rawHost = (
-    req.headers.get('x-forwarded-host') ||
-    req.headers.get('host') ||
-    ''
-  )
-    .split(',')[0]
-    .trim()
-    .toLowerCase()
-    .replace(/:\d+$/, '');
+  const host = extractRequestHostname(
+    (
+      req.headers.get('x-forwarded-host') ||
+      req.headers.get('host') ||
+      ''
+    ).toLowerCase()
+  );
+  const isFirebaseOrCloudRunHost = isDefaultFirebaseOrCloudRunHost(host);
 
-  // 0. Mirror-Domain Canonical Lock: 301 redirect www.exam-dash.com -> exam-dash.com
-  if (rawHost === 'www.exam-dash.com') {
-    const redirectUrl = new URL(
-      `${pathname}${req.nextUrl.search}`,
-      'https://exam-dash.com'
-    );
-    return NextResponse.redirect(redirectUrl, 301);
-  }
-
-  // 0b. Dynamic IndexNow Domain Key Verification (`/{INDEXNOW_KEY}.txt`)
+  // 0. Dynamic IndexNow Domain Key Verification (`/{INDEXNOW_KEY}.txt`)
   const configuredIndexNowKey = (process.env.INDEXNOW_KEY || '').trim();
   if (
     configuredIndexNowKey &&
@@ -248,7 +245,11 @@ export async function middleware(req: NextRequest) {
     const rewriteUrl = req.nextUrl.clone();
     rewriteUrl.pathname = '/api/v1/seo/indexnow';
     rewriteUrl.search = `?verifyKey=${encodeURIComponent(configuredIndexNowKey)}`;
-    return NextResponse.rewrite(rewriteUrl);
+    const rewriteRes = NextResponse.rewrite(rewriteUrl);
+    if (isFirebaseOrCloudRunHost) {
+      rewriteRes.headers.set('X-Robots-Tag', 'noindex, nofollow');
+    }
+    return rewriteRes;
   }
 
   // 1. Bearer-only /api/v1/* CORS allowlisting for Capacitor Hybrid Shell
@@ -309,11 +310,14 @@ export async function middleware(req: NextRequest) {
     return res;
   }
 
-  // 2b. Internal Search Trap Route (`/search`): no-store + noindex, follow
+  // 2b. Internal Search Trap Route (`/search`): no-store + noindex, follow (or noindex, nofollow on mirror hosts)
   if (pathname === '/search' || pathname.startsWith('/search/')) {
     const res = NextResponse.next();
     res.headers.set('Cache-Control', 'private, no-store');
-    res.headers.set('X-Robots-Tag', 'noindex, follow');
+    res.headers.set(
+      'X-Robots-Tag',
+      isFirebaseOrCloudRunHost ? 'noindex, nofollow' : 'noindex, follow'
+    );
     res.headers.set('X-Content-Type-Options', 'nosniff');
     return res;
   }
@@ -331,37 +335,17 @@ export async function middleware(req: NextRequest) {
     const res = NextResponse.next({ request: { headers: cleanHeaders } });
     res.headers.delete('set-cookie');
     res.headers.set('X-Content-Type-Options', 'nosniff');
-    if (rawHost && rawHost !== 'exam-dash.com') {
+    res.headers.set('Vary', 'X-Forwarded-Host, Accept-Encoding');
+    if (isFirebaseOrCloudRunHost) {
+      res.headers.set('Cache-Control', 'private, no-store');
       res.headers.set('X-Robots-Tag', 'noindex, nofollow');
     }
     return res;
   }
 
-  // 2d. Base Pagination Canonical Normalization (`?page=1` or invalid `<= 1` -> clean base path 301)
-  if (
-    (req.method === 'GET' || req.method === 'HEAD') &&
-    (pathname === '/books' || pathname === '/exams') &&
-    searchParams.has('page')
-  ) {
-    const rawPage = searchParams.get('page') || '';
-    const parsedPage = Number(rawPage);
-    if (!Number.isInteger(parsedPage) || parsedPage <= 1) {
-      const cleanUrl = req.nextUrl.clone();
-      cleanUrl.searchParams.delete('page');
-      if (rawHost === 'exam-dash.com') {
-        const prodTarget = new URL(
-          `${cleanUrl.pathname}${cleanUrl.search}`,
-          'https://exam-dash.com'
-        );
-        return NextResponse.redirect(prodTarget, 301);
-      }
-      return NextResponse.redirect(cleanUrl, 301);
-    }
-  }
-
   const isPartialRsc = isNextPartialFlightRequest(req);
 
-  // 2e. Permanently Deleted Entities (`isDeleted == true` Tombstones) -> Genuine HTTP 410 Gone
+  // 2d. Permanently Deleted Entities (`isDeleted == true` Tombstones) -> Genuine HTTP 410 Gone
   if ((req.method === 'GET' || req.method === 'HEAD') && !isPartialRsc) {
     const detailMatch = pathname.match(/^\/(books|exams)\/([^/]+)$/);
     if (detailMatch) {
@@ -379,13 +363,13 @@ export async function middleware(req: NextRequest) {
             ? tombstones.books.has(decodedSlug)
             : tombstones.exams.has(decodedSlug);
         if (isDeleted) {
-          return buildGone410Response();
+          return buildGone410Response(isFirebaseOrCloudRunHost);
         }
       }
     }
   }
 
-  // 3. Public Discovery, Catalog & Detail Routes: Session-Agnostic Cookie-Free Edge Caching
+  // 3. Public Discovery, Catalog & Detail Routes: Session-Agnostic Cookie-Free Edge Caching (Zero Redirects)
   const cleanRequestHeaders = new Headers(req.headers);
   cleanRequestHeaders.delete('cookie');
 
@@ -395,22 +379,27 @@ export async function middleware(req: NextRequest) {
     },
   });
 
+  const isFilteredQuery = hasFacetFilterParams(searchParams);
+
   if (req.method === 'GET' || req.method === 'HEAD') {
-    if (isPartialRsc) {
-      // Pillar 2: Never let client-router RSC flight payloads overwrite canonical HTML cache entries
+    if (isPartialRsc || isFirebaseOrCloudRunHost) {
+      // Never cache client-router RSC flight payloads or default Firebase/Cloud Run mirror responses in shared CDN
       res.headers.set('Cache-Control', 'private, no-cache, no-store, max-age=0');
       res.headers.set('Vary', PUBLIC_ROUTER_VARY);
     } else if (process.env.NODE_ENV === 'production') {
-      if (hasMarketingQueryParams(searchParams)) {
-        // Short s-maxage=60 on ?utm_* / ?gclid variants to preserve attribution while preventing CDN cache bloat
+      if (hasMarketingQueryParams(searchParams) || isFilteredQuery) {
+        // Short s-maxage=60 on ?utm_* / ?gclid / filter variants to prevent CDN cache bloat
         res.headers.set(
           'Cache-Control',
           'public, max-age=0, s-maxage=60, stale-while-revalidate=60'
         );
       } else {
+        const edgeCacheDirective =
+          'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400';
+        res.headers.set('Cache-Control', edgeCacheDirective);
         res.headers.set(
-          'Cache-Control',
-          'public, max-age=60, s-maxage=180, stale-while-revalidate=600, stale-if-error=86400'
+          'CDN-Cache-Control',
+          'public, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400'
         );
       }
       res.headers.set('Vary', PUBLIC_ROUTER_VARY);
@@ -427,9 +416,12 @@ export async function middleware(req: NextRequest) {
   res.headers.set('X-Content-Type-Options', 'nosniff');
   res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
-  // Lock preview / raw Cloud Run origin hosts against accidental indexing
-  if (rawHost && rawHost !== 'exam-dash.com') {
+  // Block indexing strictly on default Firebase/Cloud Run mirror domains (.web.app, .firebaseapp.com, .run.app),
+  // leaving exam-dash.com completely untouched (except explicit facet/filter/sort query variants).
+  if (isFirebaseOrCloudRunHost) {
     res.headers.set('X-Robots-Tag', 'noindex, nofollow');
+  } else if (isFilteredQuery) {
+    res.headers.set('X-Robots-Tag', 'noindex, follow');
   }
 
   return res;

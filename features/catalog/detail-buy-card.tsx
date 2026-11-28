@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
-import dynamic from 'next/dynamic';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
   Check,
@@ -13,6 +12,17 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
+import type {
+  SampleCloseReason,
+  SampleTriggerSource,
+  SampleViewerFormat,
+} from '../../lib/analytics/sample-telemetry';
+import {
+  popSameUrlSampleHistoryStateIfPresent,
+  pushSameUrlSampleHistoryState,
+  subscribeOpenBookSample,
+} from '../../lib/reader/sample-overlay-events';
+import { prefetchBookSampleOnIntent } from '../../lib/reader/sample-stream-loader';
 import {
   formatPrice,
   makeCompositeKey,
@@ -26,14 +36,37 @@ import { cn } from '../../lib/utils';
 import { useAuth } from '../auth/auth-provider';
 import { useCart } from '../cart/cart-provider';
 import { InstallAppCallout } from '../pwa/install-banner';
+import { SampleOverlayInstantShellSkeleton } from '../reader/shared/sample-viewer-skeleton';
 import { useToast } from '../toast/toast-context';
 import { useWishlist } from '../wishlist/wishlist-provider';
+import type { BookInlineReaderModalProps } from './book-inline-reader-modal';
 
-const LazyBookInlineReaderModal = dynamic(
-  () =>
-    import('./book-inline-reader-modal').then((m) => m.BookInlineReaderModal),
-  { ssr: false }
-);
+type LoadedModalComponent = React.ComponentType<BookInlineReaderModalProps>;
+
+let cachedModalComponent: LoadedModalComponent | null = null;
+let modalImportPromise: Promise<LoadedModalComponent> | null = null;
+
+function loadBookInlineReaderModalChunk(): Promise<LoadedModalComponent> {
+  if (cachedModalComponent) {
+    return Promise.resolve(cachedModalComponent);
+  }
+  if (!modalImportPromise) {
+    modalImportPromise = import('./book-inline-reader-modal').then((mod) => {
+      cachedModalComponent = mod.BookInlineReaderModal;
+      return mod.BookInlineReaderModal;
+    });
+  }
+  return modalImportPromise;
+}
+
+function preloadSampleViewerChunks(preferredFormat: SampleViewerFormat): void {
+  void loadBookInlineReaderModalChunk().catch(() => {});
+  if (preferredFormat === 'pdf') {
+    void import('../reader/pdf/pdf-viewer').catch(() => {});
+  } else {
+    void import('../reader/markdown/markdown-viewer').catch(() => {});
+  }
+}
 
 /**
  * Primitive-only props contract (Module 4 RSC Payload Slimming):
@@ -83,37 +116,120 @@ export function DetailBuyCard({
 
   const validityOptions = getValidityOptions(collectionName, buyPrice);
   const [selectedValidityMonths, setSelectedValidityMonths] = useState<number>(
-    () => (buyPrice <= 0 ? validityOptions[1].validityMonths : validityOptions[0].validityMonths)
+    () =>
+      buyPrice <= 0
+        ? validityOptions[1].validityMonths
+        : validityOptions[0].validityMonths
   );
   const [copiedLink, setCopiedLink] = useState(false);
   const [inlineSampleState, setInlineSampleState] = useState<{
     open: boolean;
-    format: 'pdf' | 'markdown';
+    format: SampleViewerFormat;
+    triggerSource: SampleTriggerSource;
   } | null>(null);
+  const [ModalComponent, setModalComponent] =
+    useState<LoadedModalComponent | null>(() => cachedModalComponent);
 
-  const openSampleReader = useCallback((format: 'pdf' | 'markdown') => {
-    if (typeof window !== 'undefined') {
-      try {
-        const currentState =
-          window.history.state && typeof window.history.state === 'object'
-            ? (window.history.state as Record<string, unknown>)
-            : {};
-        if (!currentState.edInlineReader) {
-          window.history.pushState(
-            { ...currentState, edInlineReader: true },
-            ''
-          );
-        }
-      } catch {
-        // Ignore restricted iframe history APIs
+  const suppressNextPopStateRef = useRef(false);
+
+  const hasBookSample =
+    collectionName === 'books' && Boolean(samplePdfUrl || sampleMarkdownUrl);
+  const defaultBookSampleFormat: SampleViewerFormat = samplePdfUrl
+    ? 'pdf'
+    : 'markdown';
+  const hasExamSample =
+    collectionName === 'ExamPackDocument' && Boolean(sampleJsonUrl);
+
+  const handlePrefetchSampleIntent = useCallback(() => {
+    if (!hasBookSample) return;
+    prefetchBookSampleOnIntent({
+      urlSlug,
+      preferredFormat: defaultBookSampleFormat,
+      preloadViewerChunks: () =>
+        preloadSampleViewerChunks(defaultBookSampleFormat),
+    });
+  }, [defaultBookSampleFormat, hasBookSample, urlSlug]);
+
+  const openSampleReader = useCallback(
+    (
+      format: SampleViewerFormat,
+      triggerSource: SampleTriggerSource = 'buy_card_cta'
+    ) => {
+      pushSameUrlSampleHistoryState(id);
+      setInlineSampleState({ open: true, format, triggerSource });
+
+      if (!cachedModalComponent) {
+        void loadBookInlineReaderModalChunk()
+          .then((Comp) => {
+            setModalComponent(() => Comp);
+          })
+          .catch(() => {});
+      } else if (!ModalComponent) {
+        setModalComponent(() => cachedModalComponent);
+      }
+    },
+    [ModalComponent, id]
+  );
+
+  const closeSampleReader = useCallback((reason: SampleCloseReason) => {
+    setInlineSampleState(null);
+
+    if (
+      reason !== 'back_button' &&
+      reason !== 'cta_checkout' &&
+      reason !== 'pagehide'
+    ) {
+      suppressNextPopStateRef.current = true;
+      const didPop = popSameUrlSampleHistoryStateIfPresent();
+      if (!didPop) {
+        suppressNextPopStateRef.current = false;
+      } else {
+        window.setTimeout(() => {
+          suppressNextPopStateRef.current = false;
+        }, 250);
       }
     }
-    setInlineSampleState({ open: true, format });
   }, []);
 
-  const closeSampleReader = useCallback(() => {
-    setInlineSampleState(null);
-  }, []);
+  // Listen for same-URL mobile/browser Back button (`popstate`) while Sample Viewer is open
+  useEffect(() => {
+    if (!inlineSampleState?.open) return;
+
+    const onPopState = () => {
+      if (suppressNextPopStateRef.current) {
+        suppressNextPopStateRef.current = false;
+        return;
+      }
+      setInlineSampleState(null);
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, [inlineSampleState?.open]);
+
+  // Listen for Chapter 1 Same-DOM open requests from `BookChaptersList`
+  useEffect(() => {
+    if (collectionName !== 'books' || !hasBookSample) return;
+    return subscribeOpenBookSample(id, (detail) => {
+      const requestedFormat: SampleViewerFormat =
+        detail.format === 'markdown' && sampleMarkdownUrl
+          ? 'markdown'
+          : detail.format === 'pdf' && samplePdfUrl
+          ? 'pdf'
+          : defaultBookSampleFormat;
+      openSampleReader(requestedFormat, detail.triggerSource);
+    });
+  }, [
+    collectionName,
+    defaultBookSampleFormat,
+    hasBookSample,
+    id,
+    openSampleReader,
+    sampleMarkdownUrl,
+    samplePdfUrl,
+  ]);
 
   const compositeKey = makeCompositeKey(collectionName, id);
   const isOwned = ownedCompositeKeys.has(compositeKey);
@@ -182,7 +298,10 @@ export function DetailBuyCard({
 
   const handleShare = async () => {
     const url = getShareUrl();
-    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    if (
+      typeof navigator !== 'undefined' &&
+      typeof navigator.share === 'function'
+    ) {
       try {
         await navigator.share({
           title: `${title} — ExamDash`,
@@ -205,20 +324,17 @@ export function DetailBuyCard({
     addItem(itemPayload);
   };
 
-  const hasBookSample =
-    collectionName === 'books' &&
-    Boolean(samplePdfUrl || sampleMarkdownUrl);
-  const defaultBookSampleFormat: 'pdf' | 'markdown' = samplePdfUrl
-    ? 'pdf'
-    : 'markdown';
-  const hasExamSample =
-    collectionName === 'ExamPackDocument' && Boolean(sampleJsonUrl);
-
   const primaryLabel = isCheckingOut
     ? 'Processing...'
     : isFree
     ? 'Claim Free'
     : 'Buy Now';
+
+  const formattedPriceLabel = isFree
+    ? 'Free'
+    : formatPrice(activeValidity.payablePrice, currency);
+
+  const ActiveModal = ModalComponent ?? cachedModalComponent;
 
   return (
     <>
@@ -243,7 +359,10 @@ export function DetailBuyCard({
           )}
         >
           <Heart
-            className={cn('w-[18px] h-[18px] shrink-0', wishlisted && 'fill-current')}
+            className={cn(
+              'w-[18px] h-[18px] shrink-0',
+              wishlisted && 'fill-current'
+            )}
             aria-hidden="true"
           />
         </button>
@@ -326,9 +445,7 @@ export function DetailBuyCard({
           {/* Dynamic Price Readout */}
           <div className="flex items-baseline tabular-nums shrink-0">
             <span className="text-[26px] font-extrabold text-[var(--text-main)] leading-none">
-              {isFree
-                ? 'Free'
-                : formatPrice(activeValidity.payablePrice, currency)}
+              {formattedPriceLabel}
             </span>
           </div>
 
@@ -382,7 +499,10 @@ export function DetailBuyCard({
                       )}
                     >
                       {isSelected && (
-                        <Check className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
+                        <Check
+                          className="w-3.5 h-3.5 stroke-[2.5]"
+                          aria-hidden="true"
+                        />
                       )}
                     </span>
                     <span className="relative z-10 flex flex-col leading-none gap-0.5 whitespace-nowrap">
@@ -442,7 +562,14 @@ export function DetailBuyCard({
           {hasBookSample && (
             <button
               type="button"
-              onClick={() => openSampleReader(defaultBookSampleFormat)}
+              onPointerEnter={handlePrefetchSampleIntent}
+              onTouchStart={handlePrefetchSampleIntent}
+              onFocus={handlePrefetchSampleIntent}
+              onClick={() =>
+                openSampleReader(defaultBookSampleFormat, 'buy_card_cta')
+              }
+              aria-haspopup="dialog"
+              aria-expanded={Boolean(inlineSampleState?.open)}
               className="ed-sample-cta inline-flex items-center justify-center gap-2 min-h-[48px] max-md:w-full px-5 max-md:px-3.5 rounded-lg border text-sm font-semibold whitespace-nowrap min-w-0"
             >
               <span
@@ -451,7 +578,10 @@ export function DetailBuyCard({
               >
                 <span className="ed-sample-cta-sheen" />
               </span>
-              <BookOpen className="relative z-10 w-4 h-4 shrink-0" aria-hidden="true" />
+              <BookOpen
+                className="relative z-10 w-4 h-4 shrink-0"
+                aria-hidden="true"
+              />
               <span className="relative z-10 truncate">Sample</span>
             </button>
           )}
@@ -468,7 +598,10 @@ export function DetailBuyCard({
               >
                 <span className="ed-sample-cta-sheen" />
               </span>
-              <Play className="relative z-10 w-4 h-4 shrink-0" aria-hidden="true" />
+              <Play
+                className="relative z-10 w-4 h-4 shrink-0"
+                aria-hidden="true"
+              />
               <span className="relative z-10 truncate">Try Sample Mock</span>
             </a>
           )}
@@ -482,22 +615,40 @@ export function DetailBuyCard({
         className="mt-4 max-md:mt-3.5"
       />
 
-      {collectionName === 'books' && inlineSampleState?.open && (
-        <LazyBookInlineReaderModal
-          book={{
-            id,
-            title,
-            urlSlug,
-            currency,
-            buyPrice,
-            listPrice,
-            samplePdfUrl,
-            sampleMarkdownUrl,
-          }}
-          initialFormat={inlineSampleState.format}
-          onClose={closeSampleReader}
-        />
-      )}
+      {/* Same-DOM Sample Overlay: Instant <16ms Skeleton -> Lazy Web Worker Viewer */}
+      {collectionName === 'books' &&
+        inlineSampleState?.open &&
+        (ActiveModal ? (
+          <ActiveModal
+            book={{
+              id,
+              title,
+              urlSlug,
+              type,
+              authorName,
+              language,
+              currency,
+              buyPrice,
+              listPrice,
+              imageUrl,
+              imageAlt,
+              samplePdfUrl,
+              sampleMarkdownUrl,
+            }}
+            initialFormat={inlineSampleState.format}
+            selectedValidityMonths={selectedValidityMonths}
+            triggerSource={inlineSampleState.triggerSource}
+            onClose={closeSampleReader}
+          />
+        ) : (
+          <SampleOverlayInstantShellSkeleton
+            title={title}
+            format={inlineSampleState.format}
+            priceLabel={formattedPriceLabel}
+            isFree={isFree}
+            onClose={() => closeSampleReader('close_button')}
+          />
+        ))}
     </>
   );
 }

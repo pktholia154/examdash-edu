@@ -6,8 +6,14 @@ import {
   type LegalTocItem,
 } from '../../components/legal/legal-document-shell';
 import { BUSINESS_INFO } from '../../lib/legal/business-info';
-import { buildCanonicalAlternates, buildSiteOgUrl } from '../../lib/seo/schema';
+import {
+  buildCanonicalAlternates,
+  buildSiteOgUrl,
+  getCanonicalOrigin,
+} from '../../lib/seo/schema';
 import { ContactSupportComposer } from '../../features/legal/contact-support-composer';
+
+export const revalidate = false;
 
 const PAGE_TITLE = 'Contact Us';
 const PAGE_DESC =
@@ -24,7 +30,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: `${PAGE_TITLE} — ${BUSINESS_INFO.brandName}`,
     description: PAGE_DESC,
-    url: `${BUSINESS_INFO.officialWebsiteOrigin}/contact-us`,
+    url: `${getCanonicalOrigin()}/contact-us`,
     type: 'website',
     images: [
       {

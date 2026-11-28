@@ -104,6 +104,7 @@ const nextConfig: NextConfig = {
             value: 'no-cache, no-store, must-revalidate',
           },
           { key: 'Service-Worker-Allowed', value: '/' },
+          { key: 'X-Robots-Tag', value: 'noindex' },
         ],
       },
       ...(isProd

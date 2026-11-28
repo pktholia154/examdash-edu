@@ -1,0 +1,9 @@
+# Firebase App Hosting / Cloud Run Serverless Compute Configuration
+# Keeps >= 1 warm instance online 24/7 to eliminate cold-start TTFB spikes for Googlebot & learners,
+# paired with hard FinOps concurrency and maxInstances caps.
+runConfig:
+  minInstances: 1
+  maxInstances: 10
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
