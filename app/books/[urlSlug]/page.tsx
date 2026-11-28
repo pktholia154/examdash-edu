@@ -183,7 +183,8 @@ export default async function BookDetailPage({
               title={book.title}
               collectionName="books"
               imageUrl={book.imageUrl}
-              imageMeta={book.imageMeta}
+              imageAlt={book.imageMeta?.alt}
+              imageTitle={book.imageMeta?.title}
               size="lg"
               priority
             />
@@ -357,7 +358,8 @@ export default async function BookDetailPage({
                       title={rel.title}
                       collectionName="books"
                       imageUrl={rel.imageUrl}
-                      imageMeta={rel.imageMeta}
+                      imageAlt={rel.imageMeta?.alt}
+                      imageTitle={rel.imageMeta?.title}
                       size="xs"
                     />
                     <div className="min-w-0 flex-1">
@@ -393,7 +395,8 @@ export default async function BookDetailPage({
                       title={relEx.title}
                       collectionName="ExamPackDocument"
                       imageUrl={relEx.imageUrl}
-                      imageMeta={relEx.imageMeta}
+                      imageAlt={relEx.imageMeta?.alt}
+                      imageTitle={relEx.imageMeta?.title}
                       size="xs"
                     />
                     <div className="min-w-0 flex-1">

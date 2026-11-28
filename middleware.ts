@@ -5,6 +5,7 @@ import {
   hasFacetFilterParams,
   isDefaultFirebaseOrCloudRunHost,
 } from './lib/seo/schema';
+import { evaluateSwrState } from './lib/seo/crawl-resilience';
 
 const CAPACITOR_ALLOWED_ORIGINS = new Set([
   'capacitor://localhost',
@@ -47,10 +48,15 @@ function isNextPartialFlightRequest(req: NextRequest): boolean {
 }
 
 interface EdgeTombstoneSnapshot {
-  expiresAtMs: number;
+  freshUntilMs: number;
+  staleUntilMs: number;
   books: Set<string>;
   exams: Set<string>;
 }
+
+const TOMBSTONE_FRESH_TTL_MS = 60_000;
+const TOMBSTONE_STALE_TTL_MS = 600_000;
+const TOMBSTONE_FETCH_TIMEOUT_MS = 800;
 
 let edgeTombstoneCache: EdgeTombstoneSnapshot | null = null;
 let inflightTombstonePromise: Promise<EdgeTombstoneSnapshot> | null = null;
@@ -67,7 +73,7 @@ async function queryEdgeDeletedSlugs(
   }`;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1500);
+  const timer = setTimeout(() => controller.abort(), TOMBSTONE_FETCH_TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
@@ -125,11 +131,7 @@ async function queryEdgeDeletedSlugs(
   }
 }
 
-async function getEdgeTombstones(): Promise<EdgeTombstoneSnapshot> {
-  const now = Date.now();
-  if (edgeTombstoneCache && edgeTombstoneCache.expiresAtMs > now) {
-    return edgeTombstoneCache;
-  }
+function refreshEdgeTombstones(): Promise<EdgeTombstoneSnapshot> {
   if (inflightTombstonePromise) {
     return inflightTombstonePromise;
   }
@@ -139,8 +141,10 @@ async function getEdgeTombstones(): Promise<EdgeTombstoneSnapshot> {
     queryEdgeDeletedSlugs('ExamPackDocument'),
   ])
     .then(([books, exams]) => {
+      const completedAt = Date.now();
       const snapshot: EdgeTombstoneSnapshot = {
-        expiresAtMs: Date.now() + 60_000,
+        freshUntilMs: completedAt + TOMBSTONE_FRESH_TTL_MS,
+        staleUntilMs: completedAt + TOMBSTONE_STALE_TTL_MS,
         books,
         exams,
       };
@@ -150,14 +154,36 @@ async function getEdgeTombstones(): Promise<EdgeTombstoneSnapshot> {
     })
     .catch(() => {
       inflightTombstonePromise = null;
+      const now = Date.now();
+      if (edgeTombstoneCache) {
+        return edgeTombstoneCache;
+      }
       return {
-        expiresAtMs: Date.now() + 15_000,
+        freshUntilMs: now + 15_000,
+        staleUntilMs: now + 60_000,
         books: new Set<string>(),
         exams: new Set<string>(),
       };
     });
 
   return inflightTombstonePromise;
+}
+
+async function getEdgeTombstones(): Promise<EdgeTombstoneSnapshot> {
+  const now = Date.now();
+  const state = evaluateSwrState(edgeTombstoneCache, now);
+
+  if (state === 'fresh' && edgeTombstoneCache) {
+    return edgeTombstoneCache;
+  }
+
+  if (state === 'stale' && edgeTombstoneCache) {
+    // Serve warm tombstone snapshot immediately (0ms TTFB) and refresh in background
+    void refreshEdgeTombstones();
+    return edgeTombstoneCache;
+  }
+
+  return refreshEdgeTombstones();
 }
 
 function buildGone410Response(isFirebaseOrCloudRunHost: boolean): NextResponse {

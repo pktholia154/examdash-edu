@@ -31,13 +31,19 @@ const SIZE_CLASSES: Record<NonNullable<CatalogThumbnailProps['size']>, string> =
   card: 'w-full',
 };
 
-const SIZE_HINTS: Record<NonNullable<CatalogThumbnailProps['size']>, string> = {
-  xs: '48px',
-  sm: '64px',
-  list: '(max-width: 767px) 84px, 90px',
-  lg: '(max-width: 639px) 90px, (max-width: 767px) 108px, 126px',
-  card: '(max-width: 767px) 30vw, (max-width: 1023px) 19vw, 14vw',
+const FIXED_DIMENSIONS: Partial<
+  Record<
+    NonNullable<CatalogThumbnailProps['size']>,
+    { width: number; height: number }
+  >
+> = {
+  xs: { width: 48, height: 64 },
+  sm: { width: 64, height: 85 },
+  list: { width: 96, height: 128 },
+  lg: { width: 128, height: 171 },
 };
+
+const CARD_SIZES_HINT = '(max-width: 767px) 30vw, (max-width: 1023px) 19vw, 14vw';
 
 const ICON_SIZES: Record<NonNullable<CatalogThumbnailProps['size']>, string> = {
   xs: 'w-4 h-4',
@@ -71,6 +77,9 @@ export function CatalogThumbnail({
 
   const FallbackIcon =
     collectionName === 'ExamPackDocument' ? FileCheck2 : BookOpen;
+  const fixedDims = FIXED_DIMENSIONS[size];
+  const quality = 75;
+  const fetchPriority = priority ? 'high' : 'low';
 
   return (
     <div
@@ -84,17 +93,35 @@ export function CatalogThumbnail({
       )}
     >
       {canShowImage ? (
-        <Image
-          src={cleanUrl}
-          alt={resolvedAlt}
-          title={resolvedTitle}
-          fill
-          sizes={SIZE_HINTS[size]}
-          priority={priority}
-          referrerPolicy="no-referrer"
-          onError={() => setFailedSrc(cleanUrl)}
-          className="object-cover"
-        />
+        fixedDims ? (
+          <Image
+            src={cleanUrl}
+            alt={resolvedAlt}
+            title={resolvedTitle}
+            width={fixedDims.width}
+            height={fixedDims.height}
+            quality={quality}
+            priority={priority}
+            fetchPriority={fetchPriority}
+            referrerPolicy="no-referrer"
+            onError={() => setFailedSrc(cleanUrl)}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <Image
+            src={cleanUrl}
+            alt={resolvedAlt}
+            title={resolvedTitle}
+            fill
+            sizes={CARD_SIZES_HINT}
+            quality={quality}
+            priority={priority}
+            fetchPriority={fetchPriority}
+            referrerPolicy="no-referrer"
+            onError={() => setFailedSrc(cleanUrl)}
+            className="object-cover"
+          />
+        )
       ) : (
         <div
           role="img"

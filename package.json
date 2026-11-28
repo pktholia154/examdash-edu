@@ -34,6 +34,7 @@
     "react-markdown": "^10.1.0",
     "recharts": "^3.11.0",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.35.5",
     "smiles-drawer": "^2.4.2",
     "tailwind-merge": "^3.3.1",
     "zod": "^4.6.7"

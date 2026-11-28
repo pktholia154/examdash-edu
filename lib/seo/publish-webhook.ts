@@ -10,9 +10,11 @@ import {
   type IndexNowDispatchResult,
 } from './indexnow';
 import { getCanonicalOrigin } from './schema';
+import { extractPreloadNextImageUrls } from './crawl-resilience';
 
 const MAX_PREWARM_CONCURRENCY = 4;
 const MAX_PREWARM_URLS = 25;
+const MAX_PREWARM_IMAGES_PER_PAGE = 2;
 const PREWARM_TIMEOUT_MS = 5000;
 
 export interface PrewarmOutcome {
@@ -49,6 +51,31 @@ export async function prewarmCanonicalUrls(
 
   const canonicalHost = new URL(origin).host;
   const outcomes: PrewarmOutcome[] = [];
+  const warmedImageUrls = new Set<string>();
+
+  const prewarmImageAsset = async (imageUrl: string): Promise<void> => {
+    if (warmedImageUrls.has(imageUrl)) return;
+    warmedImageUrls.add(imageUrl);
+    const imgController = new AbortController();
+    const imgTimer = setTimeout(() => imgController.abort(), PREWARM_TIMEOUT_MS);
+    try {
+      const imgRes = await fetch(imageUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        cache: 'no-store',
+        signal: imgController.signal,
+        headers: {
+          Accept: 'image/webp,image/*,*/*;q=0.8',
+          'User-Agent': 'ExamDash-Prewarmer/1.0 (+https://exam-dash.com)',
+        },
+      });
+      await imgRes.arrayBuffer().catch(() => undefined);
+    } catch {
+      // Best-effort image cache pre-warm
+    } finally {
+      clearTimeout(imgTimer);
+    }
+  };
 
   for (let i = 0; i < safeUrls.length; i += MAX_PREWARM_CONCURRENCY) {
     const chunk = safeUrls.slice(i, i + MAX_PREWARM_CONCURRENCY);
@@ -80,8 +107,21 @@ export async function prewarmCanonicalUrls(
               'User-Agent': 'ExamDash-Prewarmer/1.0 (+https://exam-dash.com)',
             },
           });
-          // Drain body so Next.js finishes streaming/caching the full HTML payload
-          await res.arrayBuffer().catch(() => undefined);
+          const contentType = (res.headers.get('content-type') || '').toLowerCase();
+          if (res.ok && contentType.includes('text/html')) {
+            const html = await res.text().catch(() => '');
+            const heroImages = extractPreloadNextImageUrls(
+              html,
+              origin,
+              MAX_PREWARM_IMAGES_PER_PAGE
+            );
+            if (heroImages.length > 0) {
+              await Promise.all(heroImages.map(prewarmImageAsset));
+            }
+          } else {
+            // Drain body so Next.js finishes streaming/caching non-HTML payloads
+            await res.arrayBuffer().catch(() => undefined);
+          }
           return {
             url: parsed.toString(),
             status: res.status,

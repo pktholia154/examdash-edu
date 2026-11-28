@@ -39,8 +39,18 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
-  // Allow access to remote image placeholder.
+  // Optimized image delivery for instant first-crawl Googlebot WRS rendering:
+  // - Single WebP format (~10x faster encode than AVIF on Cloud Run with native sharp)
+  // - 31-day minimumCacheTTL so optimized remote covers stay warm across crawl sessions
+  // - Compact deviceSizes/imageSizes to eliminate 16-entry srcset bloat & w=3840 fallback URLs
+  // - Inline Content-Disposition for clean browser & crawler handling
   images: {
+    formats: ['image/webp'],
+    qualities: [75],
+    minimumCacheTTL: 2678400,
+    contentDispositionType: 'inline',
+    deviceSizes: [384, 640, 828, 1200],
+    imageSizes: [48, 64, 96, 128, 192, 256],
     remotePatterns: [
       {
         protocol: 'https',
@@ -67,6 +77,9 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       },
     ],
+  },
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
   },
   output: 'standalone',
   outputFileTracingIncludes: {
@@ -126,9 +139,27 @@ const nextConfig: NextConfig = {
               source: '/_next/image',
               headers: [
                 {
-                  key: 'Cache-Control',
+                  key: 'CDN-Cache-Control',
                   value:
-                    'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+                    'public, max-age=2678400, s-maxage=2678400, stale-while-revalidate=86400',
+                },
+              ],
+            },
+            {
+              source: '/assets/:path*',
+              headers: [
+                {
+                  key: 'Cache-Control',
+                  value: 'public, max-age=31536000, s-maxage=31536000, immutable',
+                },
+              ],
+            },
+            {
+              source: '/app-icons/:path*',
+              headers: [
+                {
+                  key: 'Cache-Control',
+                  value: 'public, max-age=31536000, s-maxage=31536000, immutable',
                 },
               ],
             },
@@ -181,8 +212,9 @@ const nextConfig: NextConfig = {
         crypto: false,
       };
 
-      // Consolidate tiny shared client chunks in production so Googlebot WRS never hits
-      // 20+ concurrent chunk fetches while keeping every uncompressed asset < 500 KB (Pillar 1).
+      // Consolidate tiny shared client chunks in production so Googlebot WRS fetches
+      // <= 6 JS bundles per route (eliminating same-host request storms on first crawl)
+      // while keeping every single uncompressed JS asset < 450 KB (Pillar 1).
       if (
         !dev &&
         config.optimization?.splitChunks &&
@@ -200,11 +232,23 @@ const nextConfig: NextConfig = {
         config.optimization.splitChunks = {
           ...config.optimization.splitChunks,
           minSize: 65000,
-          maxInitialRequests: 8,
+          maxInitialRequests: 6,
           maxAsyncRequests: 10,
           cacheGroups: {
             ...existingCacheGroups,
             shared: false,
+            commons: false,
+            appShared: {
+              name: 'app-shared',
+              chunks: 'initial',
+              minChunks: 10,
+              minSize: 0,
+              priority: 25,
+              reuseExistingChunk: true,
+              test: (module: { type?: string; resource?: string }) =>
+                !module?.type?.startsWith('css/') &&
+                !(module?.resource || '').includes('firebase'),
+            },
           },
         };
       }

@@ -174,7 +174,8 @@ export default async function ExamDetailPage({
               title={exam.title}
               collectionName="ExamPackDocument"
               imageUrl={exam.imageUrl}
-              imageMeta={exam.imageMeta}
+              imageAlt={exam.imageMeta?.alt}
+              imageTitle={exam.imageMeta?.title}
               size="lg"
               priority
             />
@@ -351,7 +352,8 @@ export default async function ExamDetailPage({
                       title={b.title}
                       collectionName="books"
                       imageUrl={b.imageUrl}
-                      imageMeta={b.imageMeta}
+                      imageAlt={b.imageMeta?.alt}
+                      imageTitle={b.imageMeta?.title}
                       size="xs"
                     />
                     <div className="min-w-0 flex-1">
@@ -387,7 +389,8 @@ export default async function ExamDetailPage({
                       title={ex.title}
                       collectionName="ExamPackDocument"
                       imageUrl={ex.imageUrl}
-                      imageMeta={ex.imageMeta}
+                      imageAlt={ex.imageMeta?.alt}
+                      imageTitle={ex.imageMeta?.title}
                       size="xs"
                     />
                     <div className="min-w-0 flex-1">

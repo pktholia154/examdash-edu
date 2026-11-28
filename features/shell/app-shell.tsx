@@ -30,6 +30,7 @@ import { useCart } from '../cart/cart-provider';
 import { useSearchModal } from '../search/command-search-modal';
 import { HeaderPwaAction } from '../pwa/install-banner';
 import { useTheme } from '../theme/theme-provider';
+import examDashLogo from '../../public/assets/aistudio/exam-dash_logo_ef0c6c39.png';
 
 const LazyCartDrawer = dynamic(
   () => import('../cart/cart-drawer').then((m) => m.CartDrawer),
@@ -124,11 +125,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className="inline-flex items-center gap-2.5 max-md:gap-2 min-h-[48px] max-md:min-h-[44px] text-lg max-md:text-base font-extrabold tracking-tight text-[var(--text-main)] whitespace-nowrap shrink-0 min-w-0"
           >
             <Image
-              src="/assets/aistudio/exam-dash_logo_ef0c6c39.png"
+              src={examDashLogo}
               alt="ExamDash logo"
               width={36}
               height={36}
-              priority
+              loading="eager"
               referrerPolicy="no-referrer"
               className="w-9 h-9 max-md:w-8 max-md:h-8 rounded-lg object-cover shrink-0"
             />
